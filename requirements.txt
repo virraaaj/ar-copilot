@@ -1,0 +1,22 @@
+# Web server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# Azure OpenAI (conversational AI) — Azure-only
+openai>=1.30.0
+
+# Backend API client
+httpx>=0.27.0
+
+# Config / env
+python-dotenv>=1.0.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# Local state (audit log, conversation refs, proactive dedupe)
+aiosqlite>=0.20.0
+
+# ---- dev / test ----
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+respx>=0.21.0
