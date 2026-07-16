@@ -173,7 +173,16 @@ def test_get_invoice_timeline(client: TestClient) -> None:
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1/timeline").mock(
         return_value=httpx.Response(
             200,
-            json={"items": [{"event_type": "reply_received", "event_title": "Inbound reply received", "event_summary": "Paying Friday"}]},
+            json={
+                "items": [
+                    {
+                        "event_type": "reply_received",
+                        "event_title": "Inbound reply received",
+                        "event_summary": "Paying Friday",
+                        "occurred_at": "2026-07-16T21:16:32.057179",
+                    }
+                ]
+            },
         )
     )
 
@@ -181,6 +190,7 @@ def test_get_invoice_timeline(client: TestClient) -> None:
 
     assert resp.status_code == 200
     assert resp.json()[0]["summary"] == "Paying Friday"
+    assert resp.json()[0]["at"] == "2026-07-16T21:16:32.057179"
 
 
 @respx.mock

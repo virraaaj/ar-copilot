@@ -65,7 +65,12 @@ async def get_invoice(client: BackendClient, invoice_id: str) -> Dict[str, Any]:
 
 
 async def get_timeline(client: BackendClient, invoice_id: str, limit: int = 25) -> List[Dict[str, Any]]:
-    """Event history for one invoice — comments, emails, stage transitions."""
+    """Event history for one invoice — comments, emails, stage transitions.
+    Field names match the real backend response (CaseTimelineEventResponse)
+    — verified against live UAT data, not guessed: the timestamp field is
+    `occurred_at`, not `created_at`/`at`. An earlier version checked the
+    wrong names, so every non-comment event (stage transitions, emails,
+    case-opened) silently rendered with no timestamp in the UI."""
     events = await client.get_case_timeline(invoice_id, limit=limit)
     return [
         {
@@ -73,7 +78,7 @@ async def get_timeline(client: BackendClient, invoice_id: str, limit: int = 25) 
             "title": e.get("event_title"),
             "summary": e.get("event_summary"),
             "actor": e.get("actor_type"),
-            "at": e.get("created_at") or e.get("at"),
+            "at": e.get("occurred_at"),
         }
         for e in events
     ]

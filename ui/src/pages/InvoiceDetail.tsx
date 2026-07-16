@@ -18,7 +18,7 @@ function money(n: number | null): string {
 }
 
 function when(at: string | null): string {
-  if (!at) return "";
+  if (!at) return "Unknown time";
   const d = new Date(at);
   if (isNaN(d.getTime())) return at;
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -29,6 +29,11 @@ const EVENT_LABELS: Record<string, string> = {
   stage_transition: "Stage change",
   case_created: "Case opened",
 };
+
+function humanizeEventType(eventType: string | null): string {
+  if (!eventType) return "Event";
+  return EVENT_LABELS[eventType] ?? eventType.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
 
 function StageRail({ stages, currentStageCode }: { stages: EscalationStage[]; currentStageCode: string | null }) {
   const ordered = [...stages].sort((a, b) => a.sequence_order - b.sequence_order);
@@ -185,6 +190,9 @@ export default function InvoiceDetail() {
       </div>
     );
 
+  const comments = timeline.filter((e) => e.event_type === "reply_received");
+  const activity = timeline.filter((e) => e.event_type !== "reply_received");
+
   const fields: [string, string | number | null][] = [
     ["Case key", invoice.case_key],
     ["Business unit", invoice.business_unit_id],
@@ -278,9 +286,9 @@ export default function InvoiceDetail() {
       {stages && stages.length > 0 && <StageRail stages={stages} currentStageCode={invoice.stage} />}
 
       <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments &amp; activity</h2>
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments</h2>
         <p className="mt-1 text-[12px] text-zinc-400">
-          Includes comments posted from Teams and the web -- both land in the same timeline.
+          Comments posted from Teams and the web -- both land in the same timeline.
         </p>
 
         <div className="mt-5 flex gap-2">
@@ -306,15 +314,34 @@ export default function InvoiceDetail() {
 
         <ul className="mt-6 space-y-4">
           {timelineLoading && <li className="text-[13px] text-zinc-400">Loading...</li>}
-          {!timelineLoading && timeline.length === 0 && (
+          {!timelineLoading && comments.length === 0 && (
+            <li className="text-[13px] text-zinc-400">No comments yet.</li>
+          )}
+          {!timelineLoading &&
+            comments.map((event, i) => (
+              <li key={i} className="border-l-2 border-zinc-100 pl-4">
+                <div className="text-[11px] font-medium text-zinc-400">{when(event.at)}</div>
+                <p className="mt-1 text-[13px] text-zinc-800">{event.summary ?? event.title ?? "--"}</p>
+              </li>
+            ))}
+        </ul>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Activity</h2>
+        <p className="mt-1 text-[12px] text-zinc-400">Stage changes, outreach sent, and other system events.</p>
+
+        <ul className="mt-6 space-y-4">
+          {timelineLoading && <li className="text-[13px] text-zinc-400">Loading...</li>}
+          {!timelineLoading && activity.length === 0 && (
             <li className="text-[13px] text-zinc-400">No activity yet.</li>
           )}
           {!timelineLoading &&
-            timeline.map((event, i) => (
+            activity.map((event, i) => (
               <li key={i} className="border-l-2 border-zinc-100 pl-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">
-                    {EVENT_LABELS[event.event_type ?? ""] ?? event.event_type ?? "Event"}
+                    {humanizeEventType(event.event_type)}
                   </span>
                   <span className="text-[11px] text-zinc-300">{when(event.at)}</span>
                 </div>
