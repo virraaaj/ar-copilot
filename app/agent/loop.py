@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.registry import ToolRegistry
@@ -67,7 +67,11 @@ class AgentLoop:
         user_message: str,
         role: str = "viewer",
         history: Optional[List[Dict[str, Any]]] = None,
+        on_tool_call: Optional[Callable[[ToolCallRecord], Awaitable[None]]] = None,
     ) -> AgentResult:
+        """`on_tool_call`, if given, is awaited after each tool call resolves
+        — this is what lets the web channel (Phase 2) stream progress over
+        SSE without needing token-level streaming from the LLM itself."""
         messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         if history:
             messages.extend(history)
@@ -121,7 +125,10 @@ class AgentLoop:
                         logger.warning("Tool '%s' raised: %s", name, exc)
                         result = {"error": str(exc)}
 
-                tool_calls_log.append(ToolCallRecord(name=name, arguments=args, result=result, permitted=permitted))
+                record = ToolCallRecord(name=name, arguments=args, result=result, permitted=permitted)
+                tool_calls_log.append(record)
+                if on_tool_call is not None:
+                    await on_tool_call(record)
                 messages.append(
                     {
                         "role": "tool",

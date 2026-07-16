@@ -1,6 +1,7 @@
 # Web server
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9  # required by FastAPI for file-upload (Form/UploadFile) endpoints
 
 # Azure OpenAI (conversational AI) — Azure-only
 openai>=1.30.0

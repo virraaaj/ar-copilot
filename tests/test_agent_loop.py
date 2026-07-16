@@ -160,3 +160,32 @@ async def test_stops_at_max_rounds_and_answers_with_what_it_has(backend: Backend
     # The forced final call must not offer tools -- otherwise it could loop forever.
     assert llm.calls[-1]["tools"] is None
     await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_on_tool_call_hook_fires_for_each_call(backend: BackendClient) -> None:
+    """This is what lets the web channel (Phase 2) stream progress over SSE
+    without the LLM itself supporting token streaming."""
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": []}))
+
+    llm = ScriptedLLM(
+        [
+            make_message(tool_calls=[make_tool_call("t1", "list_invoices", {})]),
+            make_message(content="done"),
+        ]
+    )
+    seen = []
+
+    async def on_tool_call(record):
+        seen.append(record.name)
+
+    registry = build_registry()
+    loop = AgentLoop(llm=llm, registry=registry, backend_client=backend)
+
+    result = await loop.run("question", on_tool_call=on_tool_call)
+
+    assert seen == ["list_invoices"]
+    assert result.answer == "done"
+    await backend.close()

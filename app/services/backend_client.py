@@ -77,6 +77,13 @@ class BackendClient:
         if not self._token:
             raise BackendError("Backend login returned no access token.")
 
+    async def verify_login(self) -> None:
+        """Public wrapper around _login() — raises BackendError on bad
+        credentials. Used by the web channel's login endpoint (Phase 2) to
+        confirm a submitted email/password are real Lummus credentials,
+        without exposing the private auth mechanics."""
+        await self._login()
+
     async def _request(
         self,
         method: str,
