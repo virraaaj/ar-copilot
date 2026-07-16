@@ -93,8 +93,25 @@ whether the message came from Teams, the web UI, or a CLI test harness.
   var names from `lummus-teams-bot/config.py`).
 - **React + Vite + Tailwind** for the minimal UI (matches the main repo's stack).
 - **SQLite** for the agent's own state (audit log, conversation refs, proactive
-  dedupe). Not Postgres — this project owns no business data.
+  dedupe, document metadata + auto-logged fields). Not Postgres — this project
+  owns no business data.
 - **pytest + respx** for tests (mock the backend API; no live calls in CI).
+
+### Document Intelligence additions (Phase 1B — see §5)
+
+- **Azure AI Document Intelligence** (formerly Form Recognizer) — OCR for
+  scanned PDFs, layout extraction, and prebuilt/custom models for structured
+  field extraction (Vendor Certifications' "auto-log important information").
+  Azure-native, fits the existing constraint of no non-Azure AI services.
+- **Azure AI Search** — hybrid text + vector index. One service covers text
+  search (manuals, T&Cs, quote descriptions) and, later, image vector fields
+  (quote drawing similarity) — avoids standing up a separate vector DB.
+- **pypdf / pdfplumber** — native (non-scanned) PDF text extraction; cheaper
+  and faster than OCR when a PDF already has a text layer. Try this first,
+  fall back to Document Intelligence OCR only when a page has no extractable
+  text (i.e. it's a scan/image).
+- **Azure AI Vision multimodal embeddings** — for drawing/CAD image similarity
+  search (Quotes, later phase). Deliberately deferred; text search ships first.
 
 ## 4. Repo layout
 
@@ -123,10 +140,20 @@ ar-copilot/
       state.py               ← SQLite store
     proactive/
       watchers.py            ← Phase 5
+    documents/                ← Phase 1B
+      sources/
+        base.py               ← DocumentSource interface (pluggable storage)
+        sharepoint.py          ← Graph API connector
+        manual_upload.py       ← direct upload path
+      ingest.py                ← text-layer extraction, OCR fallback, chunking
+      extract.py                ← structured field auto-logging (Vendor Certs)
+      index.py                  ← Azure AI Search read/write wrapper
+      tools_documents.py        ← agent tools: search_documents, get_document, …
   ui/                        ← Vite app
     src/pages/Dashboard.tsx
     src/pages/InvoiceDetail.tsx
     src/pages/Chat.tsx
+    src/pages/Documents.tsx  ← Phase 1B: upload + browse + search
   tests/
 ```
 
@@ -156,8 +183,70 @@ ar-copilot/
   replied?" — verified against the UAT stack's seeded data. It refuses
   action requests with a clear "I can look things up but can't act yet."
 
+### Phase 1B — Document Intelligence: foundation (boss must-have; runs after Phase 1, alongside Phase 2)
+
+⚠️ New capability added 2026-07-15: the agent must also answer questions over
+five document types — Vendor Certifications, Customer Manuals, Quotes, T&Cs,
+Equipment Manuals. Building the shared ingestion/search foundation on the
+**simplest** type first (Equipment Manuals) means Vendor Certs (adds
+structured auto-extraction) and Quotes (adds drawing similarity) reuse it
+rather than each building their own pipeline. This phase depends on Phase 1's
+tool-calling loop existing — document search is just another tool the agent
+decides to call.
+
+- **Sources (pluggable from day one):** `DocumentSource` interface with two
+  implementations — SharePoint (Graph API, same auth pattern as the main
+  Lummus backend's document sync) and manual upload (through the web UI).
+  Designed so a third source (network drive, other DMS) is a new class, not a
+  rewrite.
+- **Ingestion:** try native PDF text extraction first (pypdf/pdfplumber); if a
+  page has no text layer (a scan), fall back to Azure AI Document Intelligence
+  OCR. Chunk extracted text, embed with Azure OpenAI, write to Azure AI Search.
+- **Tools (read-only, same registry as Phase 1):** `search_documents(query,
+  doc_type)`, `get_document(doc_id)`, `list_recent_documents(doc_type)`.
+- **UI:** a 4th page, `Documents.tsx` — upload, browse by type, and a search
+  box that shows matched chunks with source document + page.
+- **Guardrails:** document text is untrusted content, same as backend data —
+  route it through the same injection-hygiene wrapping as §6.3 before it
+  reaches the model. A malicious PDF is now a real threat surface, not just a
+  hypothetical.
+- **Accept:** upload an Equipment Manual PDF (one native, one scanned) through
+  the UI; ask the agent a question whose answer only exists in that manual;
+  it answers correctly and cites the source document. Same works for a
+  document pulled from SharePoint instead of uploaded.
+
+### Phase 1C — Document Intelligence: Vendor Certifications (auto-log)
+- Builds on 1B's ingestion pipeline. Adds structured field extraction — define
+  the field schema with the boss/business first (⚠️ OPEN, see §7) before
+  building the extractor, since "important information" is undefined.
+- Extracted fields land in a new SQLite table (`vendor_cert_fields`), queryable
+  by a new tool (`get_vendor_cert_fields`), not just full-text search.
+- **Accept:** upload a vendor certification PDF; the defined fields are
+  extracted and correctly queryable without the agent needing to re-read the
+  full document.
+
+### Phase 1D — Document Intelligence: Quotes (text + drawing search)
+- Text search over quote descriptions/part numbers reuses 1B's pipeline
+  directly — no new work beyond indexing quotes as a doc_type.
+- Drawing similarity is new: Azure AI Vision multimodal embeddings on
+  extracted drawing images, stored as a vector field in the same Azure AI
+  Search index. A drawing query embeds the same way and searches that field.
+- **Accept:** given a reference part drawing, the agent returns quotes with
+  visually similar drawings, ranked by similarity — verified against a small
+  hand-picked set of known-similar and known-dissimilar drawings.
+
+### Phase 1E — Document Intelligence: T&Cs (non-standard clause detection)
+- Needs a "standard" T&C reference to diff against (⚠️ OPEN — see §7:
+  whose T&Cs, is there a canonical version).
+- Search reuses 1B; "non-standard" detection is a targeted comparison prompt
+  (retrieve the standard clause for each section, compare against the
+  uploaded document's corresponding clause, flag deltas) rather than a new
+  pipeline.
+- **Accept:** given a T&C document with 2-3 deliberately altered clauses, the
+  agent correctly flags those clauses and not the unmodified ones.
+
 ### Phase 2 — Minimal web UI
-Three pages, deliberately small:
+Three pages, deliberately small (a 4th, Documents, is added in Phase 1B):
 - **Dashboard** — aging summary tiles (total open, by bucket), invoice table
   (status/stage filters), snoozed list. Read-only.
 - **Invoice detail** — timeline, contacts, comments for one invoice.
@@ -218,9 +307,11 @@ recommendation. Do not build product code in this phase.
 2. **Read/write separation** — enforced by the registry, not the prompt. A
    viewer's tool list simply doesn't contain write tools.
 3. **Injection hygiene** — anything fetched from the backend (comments, emails,
-   timeline text) is *data*. Wrap retrieved text in delimiters, instruct the
-   model it's untrusted, and strip/neutralize instruction-like content before
-   it enters the prompt. Test with a hostile comment seeded via the API.
+   timeline text) **or extracted from a document** (Phase 1B+) is *data*. Wrap
+   retrieved text in delimiters, instruct the model it's untrusted, and
+   strip/neutralize instruction-like content before it enters the prompt. Test
+   with a hostile comment seeded via the API, and separately with a PDF whose
+   text contains an injection attempt.
 4. **Confirm-before-write** — §Phase 3 protocol; no same-turn execution.
 5. **Audit everything** — every tool call (read included), every refusal, every
    proactive send: append-only SQLite table with timestamp, user, channel.
@@ -229,15 +320,41 @@ recommendation. Do not build product code in this phase.
 
 ## 7. ⚠️ OPEN decisions (ask the user, don't assume)
 
-1. UI auth: single shared UAT login is assumed. OK for now?
-2. Proactive channel priority: Teams DM first, or web notifications first?
+1. UI auth: single shared UAT login is assumed. OK for now? — **RESOLVED:** yes.
+2. Proactive channel priority: Teams DM first, or web notifications first? —
+   **RESOLVED:** Teams DM first.
 3. Should the Phase 6 spike happen after Phase 3 instead of last, if
-   motivation is high? (It's independent of Phases 4–5.)
-4. Repo hosting: push to a new private GitHub repo like `virraaaj/ar-copilot`?
+   motivation is high? — **RESOLVED:** keep it last.
+4. Repo hosting: push to a new private GitHub repo like `virraaaj/ar-copilot`? —
+   **RESOLVED:** local git only for now.
+5. Document sources beyond SharePoint + manual upload — **RESOLVED for now:**
+   SharePoint + manual upload; design `DocumentSource` as pluggable so more
+   can be added later without a rewrite.
+6. Quote search modality — **RESOLVED:** both text description search and
+   drawing/image visual similarity are in scope (drawing similarity lands in
+   Phase 1D, after the text-search foundation).
+7. **Still open:** Vendor Certifications field schema — what counts as
+   "important information" to auto-log needs a concrete field list from the
+   business before Phase 1C's extractor can be built. Placeholder assumption
+   until then: vendor name, certification type, issue date, expiry date,
+   certifying body, cert number.
+8. **Still open:** T&Cs "standard" baseline — whose T&Cs are the reference for
+   "non-standard requirement" detection, and is there a canonical current
+   version to diff against? Phase 1E is blocked without this.
+9. **Still open:** is this whole project still personal exploration, or does
+   the "boss must-have" framing mean it's now closer to a real deliverable?
+   Doesn't block building, but affects how much production-readiness (real
+   auth, real hosting, error handling depth) matters before it's "done."
 
-## 8. Definition of done (v0.1 tag)
+## 8. Definition of done
 
-Phases 0–3 complete: a web UI where you can see AR state, chat with an agent
-that reasons over live data with cited tool calls, and execute guarded write
-actions with confirmations and a full audit trail. Teams (4), proactive (5),
-and the meeting spike (6) each cut a further minor tag.
+**v0.1** — Phases 0–3 complete: a web UI where you can see AR state, chat with
+an agent that reasons over live data with cited tool calls, and execute
+guarded write actions with confirmations and a full audit trail.
+
+**v0.2** — Phases 1B–1E complete: the agent answers questions over all five
+document types, with citations, auto-logged Vendor Cert fields queryable
+directly, and drawing similarity search for quotes.
+
+Teams (4), proactive (5), and the meeting spike (6) each cut a further minor
+tag, independent of the v0.2 document work.
