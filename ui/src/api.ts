@@ -99,6 +99,20 @@ export async function login(email: string, password: string): Promise<{ session_
   });
 }
 
+export interface MagicLinkExchangeResult {
+  session_token: string;
+  email: string;
+  redirect: string;
+}
+
+export async function exchangeMagicLink(token: string): Promise<MagicLinkExchangeResult> {
+  return request("/auth/magic-link", null, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+}
+
 export async function listInvoices(
   token: string,
   filters: { status?: string; stage?: string; overdue_days_min?: number } = {}
@@ -115,6 +129,23 @@ export async function getInvoice(token: string, invoiceId: string): Promise<Invo
 
 export async function getAgingSummary(token: string): Promise<AgingSummary> {
   return request("/aging-summary", token);
+}
+
+export async function listProjectInvoices(token: string, projectNumber: string): Promise<Invoice[]> {
+  return request(`/projects/${encodeURIComponent(projectNumber)}/invoices`, token);
+}
+
+export async function snoozeInvoice(
+  token: string,
+  invoiceId: string,
+  reason: string,
+  resumeDate?: string
+): Promise<void> {
+  await request(`/invoices/${encodeURIComponent(invoiceId)}/snooze`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason, resume_date: resumeDate || undefined }),
+  });
 }
 
 export async function getEscalationPolicy(token: string): Promise<EscalationPolicy> {

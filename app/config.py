@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     MICROSOFT_APP_PASSWORD: str = ""
     MICROSOFT_APP_TENANT_ID: str = ""
 
+    # ---- Teams -> web redirect (added 2026-07-16) ----
+    # Reminder-card buttons and chat replies link out to the web UI instead of
+    # opening in-Teams forms. WEB_BASE_URL is where those links point;
+    # MAGIC_LINK_SECRET signs the short-lived tokens that let a Teams user
+    # land already-authenticated on the right page (see guardrails/magic_link.py).
+    # The default secret is fine for local dev only -- must be overridden by a
+    # real random value before this is ever exposed beyond localhost.
+    WEB_BASE_URL: str = "http://localhost:8090"
+    MAGIC_LINK_SECRET: str = "dev-only-insecure-magic-link-secret-change-me"
+    MAGIC_LINK_TTL_SECONDS: int = 900
+
     # ---- Local state (audit log, conversation refs, proactive dedupe) ----
     STATE_DB_PATH: str = ".state/ar_copilot.db"
 

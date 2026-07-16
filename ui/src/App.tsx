@@ -8,6 +8,8 @@ import InvoiceDetail from "./pages/InvoiceDetail";
 import Chat from "./pages/Chat";
 import Documents from "./pages/Documents";
 import EscalationPolicy from "./pages/EscalationPolicy";
+import MagicLink from "./pages/MagicLink";
+import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -24,6 +26,15 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/link" element={<MagicLink />} />
+      <Route
+        path="/projects/:projectNumber/pick-invoice"
+        element={
+          <RequireSession>
+            <ProjectInvoicePicker />
+          </RequireSession>
+        }
+      />
       <Route
         path="/"
         element={

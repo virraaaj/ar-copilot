@@ -18,6 +18,26 @@ async def test_fake_messenger_records_text_and_cards():
     assert messenger.sent[1].card == {"type": "AdaptiveCard"}
 
 
+@pytest.mark.asyncio
+async def test_fake_messenger_create_group_conversation_records_members():
+    messenger = FakeMessenger()
+
+    conv_id = await messenger.create_group_conversation("Meridian Bay", ["pm@corehelix.ai", "finance@corehelix.ai"])
+
+    assert conv_id in messenger.created_conversations
+    assert messenger.created_conversations[conv_id] == ["pm@corehelix.ai", "finance@corehelix.ai"]
+
+
+@pytest.mark.asyncio
+async def test_fake_messenger_create_group_conversation_ids_are_unique():
+    messenger = FakeMessenger()
+
+    first = await messenger.create_group_conversation("Project A", ["a@corehelix.ai"])
+    second = await messenger.create_group_conversation("Project B", ["b@corehelix.ai"])
+
+    assert first != second
+
+
 def test_get_messenger_defaults_to_fake_without_credentials(monkeypatch):
     monkeypatch.setenv("MICROSOFT_APP_ID", "")
     monkeypatch.setenv("MICROSOFT_APP_PASSWORD", "")

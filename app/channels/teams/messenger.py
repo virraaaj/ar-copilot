@@ -31,6 +31,14 @@ class TeamsMessenger(ABC):
     @abstractmethod
     async def send_card(self, conversation_id: str, card: Dict[str, Any]) -> None: ...
 
+    @abstractmethod
+    async def create_group_conversation(self, topic: str, member_emails: List[str]) -> str:
+        """Create (or would-create) a group chat with these members and
+        return its conversation_id. Added 2026-07-16 for project-level
+        Teams chats: one conversation per project, seeded with that
+        project's contacts, replacing the earlier 1:1-DM-per-PM model."""
+        ...
+
 
 class FakeMessenger(TeamsMessenger):
     """In-memory recorder. The default via get_messenger() until real
@@ -38,12 +46,20 @@ class FakeMessenger(TeamsMessenger):
 
     def __init__(self) -> None:
         self.sent: List[SentMessage] = []
+        self.created_conversations: Dict[str, List[str]] = {}  # conversation_id -> members
+        self._next_id = 1
 
     async def send_text(self, conversation_id: str, text: str) -> None:
         self.sent.append(SentMessage(conversation_id=conversation_id, text=text))
 
     async def send_card(self, conversation_id: str, card: Dict[str, Any]) -> None:
         self.sent.append(SentMessage(conversation_id=conversation_id, card=card))
+
+    async def create_group_conversation(self, topic: str, member_emails: List[str]) -> str:
+        conversation_id = f"fake-group-{self._next_id}"
+        self._next_id += 1
+        self.created_conversations[conversation_id] = list(member_emails)
+        return conversation_id
 
 
 class BotFrameworkMessenger(TeamsMessenger):
@@ -70,6 +86,9 @@ class BotFrameworkMessenger(TeamsMessenger):
         raise NotImplementedError
 
     async def send_card(self, conversation_id: str, card: Dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    async def create_group_conversation(self, topic: str, member_emails: List[str]) -> str:
         raise NotImplementedError
 
 

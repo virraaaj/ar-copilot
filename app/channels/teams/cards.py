@@ -44,22 +44,28 @@ def _fact_set(facts: Dict[str, str]) -> Dict[str, Any]:
 
 
 def reminder_card(
-    invoice_id: str,
     case_key: str,
     project_name: str,
     stage_label: str,
     amount: str,
     aging: str,
+    snooze_url: str,
+    comment_url: str,
     due_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The proactive stage-triggered reminder (Phase 4's proactive.py sends
-    this). Stage banner + Invoice details + Action needed callout +
-    Snooze/Add comment buttons — matches the earlier bot's card exactly.
+    this). Stage banner + Invoice details + Action needed callout + Snooze/
+    Add comment buttons.
 
-    `invoice_id` (the backend's internal case id) never appears in the
-    visible body — only `case_key` (the business-facing reference) does.
-    `invoice_id` rides in the button's hidden Action.Submit data, same
-    invoice-ID-free principle as the web UI."""
+    2026-07-16: buttons changed from Action.Submit (opened an in-Teams form
+    card) to Action.OpenUrl, each carrying a signed one-time magic-link URL
+    that lands the user already-authenticated on the matching web page —
+    see guardrails/magic_link.py. Only `case_key` (the business-facing
+    reference) ever appears in the visible body; the backend's internal case
+    id lives only inside the opaque, signed token embedded in each URL —
+    same invoice-ID-free principle as everywhere else, just carried by a
+    token instead of hidden Action.Submit data now that the action happens
+    on the web instead of in-Teams."""
     facts = {"Invoice": case_key, "Amount": amount, "Aging": aging}
     if due_date:
         facts["Due date"] = due_date
@@ -92,59 +98,20 @@ def reminder_card(
             {"type": "TextBlock", "text": "Automated message · Lummus AR", "isSubtle": True, "size": "small"},
         ],
         actions=[
-            {"type": "Action.Submit", "title": "Snooze", "data": {"action": "open_snooze_form", "invoice_id": invoice_id, "label": project_name}},
-            {"type": "Action.Submit", "title": "Add comment", "data": {"action": "open_comment_form", "invoice_id": invoice_id, "label": project_name}},
+            {"type": "Action.OpenUrl", "title": "Snooze", "url": snooze_url},
+            {"type": "Action.OpenUrl", "title": "Add comment", "url": comment_url},
         ],
     )
 
 
-def snooze_form_card(invoice_id: str, label: str) -> Dict[str, Any]:
-    """'Snooze a follow-up' — opened by tapping Snooze on a reminder card,
-    or by the agent when a chat message asks to snooze without giving a
-    reason/date yet."""
+def redirect_card(message: str, url: str, button_title: str = "Open in AR Copilot") -> Dict[str, Any]:
+    """Generic 'here's a link to finish this on the web' card — used by
+    bot.py when free text in a project chat asks to snooze/comment (see the
+    2026-07-16 redirect-to-web design). Carries a signed magic-link URL the
+    same way reminder_card's buttons do."""
     return _card(
-        body=[
-            {"type": "TextBlock", "text": "⏸ Snooze a follow-up", "weight": "bolder", "size": "medium"},
-            {"type": "TextBlock", "text": label, "isSubtle": True, "wrap": True},
-            {"type": "Input.Text", "id": "reason", "label": "Reason", "isRequired": True, "errorMessage": "A reason is required."},
-            {"type": "Input.Date", "id": "resume_date", "label": "Resume on (optional)"},
-        ],
-        actions=[
-            {"type": "Action.Submit", "title": "Confirm snooze", "data": {"action": "snooze_submit", "invoice_id": invoice_id, "label": label}},
-        ],
-    )
-
-
-def comment_form_card(invoice_id: str, label: str) -> Dict[str, Any]:
-    """'Add a note' — opened by tapping Add comment on a reminder card."""
-    return _card(
-        body=[
-            {"type": "TextBlock", "text": "📝 Add a note", "weight": "bolder", "size": "medium"},
-            {"type": "TextBlock", "text": label, "isSubtle": True, "wrap": True},
-            {"type": "Input.Text", "id": "comment", "label": "Comment", "isRequired": True, "isMultiline": True, "errorMessage": "A comment is required."},
-        ],
-        actions=[
-            {"type": "Action.Submit", "title": "Save comment", "data": {"action": "comment_submit", "invoice_id": invoice_id, "label": label}},
-        ],
-    )
-
-
-def snooze_confirmation_card(label: str, reason: str, resume_date: Optional[str]) -> Dict[str, Any]:
-    body = [
-        {"type": "TextBlock", "text": "✅ Snoozed", "weight": "bolder", "color": "good"},
-        {"type": "TextBlock", "text": label, "wrap": True},
-        _fact_set({"Reason": reason, "Resume on": resume_date or "Not set -- resume manually"}),
-    ]
-    return _card(body=body)
-
-
-def comment_confirmation_card(label: str, comment: str) -> Dict[str, Any]:
-    return _card(
-        body=[
-            {"type": "TextBlock", "text": "✅ Comment saved", "weight": "bolder", "color": "good"},
-            {"type": "TextBlock", "text": label, "wrap": True},
-            {"type": "TextBlock", "text": f"“{comment}”", "wrap": True, "isSubtle": True},
-        ]
+        body=[{"type": "TextBlock", "text": message, "wrap": True}],
+        actions=[{"type": "Action.OpenUrl", "title": button_title, "url": url}],
     )
 
 

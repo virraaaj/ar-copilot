@@ -288,7 +288,34 @@ Three pages, deliberately small (a 4th, Documents, is added in Phase 1B):
 
 ### Phase 4 — Teams: proactive reach-out + conversational AI in the same chat
 
-⚠️ Reprioritized 2026-07-16 (was going to follow Phase 5): bring over the
+⚠️ Reworked again 2026-07-16 (same day, later): snooze/comment no longer
+happen via in-Teams Adaptive Card forms. A reminder card's Snooze/Add
+comment buttons are now `Action.OpenUrl` links carrying a signed,
+short-lived magic-link token (`app/guardrails/magic_link.py`) that lands
+the user already-authenticated on that exact invoice's web form. A plain-
+text message expressing the same intent ("I want to snooze this") gets a
+similar link to a picker page scoped to just that chat's project
+invoices (`ProjectInvoicePicker.tsx`), since a project chat pools multiple
+invoices and free text alone doesn't say which one. Reason: doing the
+actual data entry on the web (where the comment/timeline UI already lives)
+means one form to build and maintain instead of two, and it's a better
+surface for a multi-field form than an Adaptive Card. Known limitation:
+the magic link's embedded identity is best-effort (the case's PM, not
+necessarily whoever actually clicks in a shared group chat) since Teams
+doesn't personalize a card per-viewer without a real SSO round-trip — not
+a security boundary regression, since every write already goes through one
+shared backend service account (see web.py's auth docstring), just an
+honestly-flagged gap for when per-user Teams identity matters more.
+
+This also folded in the project-level group-chat rework from the same
+ideation thread: `project_conversation_store.py` maps one conversation per
+project (not per PM), seeded via `TeamsMessenger.create_group_conversation`
+with every project contact, and `proactive.py` pools all of a project's
+due invoices into that one conversation instead of DM'ing each PM
+separately. The old per-user `conversation_store.py` was removed as dead
+code once nothing needed 1:1 DM routing anymore.
+
+⚠️ Original reprioritization note (still applies): bring over the
 in-Teams reach-out UX from the earlier bot work — reminder cards asking for a
 comment or a snooze, the same way stage-triggered notifications used to work
 — *and* let the user have the same AI-reasoning conversation (Phase 1's agent

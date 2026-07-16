@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.channels.web import router as web_router
 from app.config import get_settings
+from app.services.backend_client import BackendError
 
 logging.basicConfig(level=get_settings().LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -41,6 +42,20 @@ async def backend_unreachable_handler(request: Request, exc: httpx.RequestError)
     instead of needing its own try/except."""
     logger.warning("Upstream request failed: %s", exc)
     return JSONResponse(status_code=503, content={"detail": f"An upstream service is unreachable: {exc}"})
+
+
+@app.exception_handler(BackendError)
+async def backend_rejected_handler(request: Request, exc: BackendError) -> JSONResponse:
+    """The Lummus backend responded, but rejected the request (a business
+    rule, not a connection problem) -- e.g. pausing an already-closed case.
+    BackendError's message is written to be safe to surface (see its
+    docstring), but nothing previously caught it outside a route's own
+    try/except, so any uncaught case (like this one, found by actually
+    exercising the new snooze endpoint against live UAT data rather than
+    only mocked-success tests) leaked as a raw 500. 422 since these are
+    almost always "the request was rejected", not a server fault."""
+    logger.info("Backend rejected request: %s", exc)
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @app.get("/health")

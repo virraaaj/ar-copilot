@@ -30,10 +30,12 @@ from app.agent.tools_read import get_invoice as tool_get_invoice
 from app.agent.tools_read import get_timeline as tool_get_timeline
 from app.agent.tools_read import list_invoices as tool_list_invoices
 from app.agent.tools_write import add_comment as tool_add_comment
+from app.agent.tools_write import snooze_invoice as tool_snooze_invoice
 from app.config import get_settings
 from app.documents.index import get_index
 from app.documents.ingest import chunk_pages, extract_native_text
 from app.documents.sources.manual_upload import ManualUploadSource
+from app.guardrails.magic_link import MagicLinkError, verify_magic_link_token
 from app.guardrails.policy import PolicyViolation
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
@@ -94,6 +96,44 @@ def require_session(authorization: Optional[str] = Header(default=None)) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Magic-link exchange (added 2026-07-16) — lets a Teams reminder-card button
+# or chat redirect land the user already-authenticated on the web, instead
+# of making them log in again right after Teams already vouched for them.
+# See guardrails/magic_link.py for the token shape/verification and
+# channels/teams/{cards,proactive,bot}.py for where these get generated.
+# ---------------------------------------------------------------------------
+
+
+class MagicLinkExchangeRequest(BaseModel):
+    token: str
+
+
+class MagicLinkExchangeResponse(BaseModel):
+    session_token: str
+    email: str
+    redirect: str
+
+
+@router.post("/auth/magic-link", response_model=MagicLinkExchangeResponse)
+async def exchange_magic_link(body: MagicLinkExchangeRequest) -> MagicLinkExchangeResponse:
+    try:
+        payload = verify_magic_link_token(body.token)
+    except MagicLinkError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    if payload.action == "snooze":
+        redirect = f"/invoices/{payload.invoice_id}?action=snooze"
+    elif payload.action == "comment":
+        redirect = f"/invoices/{payload.invoice_id}?action=comment"
+    else:  # pick_invoice
+        redirect = f"/projects/{payload.project_number}/pick-invoice?action={payload.next_action}"
+
+    token = secrets.token_urlsafe(24)
+    _sessions[token] = payload.email
+    return MagicLinkExchangeResponse(session_token=token, email=payload.email, redirect=redirect)
+
+
+# ---------------------------------------------------------------------------
 # Invoices (Dashboard, Invoice detail — read-only, PLAN.md §5 Phase 2)
 # ---------------------------------------------------------------------------
 
@@ -123,6 +163,19 @@ async def get_invoice_endpoint(
     return await tool_get_invoice(backend, invoice_id=invoice_id)
 
 
+@router.get("/projects/{project_number}/invoices")
+async def list_project_invoices_endpoint(
+    project_number: str,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    """Backing the project invoice-picker page (added 2026-07-16): when a
+    Teams user asks to snooze/comment in a project chat without naming a
+    specific invoice, they land here to pick one from just that project's
+    pooled invoices, matching the project-level group-chat model."""
+    return await tool_list_invoices(backend, project_id=project_number, limit=200)
+
+
 @router.get("/aging-summary")
 async def aging_summary_endpoint(
     business_unit_id: Optional[str] = None,
@@ -144,6 +197,24 @@ async def aging_summary_endpoint(
 
 class AddCommentRequest(BaseModel):
     comment: str
+
+
+class SnoozeInvoiceRequest(BaseModel):
+    reason: str
+    resume_date: Optional[str] = None
+
+
+@router.post("/invoices/{invoice_id}/snooze")
+async def snooze_invoice_endpoint(
+    invoice_id: str,
+    body: SnoozeInvoiceRequest,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    try:
+        return await tool_snooze_invoice(backend, invoice_id=invoice_id, reason=body.reason, resume_date=body.resume_date)
+    except PolicyViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.get("/invoices/{invoice_id}/timeline")

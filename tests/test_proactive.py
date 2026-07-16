@@ -1,6 +1,7 @@
 """
-Phase 4 tests: the proactive reminder poller. respx-mocked backend, real
-SQLite dedup/conversation-store against temp files, FakeMessenger.
+Phase 4 tests: the proactive reminder poller, project-level model
+(reworked 2026-07-16). respx-mocked backend, real SQLite dedup/
+project-conversation-store against temp files, FakeMessenger.
 """
 from __future__ import annotations
 
@@ -10,9 +11,9 @@ import httpx
 import pytest
 import respx
 
-from app.channels.teams.conversation_store import ConversationStore
 from app.channels.teams.messenger import FakeMessenger
 from app.channels.teams.proactive import ReminderDedup, send_due_reminders
+from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.backend_client import BackendClient
 
 BASE = "http://test-backend"
@@ -33,8 +34,8 @@ def messenger() -> FakeMessenger:
 
 
 @pytest.fixture
-def store(tmp_path) -> ConversationStore:
-    return ConversationStore(db_path=str(tmp_path / "state.db"))
+def store(tmp_path) -> ProjectConversationStore:
+    return ProjectConversationStore(db_path=str(tmp_path / "state.db"))
 
 
 @pytest.fixture
@@ -58,20 +59,45 @@ def _case(case_id="case-1", stage="first_notice", project_number="PN-1"):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_sends_reminder_when_pm_known_and_stage_matches(backend, messenger, store, dedup):
+async def test_sends_reminder_and_creates_project_conversation_on_first_use(backend, messenger, store, dedup):
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
         return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
-    await store.record("pm@corehelix.ai", "conv-1")
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
 
     assert sent == 1
     assert len(messenger.sent) == 1
-    assert messenger.sent[0].conversation_id == "conv-1"
+    conversation_id = messenger.sent[0].conversation_id
+    assert conversation_id in messenger.created_conversations
+    assert messenger.created_conversations[conversation_id] == ["pm@corehelix.ai"]
     assert "Meridian Bay Terminal Expansion" in json.dumps(messenger.sent[0].card)
+    # Now recorded for future passes/lookups (e.g. bot.py's chat-intent redirect).
+    assert await store.get_conversation_id("PN-1") == conversation_id
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_reminder_card_buttons_are_openurl_magic_links(backend, messenger, store, dedup):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+
+    await send_due_reminders(backend, messenger, store, dedup)
+
+    card = messenger.sent[0].card
+    actions = card["actions"]
+    assert all(a["type"] == "Action.OpenUrl" for a in actions)
+    assert {a["title"] for a in actions} == {"Snooze", "Add comment"}
+    assert all("/link?token=" in a["url"] for a in actions)
+    # Invoice-ID-free: the raw case id is never in the visible body, only in
+    # the opaque signed token embedded in the button URLs.
+    assert "case-1" not in json.dumps(card["body"])
     await backend.close()
 
 
@@ -83,7 +109,6 @@ async def test_second_pass_does_not_resend_same_case_and_stage(backend, messenge
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
         return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
-    await store.record("pm@corehelix.ai", "conv-1")
 
     first_pass = await send_due_reminders(backend, messenger, store, dedup)
     second_pass = await send_due_reminders(backend, messenger, store, dedup)
@@ -111,7 +136,7 @@ async def test_non_outreach_stage_is_skipped(backend, messenger, store, dedup):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_case_with_no_pm_contact_is_skipped_not_error(backend, messenger, store, dedup):
+async def test_project_with_no_contacts_is_skipped_not_error(backend, messenger, store, dedup):
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
@@ -127,13 +152,12 @@ async def test_case_with_no_pm_contact_is_skipped_not_error(backend, messenger, 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_pm_known_but_no_teams_conversation_yet_is_skipped(backend, messenger, store, dedup):
+async def test_contacts_with_no_email_are_skipped_not_error(backend, messenger, store, dedup):
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": None}]})
     )
-    # Note: no store.record() call -- this PM has never messaged the bot.
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
 
@@ -144,7 +168,27 @@ async def test_pm_known_but_no_teams_conversation_yet_is_skipped(backend, messen
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_multiple_cases_send_independently(backend, messenger, store, dedup):
+async def test_multiple_cases_same_project_pool_into_one_conversation(backend, messenger, store, dedup):
+    _mock_login()
+    case_a = _case(case_id="case-a", project_number="PN-1")
+    case_b = _case(case_id="case-b", project_number="PN-1", stage="escalation")
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [case_a, case_b]}))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+
+    sent = await send_due_reminders(backend, messenger, store, dedup)
+
+    assert sent == 2
+    conversation_ids = {m.conversation_id for m in messenger.sent}
+    assert len(conversation_ids) == 1  # both invoices pooled into the same project chat
+    assert len(messenger.created_conversations) == 1  # only created once, not per case
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_multiple_projects_send_independently(backend, messenger, store, dedup):
     _mock_login()
     case_a = _case(case_id="case-a", project_number="PN-A")
     case_b = _case(case_id="case-b", project_number="PN-B", stage="escalation")
@@ -155,12 +199,28 @@ async def test_multiple_cases_send_independently(backend, messenger, store, dedu
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-B/contacts").mock(
         return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm-b@corehelix.ai"}]})
     )
-    await store.record("pm-a@corehelix.ai", "conv-a")
-    await store.record("pm-b@corehelix.ai", "conv-b")
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
 
     assert sent == 2
     conversation_ids = {m.conversation_id for m in messenger.sent}
-    assert conversation_ids == {"conv-a", "conv-b"}
+    assert len(conversation_ids) == 2
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_reuses_existing_project_conversation_instead_of_creating_a_new_one(backend, messenger, store, dedup):
+    _mock_login()
+    await store.record("PN-1", "conv-existing")
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+
+    sent = await send_due_reminders(backend, messenger, store, dedup)
+
+    assert sent == 1
+    assert messenger.sent[0].conversation_id == "conv-existing"
+    assert messenger.created_conversations == {}  # never called create_group_conversation
     await backend.close()

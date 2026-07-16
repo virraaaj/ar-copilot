@@ -230,6 +230,162 @@ def test_add_comment_endpoint_rejects_empty_comment(client: TestClient) -> None:
 
 
 @respx.mock
+def test_snooze_invoice_endpoint_happy_path(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(
+        return_value=httpx.Response(200, json={"id": "case-1", "current_stage_code": "first_notice"})
+    )
+    pause_route = respx.post(f"{BASE}/api/v2/dunning/cases/case-1/pause").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    resp = client.post(
+        "/api/invoices/case-1/snooze",
+        json={"reason": "dispute", "resume_date": "2026-08-01"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["action"] == "snoozed"
+    assert pause_route.called
+
+
+@respx.mock
+def test_snooze_invoice_endpoint_backend_rejection_returns_clean_422_not_raw_500(client: TestClient) -> None:
+    """Regression test for a real bug found by exercising the snooze
+    endpoint live against UAT data: the backend correctly 422s "cannot
+    pause a closed case", but nothing translated BackendError into an HTTP
+    response outside each route's own try/except, so this leaked as a raw
+    500 with a stack trace. Fixed with a global exception handler in
+    main.py, mirroring the existing httpx.RequestError -> 503 handler."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(
+        return_value=httpx.Response(200, json={"id": "case-1", "current_stage_code": "final_notice"})
+    )
+    respx.post(f"{BASE}/api/v2/dunning/cases/case-1/pause").mock(
+        return_value=httpx.Response(422, json={"detail": "cannot pause a closed case (status=closed_paid)"})
+    )
+
+    resp = client.post(
+        "/api/invoices/case-1/snooze",
+        json={"reason": "dispute"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+    assert "cannot pause a closed case" in resp.json()["detail"]
+
+
+@respx.mock
+def test_snooze_invoice_endpoint_refuses_pre_due_with_422(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(
+        return_value=httpx.Response(200, json={"id": "case-1", "current_stage_code": "S0_pre_due"})
+    )
+    pause_route = respx.post(f"{BASE}/api/v2/dunning/cases/case-1/pause")
+
+    resp = client.post(
+        "/api/invoices/case-1/snooze",
+        json={"reason": "dispute"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+    assert not pause_route.called
+
+
+@respx.mock
+def test_list_project_invoices_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    cases_route = respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "case-1", "project_name": "Meridian Bay", "project_number": "PN-1"}]})
+    )
+
+    resp = client.get("/api/projects/PN-1/invoices", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["project_name"] == "Meridian Bay"
+    assert cases_route.calls.last.request.url.params["project_id"] == "PN-1"
+
+
+@respx.mock
+def test_magic_link_exchange_snooze_action_redirects_to_invoice_with_action_param(client: TestClient) -> None:
+    from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
+
+    token = create_magic_link_token(MagicLinkPayload(email="pm@corehelix.ai", action="snooze", invoice_id="case-1"))
+
+    resp = client.post("/api/auth/magic-link", json={"token": token})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email"] == "pm@corehelix.ai"
+    assert body["redirect"] == "/invoices/case-1?action=snooze"
+    assert body["session_token"]
+
+
+@respx.mock
+def test_magic_link_exchange_session_token_actually_works(client: TestClient) -> None:
+    """The session handed back must be usable, not just shaped correctly."""
+    from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
+
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+
+    token = create_magic_link_token(MagicLinkPayload(email="pm@corehelix.ai", action="comment", invoice_id="case-1"))
+    exchange_resp = client.post("/api/auth/magic-link", json={"token": token})
+    session_token = exchange_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1/timeline").mock(return_value=httpx.Response(200, json={"items": []}))
+
+    resp = client.get("/api/invoices/case-1/timeline", headers={"Authorization": f"Bearer {session_token}"})
+
+    assert resp.status_code == 200
+
+
+@respx.mock
+def test_magic_link_exchange_pick_invoice_redirects_to_project_picker(client: TestClient) -> None:
+    from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
+
+    token = create_magic_link_token(
+        MagicLinkPayload(email="pm@corehelix.ai", action="pick_invoice", project_number="PN-1", next_action="comment")
+    )
+
+    resp = client.post("/api/auth/magic-link", json={"token": token})
+
+    assert resp.status_code == 200
+    assert resp.json()["redirect"] == "/projects/PN-1/pick-invoice?action=comment"
+
+
+def test_magic_link_exchange_rejects_invalid_token(client: TestClient) -> None:
+    resp = client.post("/api/auth/magic-link", json={"token": "not-a-real-token"})
+
+    assert resp.status_code == 401
+
+
+def test_magic_link_exchange_rejects_expired_token(client: TestClient) -> None:
+    from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
+
+    token = create_magic_link_token(
+        MagicLinkPayload(email="pm@corehelix.ai", action="snooze", invoice_id="case-1"), ttl_seconds=-1
+    )
+
+    resp = client.post("/api/auth/magic-link", json={"token": token})
+
+    assert resp.status_code == 401
+
+
+@respx.mock
 def test_get_escalation_policy_composes_stages_and_rules(client: TestClient) -> None:
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})

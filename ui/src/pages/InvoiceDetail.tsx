@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { getInvoice, getInvoiceTimeline, addComment, type Invoice, type TimelineEvent } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { getInvoice, getInvoiceTimeline, addComment, snoozeInvoice, type Invoice, type TimelineEvent } from "../api";
 import { useSession } from "../context/SessionContext";
 
 function money(n: number | null): string {
@@ -23,6 +23,11 @@ const EVENT_LABELS: Record<string, string> = {
 
 export default function InvoiceDetail() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
+  const [searchParams] = useSearchParams();
+  // Set when arriving via a Teams magic link (reminder-card button, or a
+  // project chat's invoice picker) -- opens the matching form directly
+  // instead of making the user hunt for it. Added 2026-07-16.
+  const requestedAction = searchParams.get("action");
   const { token, setPinnedInvoice } = useSession();
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
@@ -32,6 +37,19 @@ export default function InvoiceDetail() {
   const [commentText, setCommentText] = useState("");
   const [posting, setPosting] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [showSnoozeForm, setShowSnoozeForm] = useState(requestedAction === "snooze");
+  const [snoozeReason, setSnoozeReason] = useState("");
+  const [snoozeResumeDate, setSnoozeResumeDate] = useState("");
+  const [snoozing, setSnoozing] = useState(false);
+  const [snoozeError, setSnoozeError] = useState<string | null>(null);
+  const [snoozeConfirmed, setSnoozeConfirmed] = useState<string | null>(null);
+  const commentInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (invoice && requestedAction === "comment") commentInputRef.current?.focus();
+    // Only once the invoice (and therefore the input) has actually mounted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoice]);
 
   useEffect(() => {
     if (!token || !invoiceId) return;
@@ -61,6 +79,23 @@ export default function InvoiceDetail() {
       setCommentError(String(e));
     } finally {
       setPosting(false);
+    }
+  }
+
+  async function submitSnooze() {
+    if (!token || !invoiceId || !snoozeReason.trim()) return;
+    setSnoozing(true);
+    setSnoozeError(null);
+    try {
+      await snoozeInvoice(token, invoiceId, snoozeReason.trim(), snoozeResumeDate || undefined);
+      setSnoozeConfirmed(snoozeReason.trim());
+      setSnoozeReason("");
+      setSnoozeResumeDate("");
+      setShowSnoozeForm(false);
+    } catch (e) {
+      setSnoozeError(String(e));
+    } finally {
+      setSnoozing(false);
     }
   }
 
@@ -107,12 +142,20 @@ export default function InvoiceDetail() {
           <h1 className="font-display text-[20px] font-semibold tracking-tight text-zinc-900">
             {invoice.project_name ?? invoice.project_number ?? "Invoice"}
           </h1>
-          <button
-            onClick={askAboutThis}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
-          >
-            Ask about this
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSnoozeForm((v) => !v)}
+              className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+            >
+              Snooze
+            </button>
+            <button
+              onClick={askAboutThis}
+              className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
+            >
+              Ask about this
+            </button>
+          </div>
         </div>
         <dl className="grid grid-cols-2 gap-y-4 text-[14px]">
           {fields.map(([label, value]) => (
@@ -124,6 +167,50 @@ export default function InvoiceDetail() {
         </dl>
       </div>
 
+      {snoozeConfirmed && (
+        <div className="mt-4 rounded-2xl border border-emerald-200/70 bg-emerald-50 px-5 py-3 text-[13px] text-emerald-700">
+          Snoozed &mdash; "{snoozeConfirmed}"
+        </div>
+      )}
+
+      {showSnoozeForm && (
+        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Snooze a follow-up</h2>
+          <p className="mt-1 text-[12px] text-zinc-400">Pauses dunning outreach on this invoice until you resume it.</p>
+
+          <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Reason</label>
+          <input
+            value={snoozeReason}
+            onChange={(e) => setSnoozeReason(e.target.value)}
+            placeholder="e.g. customer disputing amount"
+            className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          />
+          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Resume on (optional)</label>
+          <input
+            type="date"
+            value={snoozeResumeDate}
+            onChange={(e) => setSnoozeResumeDate(e.target.value)}
+            className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          />
+          {snoozeError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{snoozeError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={submitSnooze}
+              disabled={snoozing || !snoozeReason.trim()}
+              className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {snoozing ? "Snoozing..." : "Confirm snooze"}
+            </button>
+            <button
+              onClick={() => setShowSnoozeForm(false)}
+              className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments &amp; activity</h2>
         <p className="mt-1 text-[12px] text-zinc-400">
@@ -132,6 +219,7 @@ export default function InvoiceDetail() {
 
         <div className="mt-5 flex gap-2">
           <input
+            ref={commentInputRef}
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             onKeyDown={(e) => {
