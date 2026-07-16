@@ -75,6 +75,20 @@ def test_login_failure_returns_401(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
+@respx.mock
+def test_backend_unreachable_returns_clean_503_not_raw_500(client: TestClient) -> None:
+    """A connection failure (backend down, wrong URL, network blip) is a
+    different failure mode than a bad HTTP response -- BackendError's own
+    handling never sees it. Regression test for a real bug found while
+    smoke-testing: this used to leak a raw httpx.ConnectError as a 500."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(side_effect=httpx.ConnectError("connection refused"))
+
+    resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+
+    assert resp.status_code == 503
+    assert "unreachable" in resp.json()["detail"]
+
+
 def test_invoices_endpoint_requires_session(client: TestClient) -> None:
     resp = client.get("/api/invoices")
     assert resp.status_code == 401
