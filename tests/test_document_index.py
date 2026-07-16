@@ -6,13 +6,30 @@ from __future__ import annotations
 
 import pytest
 
-from app.documents.index import LocalKeywordIndex
+from app.documents.index import AzureSearchIndex, LocalKeywordIndex
 from app.documents.ingest import Chunk
 
 
 @pytest.fixture
 async def index(tmp_path) -> LocalKeywordIndex:
     return LocalKeywordIndex(db_path=str(tmp_path / "test.db"))
+
+
+def test_azure_search_index_raises_clear_error_without_credentials(monkeypatch) -> None:
+    """Regression test: ABCMeta checks abstractness before __init__ runs, so
+    an incompletely-stubbed subclass raises a confusing TypeError instead of
+    this class's own clear RuntimeError unless every abstract method has a
+    (possibly-unreachable) concrete override."""
+    monkeypatch.setenv("AZURE_SEARCH_ENDPOINT", "")
+    monkeypatch.setenv("AZURE_SEARCH_KEY", "")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://placeholder/")
+    monkeypatch.setenv("AZURE_OPENAI_KEY", "placeholder")
+    import app.config as config_module
+
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    with pytest.raises(RuntimeError, match="AZURE_SEARCH_ENDPOINT"):
+        AzureSearchIndex()
 
 
 @pytest.mark.asyncio

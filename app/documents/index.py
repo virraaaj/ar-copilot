@@ -174,6 +174,22 @@ class AzureSearchIndex(DocumentIndex):
             )
         raise NotImplementedError("AzureSearchIndex: implement once AZURE_SEARCH_* is provisioned.")
 
+    # ABCMeta checks abstractness (and refuses to instantiate) BEFORE
+    # __init__ runs at all -- these stubs exist purely so the class is
+    # concrete enough to reach the __init__ guard above. Unreachable in
+    # practice: __init__ always raises first.
+    async def add_document(self, doc_id, filename, doc_type, chunks) -> None:
+        raise NotImplementedError
+
+    async def search(self, query, doc_type=None, top_k=5):
+        raise NotImplementedError
+
+    async def delete_document(self, doc_id: str) -> None:
+        raise NotImplementedError
+
+    async def get_chunks(self, doc_id: str):
+        raise NotImplementedError
+
 
 _index: Optional[DocumentIndex] = None
 
