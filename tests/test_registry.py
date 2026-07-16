@@ -70,3 +70,21 @@ def test_schema_name_mismatch_rejected():
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+def test_pm_role_gets_read_tools_plus_explicitly_granted_writes():
+    registry = ToolRegistry()
+    registry.register("read_thing", ToolKind.READ, _schema("read_thing"), _noop_handler)
+    registry.register(
+        "snooze_invoice", ToolKind.WRITE, _schema("snooze_invoice"), _noop_handler, extra_roles=frozenset({"pm"})
+    )
+    registry.register(
+        "update_project_contact", ToolKind.WRITE, _schema("update_project_contact"), _noop_handler
+    )  # admin-only, no extra_roles
+
+    pm_tools = {t.name for t in registry.for_role("pm")}
+
+    assert pm_tools == {"read_thing", "snooze_invoice"}
+    assert registry.is_permitted("snooze_invoice", "pm") is True
+    assert registry.is_permitted("update_project_contact", "pm") is False
+    assert registry.is_permitted("update_project_contact", "admin") is True
