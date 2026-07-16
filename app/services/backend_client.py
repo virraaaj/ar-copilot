@@ -251,6 +251,45 @@ class BackendClient:
         resp = await self._request("DELETE", f"/api/v1/dunning/project-contacts/{contact_id}")
         return self._ok_or_raise(resp, "Delete project contact")
 
+    # ------------------------------------------------- default contacts
+    # Mirrors Lummus's own "Default Project Contacts" page design/concept
+    # (backend/app/api/v1/dunning.py) 1:1 -- a template system, not a live
+    # link: one Global scope (bu=None) plus optional per-BU override
+    # scopes, one contact per contact_type per scope. Real Lummus applies
+    # these to seed new projects' contacts at creation time; this app
+    # exposes the same CRUD surface for the same "set it once, applies
+    # everywhere unless overridden" mental model, verified against the
+    # real endpoint/response shapes in that file, not guessed.
+    async def list_default_project_contacts(self) -> List[Dict[str, Any]]:
+        """Returns scopes: [{bu, bu_name, contacts: [{contact_id,
+        contact_type, name, email, phone}, ...]}, ...] -- bu=None is
+        always present first (the Global scope)."""
+        resp = await self._request("GET", "/api/v1/dunning/default-project-contacts")
+        return self._ok_or_raise(resp, "List default project contacts")
+
+    async def add_default_project_contact(
+        self,
+        contact_type: str,
+        bu: Optional[str] = None,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        contact_type = "bu_finance" if contact_type == "finance" else contact_type
+        if contact_type not in CONTACT_TYPES:
+            raise BackendError(f"contact_type must be one of: {', '.join(CONTACT_TYPES)}")
+        body = {"contact_type": contact_type, "bu": bu, "name": name, "email": email, "phone": phone}
+        resp = await self._request("POST", "/api/v1/dunning/default-project-contacts", json=body)
+        return self._ok_or_raise(resp, "Add default project contact")
+
+    async def update_default_project_contact(self, contact_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        resp = await self._request("PATCH", f"/api/v1/dunning/default-project-contacts/{contact_id}", json=fields)
+        return self._ok_or_raise(resp, "Update default project contact")
+
+    async def delete_default_project_contact(self, contact_id: str) -> Dict[str, Any]:
+        resp = await self._request("DELETE", f"/api/v1/dunning/default-project-contacts/{contact_id}")
+        return self._ok_or_raise(resp, "Delete default project contact")
+
     # --------------------------------------------------------- policy (v2)
     # Escalation policy editor (PLAN.md §5, added 2026-07-16). All confirmed
     # live endpoints under /api/v2/dunning -- backend/app/dunning_v2/api/

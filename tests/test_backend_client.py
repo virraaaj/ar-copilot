@@ -3,6 +3,8 @@ Phase 0 tests: backend_client against a mocked API (respx), never a live call.
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -89,6 +91,66 @@ async def test_add_project_contact_rejects_bad_type(client: BackendClient) -> No
     # Validation happens before any HTTP call, so no routes are mocked/expected.
     with pytest.raises(BackendError, match="contact_type must be one of"):
         await client.add_project_contact("PN-1", contact_type="ceo")
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_default_project_contacts_returns_scopes(client: BackendClient) -> None:
+    _mock_login = respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    respx.get(f"{BASE}/api/v1/dunning/default-project-contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"bu": None, "bu_name": None, "contacts": [{"contact_id": "c-1", "contact_type": "pm", "name": "Jane", "email": "jane@x.com", "phone": None}]},
+                {"bu": "201", "bu_name": "BU 201", "contacts": []},
+            ],
+        )
+    )
+
+    scopes = await client.list_default_project_contacts()
+
+    assert scopes[0]["bu"] is None
+    assert scopes[0]["contacts"][0]["contact_type"] == "pm"
+    assert scopes[1]["bu"] == "201"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_default_project_contact_rejects_bad_type(client: BackendClient) -> None:
+    with pytest.raises(BackendError, match="contact_type must be one of"):
+        await client.add_default_project_contact(contact_type="ceo")
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_default_project_contact_posts_scope_and_fields(client: BackendClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    route = respx.post(f"{BASE}/api/v1/dunning/default-project-contacts").mock(
+        return_value=httpx.Response(201, json={"contact_id": "c-1", "contact_type": "pm", "bu": "201"})
+    )
+
+    await client.add_default_project_contact(contact_type="pm", bu="201", name="Jane", email="jane@x.com")
+
+    sent_body = json.loads(route.calls.last.request.content)
+    assert sent_body == {"contact_type": "pm", "bu": "201", "name": "Jane", "email": "jane@x.com", "phone": None}
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_delete_default_project_contact(client: BackendClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    route = respx.delete(f"{BASE}/api/v1/dunning/default-project-contacts/c-1").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    result = await client.delete_default_project_contact("c-1")
+
+    assert result == {"ok": True}
+    assert route.called
     await client.close()
 
 

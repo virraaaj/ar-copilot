@@ -10,6 +10,8 @@ import Documents from "./pages/Documents";
 import EscalationPolicy from "./pages/EscalationPolicy";
 import MagicLink from "./pages/MagicLink";
 import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
+import ProjectContacts from "./pages/ProjectContacts";
+import DefaultProjectContacts from "./pages/DefaultProjectContacts";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -72,6 +74,22 @@ export default function App() {
         element={
           <RequireSession>
             <EscalationPolicy />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/project-contacts"
+        element={
+          <RequireSession>
+            <ProjectContacts />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/default-project-contacts"
+        element={
+          <RequireSession>
+            <DefaultProjectContacts />
           </RequireSession>
         }
       />

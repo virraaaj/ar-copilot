@@ -76,6 +76,45 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; permitted: boolean }
   | { type: "answer"; content: string; truncated: boolean };
 
+// Project contacts + default project contacts (added 2026-07-16) -- same
+// design/concept as Lummus's own equivalent pages, see api.ts's module
+// comment near the fetch functions below for the "default = template,
+// not a live link" model.
+export const CONTACT_TYPE_LABELS: Record<string, string> = {
+  pm: "Project Manager",
+  bu_finance: "BU Finance",
+  corp_finance: "Corporate Finance",
+  general_manager: "General Manager",
+  legal: "Legal",
+};
+
+export const CONTACT_TYPES = Object.keys(CONTACT_TYPE_LABELS);
+
+export interface Contact {
+  contact_id: string;
+  contact_type: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+export interface ProjectContactGroup {
+  project_number: string;
+  project_name: string | null;
+  contacts: Contact[];
+}
+
+export interface DefaultContactScope {
+  bu: string | null;
+  bu_name: string | null;
+  contacts: Contact[];
+}
+
+export interface BusinessUnit {
+  bu_id: string;
+  bu_name: string | null;
+}
+
 class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -154,6 +193,76 @@ export async function snoozeInvoice(
 
 export async function resumeInvoice(token: string, invoiceId: string): Promise<void> {
   await request(`/invoices/${encodeURIComponent(invoiceId)}/resume`, token, { method: "POST" });
+}
+
+export async function listBusinessUnits(token: string): Promise<BusinessUnit[]> {
+  return request("/business-units", token);
+}
+
+// "Default" contacts are a template Lummus applies when a *new* project is
+// created (one Global scope + optional per-BU override scopes, one contact
+// per role per scope) -- not a live link to existing projects. Editing a
+// default afterwards never retroactively changes any project's contacts.
+export async function listDefaultProjectContacts(token: string): Promise<DefaultContactScope[]> {
+  return request("/default-project-contacts", token);
+}
+
+export async function addDefaultProjectContact(
+  token: string,
+  body: { contact_type: string; bu?: string | null; name?: string; email?: string; phone?: string }
+): Promise<Contact> {
+  return request("/default-project-contacts", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateDefaultProjectContact(
+  token: string,
+  contactId: string,
+  body: { name?: string; email?: string; phone?: string }
+): Promise<Contact> {
+  return request(`/default-project-contacts/${encodeURIComponent(contactId)}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteDefaultProjectContact(token: string, contactId: string): Promise<void> {
+  await request(`/default-project-contacts/${encodeURIComponent(contactId)}`, token, { method: "DELETE" });
+}
+
+export async function listProjectContacts(token: string): Promise<ProjectContactGroup[]> {
+  return request("/project-contacts", token);
+}
+
+export async function addProjectContact(
+  token: string,
+  body: { project_number: string; contact_type: string; name?: string; email?: string; phone?: string }
+): Promise<Contact> {
+  return request("/project-contacts", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateProjectContact(
+  token: string,
+  contactId: string,
+  body: { name?: string; email?: string; phone?: string }
+): Promise<Contact> {
+  return request(`/project-contacts/${encodeURIComponent(contactId)}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteProjectContact(token: string, contactId: string): Promise<void> {
+  await request(`/project-contacts/${encodeURIComponent(contactId)}`, token, { method: "DELETE" });
 }
 
 export async function getEscalationPolicy(token: string): Promise<EscalationPolicy> {

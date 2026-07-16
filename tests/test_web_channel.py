@@ -381,6 +381,164 @@ def test_list_project_invoices_endpoint(client: TestClient) -> None:
 
 
 @respx.mock
+def test_list_business_units_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v1/dunning/business-units").mock(
+        return_value=httpx.Response(200, json={"items": [{"bu_id": "201", "bu_name": "BU 201"}]})
+    )
+
+    resp = client.get("/api/business-units", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["bu_name"] == "BU 201"
+
+
+@respx.mock
+def test_list_project_contacts_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "project_number": "PN-1",
+                    "project_name": "Meridian Bay",
+                    "contacts": [{"contact_id": "c-1", "contact_type": "pm", "name": "Jane", "email": "jane@x.com", "phone": None}],
+                }
+            ],
+        )
+    )
+
+    resp = client.get("/api/project-contacts", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["project_number"] == "PN-1"
+    assert resp.json()[0]["contacts"][0]["contact_type"] == "pm"
+
+
+@respx.mock
+def test_add_project_contact_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    add_route = respx.post(f"{BASE}/api/v1/dunning/project-contacts").mock(
+        return_value=httpx.Response(200, json={"contact_id": "c-1"})
+    )
+
+    resp = client.post(
+        "/api/project-contacts",
+        json={"project_number": "PN-1", "contact_type": "pm", "name": "Jane", "email": "jane@x.com"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    assert add_route.called
+
+
+@respx.mock
+def test_update_project_contact_endpoint_only_sends_provided_fields(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    patch_route = respx.patch(f"{BASE}/api/v1/dunning/project-contacts/c-1").mock(
+        return_value=httpx.Response(200, json={"contact_id": "c-1", "name": "Jane Updated"})
+    )
+
+    resp = client.patch(
+        "/api/project-contacts/c-1",
+        json={"name": "Jane Updated"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    sent_body = json.loads(patch_route.calls.last.request.content)
+    assert sent_body == {"name": "Jane Updated"}
+
+
+@respx.mock
+def test_delete_project_contact_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    delete_route = respx.delete(f"{BASE}/api/v1/dunning/project-contacts/c-1").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    resp = client.delete("/api/project-contacts/c-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert delete_route.called
+
+
+@respx.mock
+def test_list_default_project_contacts_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v1/dunning/default-project-contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"bu": None, "bu_name": None, "contacts": [{"contact_id": "c-1", "contact_type": "pm", "name": "Global PM", "email": None, "phone": None}]},
+            ],
+        )
+    )
+
+    resp = client.get("/api/default-project-contacts", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["bu"] is None
+    assert resp.json()[0]["contacts"][0]["name"] == "Global PM"
+
+
+@respx.mock
+def test_add_default_project_contact_endpoint_with_bu_override(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    add_route = respx.post(f"{BASE}/api/v1/dunning/default-project-contacts").mock(
+        return_value=httpx.Response(201, json={"contact_id": "c-2", "bu": "201"})
+    )
+
+    resp = client.post(
+        "/api/default-project-contacts",
+        json={"contact_type": "pm", "bu": "201", "name": "BU 201 PM"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    sent_body = json.loads(add_route.calls.last.request.content)
+    assert sent_body["bu"] == "201"
+
+
+@respx.mock
+def test_delete_default_project_contact_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    delete_route = respx.delete(f"{BASE}/api/v1/dunning/default-project-contacts/c-1").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    resp = client.delete("/api/default-project-contacts/c-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert delete_route.called
+
+
+@respx.mock
 def test_magic_link_exchange_snooze_action_redirects_to_invoice_with_action_param(client: TestClient) -> None:
     from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
 

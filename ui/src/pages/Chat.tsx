@@ -7,6 +7,20 @@ interface DisplayMessage {
   content: string;
 }
 
+// A small bouncing-dot "still working on it" indicator, the same idea as
+// Claude's own thinking indicator -- shown the instant a question is sent
+// (before any tool-call progress event has arrived) so the chat never sits
+// silent while the agent reasons.
+function ThinkingDots() {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400" />
+    </span>
+  );
+}
+
 export default function Chat() {
   const { token, pinnedInvoice, setPinnedInvoice } = useSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -20,13 +34,18 @@ export default function Chat() {
 
     const question = input.trim();
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: question }]);
+    setMessages((m) => [...m, { role: "user", content: question }, { role: "progress", content: "Thinking" }]);
     setSending(true);
 
     try {
       for await (const event of streamChat(token, question, pinnedInvoice ?? undefined)) {
         if (event.type === "tool_call") {
-          setMessages((m) => [...m, { role: "progress", content: `Checking ${event.name.replace(/_/g, " ")}...` }]);
+          // Replace the standing "Thinking" bubble with what it's actually
+          // doing, rather than stacking a new bubble on top of it.
+          setMessages((m) => [
+            ...m.filter((msg) => msg.role !== "progress"),
+            { role: "progress", content: `Checking ${event.name.replace(/_/g, " ")}` },
+          ]);
         } else if (event.type === "answer") {
           setMessages((m) => [
             ...m.filter((msg) => msg.role !== "progress"),
@@ -76,11 +95,18 @@ export default function Chat() {
                 m.role === "user"
                   ? "bg-zinc-900 text-white"
                   : m.role === "progress"
-                    ? "italic text-zinc-400"
+                    ? "flex items-center gap-2 italic text-zinc-400"
                     : "bg-zinc-100 text-zinc-800"
               }`}
             >
-              {m.content}
+              {m.role === "progress" ? (
+                <>
+                  {m.content}
+                  <ThinkingDots />
+                </>
+              ) : (
+                m.content
+              )}
             </span>
           </div>
         ))}

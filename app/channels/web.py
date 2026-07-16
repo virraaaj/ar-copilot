@@ -177,6 +177,14 @@ async def list_project_invoices_endpoint(
     return await tool_list_invoices(backend, project_id=project_number, limit=200)
 
 
+@router.get("/business-units")
+async def list_business_units_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    return await backend.list_business_units()
+
+
 @router.get("/aging-summary")
 async def aging_summary_endpoint(
     business_unit_id: Optional[str] = None,
@@ -184,6 +192,124 @@ async def aging_summary_endpoint(
     backend: BackendClient = Depends(get_backend_client),
 ) -> Dict[str, Any]:
     return await tool_aging_summary(backend, business_unit_id=business_unit_id)
+
+
+# ---------------------------------------------------------------------------
+# Project contacts + default project contacts (added 2026-07-16). Deliberately
+# the same design/concept as Lummus's own equivalent pages
+# (backend/app/api/v1/dunning.py's /project-contacts and
+# /default-project-contacts) -- this is a thin pass-through to the same real
+# endpoints, not a reimplementation: "default" contacts are a template (one
+# Global scope + optional per-BU override scopes) that Lummus applies when
+# seeding a *new* project's contacts, not a live link -- editing a default
+# afterwards does not retroactively change any project's contacts.
+# ---------------------------------------------------------------------------
+
+
+class ProjectContactCreate(BaseModel):
+    project_number: str
+    contact_type: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class ProjectContactUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+@router.get("/project-contacts")
+async def list_project_contacts_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    return await backend.list_all_project_contacts()
+
+
+@router.post("/project-contacts")
+async def add_project_contact_endpoint(
+    body: ProjectContactCreate,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    return await backend.add_project_contact(
+        body.project_number, contact_type=body.contact_type, name=body.name, email=body.email, phone=body.phone
+    )
+
+
+@router.patch("/project-contacts/{contact_id}")
+async def update_project_contact_endpoint(
+    contact_id: str,
+    body: ProjectContactUpdate,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    return await backend.update_project_contact(contact_id, fields)
+
+
+@router.delete("/project-contacts/{contact_id}")
+async def delete_project_contact_endpoint(
+    contact_id: str,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    return await backend.delete_project_contact(contact_id)
+
+
+class DefaultProjectContactCreate(BaseModel):
+    contact_type: str
+    bu: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class DefaultProjectContactUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+@router.get("/default-project-contacts")
+async def list_default_project_contacts_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    return await backend.list_default_project_contacts()
+
+
+@router.post("/default-project-contacts")
+async def add_default_project_contact_endpoint(
+    body: DefaultProjectContactCreate,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    return await backend.add_default_project_contact(
+        contact_type=body.contact_type, bu=body.bu, name=body.name, email=body.email, phone=body.phone
+    )
+
+
+@router.patch("/default-project-contacts/{contact_id}")
+async def update_default_project_contact_endpoint(
+    contact_id: str,
+    body: DefaultProjectContactUpdate,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    return await backend.update_default_project_contact(contact_id, fields)
+
+
+@router.delete("/default-project-contacts/{contact_id}")
+async def delete_default_project_contact_endpoint(
+    contact_id: str,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    return await backend.delete_default_project_contact(contact_id)
 
 
 # ---------------------------------------------------------------------------

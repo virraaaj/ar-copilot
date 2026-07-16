@@ -32,6 +32,12 @@ export default function NavBar() {
             <NavLink to="/escalation-policy" className={linkClass}>
               Escalation Policy
             </NavLink>
+            <NavLink to="/project-contacts" className={linkClass}>
+              Project Contacts
+            </NavLink>
+            <NavLink to="/default-project-contacts" className={linkClass}>
+              Default Contacts
+            </NavLink>
           </div>
         </div>
         <div className="flex items-center gap-4">
