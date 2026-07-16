@@ -5,6 +5,11 @@
 export interface Invoice {
   invoice_id: string;
   case_key: string;
+  // The real, human-facing invoice number (e.g. "UAT-RND-FIN-002") --
+  // distinct from case_key, an internal engine-generated reference. Use
+  // this to identify an invoice to a user; case_key is a fallback for the
+  // rare case where a case predates having one.
+  invoice_no: string | null;
   status: string | null;
   stage: string | null;
   project_number: string | null;

@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from app.agent.tools_read import get_timeline
+from app.agent.tools_read import get_timeline, list_invoices
 from app.services.backend_client import BackendClient
 
 BASE = "http://test-backend"
@@ -69,4 +69,27 @@ async def test_get_timeline_handles_missing_title_and_summary(client: BackendCli
     assert events[0]["title"] is None
     assert events[0]["summary"] is None
     assert events[0]["at"] == "2026-07-14T12:00:00"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_invoices_surfaces_the_real_invoice_number(client: BackendClient) -> None:
+    """The real human-facing invoice number lives in primary_invoice_id
+    (e.g. "UAT-RND-FIN-002"), distinct from case_key (an internal
+    engine-generated reference like "V2-AUTO-UAT-RND-FIN-002") -- verified
+    against live UAT data. Added so the Dashboard can label/group invoices
+    by their actual invoice number instead of repeating the project name."""
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [{"id": "case-1", "case_key": "V2-AUTO-RND-002", "primary_invoice_id": "UAT-RND-002"}]},
+        )
+    )
+
+    invoices = await list_invoices(client)
+
+    assert invoices[0]["invoice_no"] == "UAT-RND-002"
+    assert invoices[0]["case_key"] == "V2-AUTO-RND-002"
     await client.close()

@@ -151,6 +151,15 @@ def _summarize_case(c: Dict[str, Any], full: bool = False) -> Dict[str, Any]:
     out = {
         "invoice_id": c.get("id"),
         "case_key": c.get("case_key"),
+        # The real, human-facing invoice number (e.g. "UAT-RND-FIN-002") --
+        # distinct from case_key, which is an internal engine-generated
+        # reference. Added 2026-07-16 so the UI can group/label invoices by
+        # their actual invoice number instead of repeating the project name
+        # per row. A case can technically span more than one invoice
+        # (invoice_count on the full backend response); this is just the
+        # primary one, same scope the rest of this projection already uses
+        # for due_date/open_amount/aging_status.
+        "invoice_no": c.get("primary_invoice_id"),
         "status": c.get("case_status"),
         "stage": c.get("current_stage_code"),
         "project_number": c.get("project_number"),
