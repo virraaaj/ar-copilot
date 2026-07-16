@@ -16,7 +16,12 @@ pydantic-settings>=2.2.0
 # Local state (audit log, conversation refs, proactive dedupe)
 aiosqlite>=0.20.0
 
+# ---- Document Intelligence (Phase 1B) ----
+pypdf>=4.2.0                    # native PDF text extraction
+azure-search-documents>=11.5.0  # hybrid text+vector index (blocked on AZURE_SEARCH_KEY)
+
 # ---- dev / test ----
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
 respx>=0.21.0
+fpdf2>=2.7.0                    # generates real test PDFs for ingest.py tests

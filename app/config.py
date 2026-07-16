@@ -40,6 +40,32 @@ class Settings(BaseSettings):
     PROACTIVE_POLL_ENABLED: bool = False
     PROACTIVE_POLL_INTERVAL_SECONDS: int = 300
 
+    # ---- Document Intelligence (Phase 1B) ----
+    # SharePoint (Graph API) — real dev creds, works today.
+    SHAREPOINT_TENANT_ID: str = ""
+    SHAREPOINT_CLIENT_ID: str = ""
+    SHAREPOINT_CLIENT_SECRET: str = ""
+    SHAREPOINT_SITE_URL: str = ""
+    SHAREPOINT_SITE_ID: str = ""
+    SHAREPOINT_DRIVE_ID: str = ""
+    SHAREPOINT_FOLDER_ID: str = ""
+    SHAREPOINT_DOCUMENT_LIBRARY: str = "Documents"
+
+    # Manual upload — local disk, no external service needed.
+    DOCUMENTS_LOCAL_DIR: str = ".state/documents"
+
+    # Azure AI Search (hybrid text+vector index) — blocked, no resource yet.
+    AZURE_SEARCH_ENDPOINT: str = ""
+    AZURE_SEARCH_KEY: str = ""
+    AZURE_SEARCH_INDEX_NAME: str = "ar-copilot-documents"
+
+    # Azure AI Document Intelligence (OCR for scanned PDFs) — blocked, no resource yet.
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: str = ""
+    AZURE_DOCUMENT_INTELLIGENCE_KEY: str = ""
+
+    # Embeddings model deployment (Azure OpenAI) — blocked on the same key as chat.
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME: str = "text-embedding-3-small"
+
     # ---- Server ----
     PORT: int = 8090
     LOG_LEVEL: str = "INFO"
