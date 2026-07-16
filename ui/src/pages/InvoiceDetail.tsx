@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
-import { getInvoice, getInvoiceTimeline, addComment, snoozeInvoice, type Invoice, type TimelineEvent } from "../api";
+import {
+  getInvoice,
+  getInvoiceTimeline,
+  addComment,
+  snoozeInvoice,
+  getEscalationPolicy,
+  type Invoice,
+  type TimelineEvent,
+  type EscalationStage,
+} from "../api";
 import { useSession } from "../context/SessionContext";
 
 function money(n: number | null): string {
@@ -20,6 +29,50 @@ const EVENT_LABELS: Record<string, string> = {
   stage_transition: "Stage change",
   case_created: "Case opened",
 };
+
+function StageRail({ stages, currentStageCode }: { stages: EscalationStage[]; currentStageCode: string | null }) {
+  const ordered = [...stages].sort((a, b) => a.sequence_order - b.sequence_order);
+  const currentIndex = ordered.findIndex((s) => s.stage_code === currentStageCode);
+
+  return (
+    <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Escalation status</h2>
+      {currentIndex === -1 && currentStageCode && (
+        <p className="mt-1 text-[12px] text-zinc-400">Current stage: {currentStageCode}</p>
+      )}
+      <div className="mt-6 flex items-start">
+        {ordered.map((stage, i) => {
+          const isDone = currentIndex !== -1 && i < currentIndex;
+          const isCurrent = i === currentIndex;
+          return (
+            <div key={stage.stage_id} className="flex flex-1 flex-col items-center last:flex-none last:items-end">
+              <div className="flex w-full items-center">
+                <div
+                  className={
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold " +
+                    (isCurrent
+                      ? "bg-zinc-900 text-white ring-4 ring-zinc-900/10"
+                      : isDone
+                        ? "bg-emerald-500 text-white"
+                        : "bg-zinc-100 text-zinc-400")
+                  }
+                >
+                  {isDone ? "✓" : stage.sequence_order}
+                </div>
+                {i < ordered.length - 1 && (
+                  <div className={"h-0.5 flex-1 " + (isDone ? "bg-emerald-500" : "bg-zinc-100")} />
+                )}
+              </div>
+              <div className="mt-2 max-w-[84px] text-center text-[11px] leading-tight">
+                <span className={isCurrent ? "font-semibold text-zinc-900" : "text-zinc-400"}>{stage.stage_name}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function InvoiceDetail() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
@@ -43,7 +96,18 @@ export default function InvoiceDetail() {
   const [snoozing, setSnoozing] = useState(false);
   const [snoozeError, setSnoozeError] = useState<string | null>(null);
   const [snoozeConfirmed, setSnoozeConfirmed] = useState<string | null>(null);
+  const [stages, setStages] = useState<EscalationStage[] | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    // Reuses the same global escalation policy the Escalation Policy page
+    // edits -- the rail always reflects the real configured stage order,
+    // not a hardcoded guess that could drift from it.
+    getEscalationPolicy(token)
+      .then((p) => setStages(p.stages))
+      .catch(() => setStages(null));
+  }, [token]);
 
   useEffect(() => {
     if (invoice && requestedAction === "comment") commentInputRef.current?.focus();
@@ -210,6 +274,8 @@ export default function InvoiceDetail() {
           </div>
         </div>
       )}
+
+      {stages && stages.length > 0 && <StageRail stages={stages} currentStageCode={invoice.stage} />}
 
       <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments &amp; activity</h2>
