@@ -23,9 +23,9 @@ from typing import Optional
 
 from app.config import get_settings
 
-# action is one of these three; "snooze"/"comment" always carry invoice_id,
-# "pick_invoice" always carries project_number instead.
-VALID_ACTIONS = frozenset({"snooze", "comment", "pick_invoice"})
+# action is one of these four; "snooze"/"comment"/"follow_up" always carry
+# invoice_id, "pick_invoice" always carries project_number instead.
+VALID_ACTIONS = frozenset({"snooze", "comment", "follow_up", "pick_invoice"})
 
 
 class MagicLinkError(Exception):
@@ -55,9 +55,9 @@ def create_magic_link_token(payload: MagicLinkPayload, ttl_seconds: Optional[int
         raise ValueError(f"action must be one of {sorted(VALID_ACTIONS)}, got {payload.action!r}")
     if payload.action == "pick_invoice" and not payload.project_number:
         raise ValueError("pick_invoice requires project_number")
-    if payload.action == "pick_invoice" and payload.next_action not in ("snooze", "comment"):
-        raise ValueError("pick_invoice requires next_action to be 'snooze' or 'comment'")
-    if payload.action in ("snooze", "comment") and not payload.invoice_id:
+    if payload.action == "pick_invoice" and payload.next_action not in ("snooze", "comment", "follow_up"):
+        raise ValueError("pick_invoice requires next_action to be 'snooze', 'comment', or 'follow_up'")
+    if payload.action in ("snooze", "comment", "follow_up") and not payload.invoice_id:
         raise ValueError(f"{payload.action} requires invoice_id")
 
     s = get_settings()

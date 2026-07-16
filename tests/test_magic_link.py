@@ -37,6 +37,30 @@ def test_round_trips_pick_invoice_payload():
     assert payload.invoice_id is None
 
 
+def test_round_trips_follow_up_payload():
+    token = create_magic_link_token(MagicLinkPayload(email="pm@corehelix.ai", action="follow_up", invoice_id="case-1"))
+
+    payload = verify_magic_link_token(token)
+
+    assert payload.action == "follow_up"
+    assert payload.invoice_id == "case-1"
+
+
+def test_follow_up_requires_invoice_id():
+    with pytest.raises(ValueError):
+        create_magic_link_token(MagicLinkPayload(email="pm@corehelix.ai", action="follow_up"))
+
+
+def test_pick_invoice_accepts_follow_up_as_next_action():
+    token = create_magic_link_token(
+        MagicLinkPayload(email="pm@corehelix.ai", action="pick_invoice", project_number="PN-1", next_action="follow_up")
+    )
+
+    payload = verify_magic_link_token(token)
+
+    assert payload.next_action == "follow_up"
+
+
 def test_pick_invoice_requires_valid_next_action():
     with pytest.raises(ValueError):
         create_magic_link_token(

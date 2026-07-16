@@ -12,9 +12,15 @@ themselves to render a clean error card.
 """
 from __future__ import annotations
 
+import re
+from datetime import date
 from typing import Optional
 
 PRE_DUE_STAGE = "S0_pre_due"
+
+# Deliberately simple -- good enough to catch typos before we hand the
+# address to a real mail transport, not a full RFC 5322 validator.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class PolicyViolation(Exception):
@@ -29,3 +35,25 @@ def check_snooze_allowed(current_stage_code: Optional[str]) -> None:
 def check_nonempty_text(value: Optional[str], field_name: str) -> None:
     if not value or not value.strip():
         raise PolicyViolation(f"{field_name} is required for this action.")
+
+
+def check_valid_email(value: Optional[str]) -> None:
+    if not value or not _EMAIL_RE.match(value.strip()):
+        raise PolicyViolation("Enter a valid email address.")
+
+
+def check_positive_int(value: int, field_name: str) -> None:
+    if value < 1:
+        raise PolicyViolation(f"{field_name} must be at least 1.")
+
+
+def check_future_or_today(value: Optional[str], field_name: str) -> None:
+    """value is an ISO date string (YYYY-MM-DD)."""
+    if not value:
+        return
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise PolicyViolation(f"{field_name} must be a valid date.")
+    if parsed < date.today():
+        raise PolicyViolation(f"{field_name} can't be in the past.")

@@ -51,11 +51,12 @@ def reminder_card(
     aging: str,
     snooze_url: str,
     comment_url: str,
+    follow_up_url: str,
     due_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The proactive stage-triggered reminder (Phase 4's proactive.py sends
-    this). Stage banner + Invoice details + Action needed callout + Snooze/
-    Add comment buttons.
+    this). Stage banner + Invoice details + Action needed callout +
+    Snooze/Add comment/Follow up buttons.
 
     2026-07-16: buttons changed from Action.Submit (opened an in-Teams form
     card) to Action.OpenUrl, each carrying a signed one-time magic-link URL
@@ -65,7 +66,11 @@ def reminder_card(
     id lives only inside the opaque, signed token embedded in each URL —
     same invoice-ID-free principle as everywhere else, just carried by a
     token instead of hidden Action.Submit data now that the action happens
-    on the web instead of in-Teams."""
+    on the web instead of in-Teams.
+
+    2026-07-16 (later): added the Follow up button, for the "have the agent
+    email the customer on a schedule" feature — same OpenUrl pattern, lands
+    on the follow-up setup form (email, cadence, end date)."""
     facts = {"Invoice": case_key, "Amount": amount, "Aging": aging}
     if due_date:
         facts["Due date"] = due_date
@@ -90,7 +95,7 @@ def reminder_card(
                     {"type": "TextBlock", "text": "⚡ Action needed", "weight": "bolder"},
                     {
                         "type": "TextBlock",
-                        "text": "Please confirm receipt and a payment ETA with the customer, or use the buttons below to snooze or add a note.",
+                        "text": "Please confirm receipt and a payment ETA with the customer, or use the buttons below.",
                         "wrap": True,
                     },
                 ],
@@ -100,6 +105,7 @@ def reminder_card(
         actions=[
             {"type": "Action.OpenUrl", "title": "Snooze", "url": snooze_url},
             {"type": "Action.OpenUrl", "title": "Add comment", "url": comment_url},
+            {"type": "Action.OpenUrl", "title": "Follow up", "url": follow_up_url},
         ],
     )
 

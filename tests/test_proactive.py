@@ -93,7 +93,7 @@ async def test_reminder_card_buttons_are_openurl_magic_links(backend, messenger,
     card = messenger.sent[0].card
     actions = card["actions"]
     assert all(a["type"] == "Action.OpenUrl" for a in actions)
-    assert {a["title"] for a in actions} == {"Snooze", "Add comment"}
+    assert {a["title"] for a in actions} == {"Snooze", "Add comment", "Follow up"}
     assert all("/link?token=" in a["url"] for a in actions)
     # Invoice-ID-free: the raw case id is never in the visible body, only in
     # the opaque signed token embedded in the button URLs.

@@ -119,6 +119,21 @@ async def test_comment_intent_in_project_chat_redirects_to_invoice_picker(backen
 
 
 @pytest.mark.asyncio
+async def test_follow_up_intent_in_project_chat_redirects_to_invoice_picker(backend, messenger, project_store):
+    await project_store.record("PN-1", "conv-1")
+    bot = TeamsBot(AgentLoop(llm=None, registry=build_registry(), backend_client=backend), messenger, project_store)
+    activity = IncomingActivity(conversation_id="conv-1", user_id="pm@corehelix.ai", user_name="A PM", text="can we follow up with the customer on this one?")
+
+    await bot.handle(activity)
+
+    assert len(messenger.sent) == 1
+    card = messenger.sent[0].card
+    assert card["actions"][0]["type"] == "Action.OpenUrl"
+    assert "follow-up emails" in card["body"][0]["text"]
+    await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_write_intent_in_unlinked_chat_explains_instead_of_guessing(backend, messenger, project_store):
     # No project_store.record() call -- this conversation isn't a known project chat.
     bot = TeamsBot(AgentLoop(llm=None, registry=build_registry(), backend_client=backend), messenger, project_store)

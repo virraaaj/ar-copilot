@@ -59,6 +59,7 @@ def test_reminder_card_shows_case_key_not_internal_invoice_id():
         aging="21 days",
         snooze_url="https://ar.example/link?token=snz-abc123internal",
         comment_url="https://ar.example/link?token=cmt-abc123internal",
+        follow_up_url="https://ar.example/link?token=flw-abc123internal",
         due_date="2026-07-21",
     )
 
@@ -70,10 +71,12 @@ def test_reminder_card_shows_case_key_not_internal_invoice_id():
     assert "abc123internal" in json.dumps(card["actions"])
 
 
-def test_reminder_card_has_snooze_and_comment_openurl_actions():
+def test_reminder_card_has_snooze_comment_and_follow_up_openurl_actions():
     card = reminder_card(
         "CK-1", "Project X", "Escalation", "$500", "31-60 days",
-        snooze_url="https://ar.example/link?token=snz-1", comment_url="https://ar.example/link?token=cmt-1",
+        snooze_url="https://ar.example/link?token=snz-1",
+        comment_url="https://ar.example/link?token=cmt-1",
+        follow_up_url="https://ar.example/link?token=flw-1",
     )
 
     actions = card["actions"]
@@ -81,6 +84,7 @@ def test_reminder_card_has_snooze_and_comment_openurl_actions():
     titles_to_urls = {a["title"]: a["url"] for a in actions}
     assert titles_to_urls["Snooze"] == "https://ar.example/link?token=snz-1"
     assert titles_to_urls["Add comment"] == "https://ar.example/link?token=cmt-1"
+    assert titles_to_urls["Follow up"] == "https://ar.example/link?token=flw-1"
 
 
 def test_redirect_card_carries_magic_link_url():

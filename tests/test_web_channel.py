@@ -364,6 +364,122 @@ def test_resume_invoice_endpoint_requires_session(client: TestClient) -> None:
 
 
 @respx.mock
+def test_get_follow_up_status_when_none_active(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.get("/api/invoices/case-1/follow-up", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"active_campaign": None, "send_history": []}
+
+
+@respx.mock
+def test_create_follow_up_happy_path(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "pm@corehelix.ai", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post(
+        "/api/invoices/case-1/follow-up",
+        json={"customer_email": "customer@example.com", "cadence_days": 3},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["campaign_id"]
+
+    status_resp = client.get("/api/invoices/case-1/follow-up", headers={"Authorization": f"Bearer {token}"})
+    assert status_resp.json()["active_campaign"]["customer_email"] == "customer@example.com"
+    assert status_resp.json()["active_campaign"]["requested_by"] == "pm@corehelix.ai"
+
+
+@respx.mock
+def test_create_follow_up_rejects_invalid_email(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post(
+        "/api/invoices/case-1/follow-up",
+        json={"customer_email": "not-an-email", "cadence_days": 3},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+
+
+@respx.mock
+def test_create_follow_up_rejects_zero_cadence(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post(
+        "/api/invoices/case-1/follow-up",
+        json={"customer_email": "customer@example.com", "cadence_days": 0},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+
+
+@respx.mock
+def test_create_follow_up_rejects_past_end_date(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post(
+        "/api/invoices/case-1/follow-up",
+        json={"customer_email": "customer@example.com", "cadence_days": 3, "end_date": "2020-01-01"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+
+
+@respx.mock
+def test_create_follow_up_rejects_second_active_campaign(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    client.post("/api/invoices/case-1/follow-up", json={"customer_email": "a@example.com", "cadence_days": 3}, headers=headers)
+    resp = client.post("/api/invoices/case-1/follow-up", json={"customer_email": "b@example.com", "cadence_days": 3}, headers=headers)
+
+    assert resp.status_code == 409
+
+
+@respx.mock
+def test_cancel_follow_up_happy_path(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    client.post("/api/invoices/case-1/follow-up", json={"customer_email": "a@example.com", "cadence_days": 3}, headers=headers)
+    resp = client.post("/api/invoices/case-1/follow-up/cancel", headers=headers)
+
+    assert resp.status_code == 200
+    status_resp = client.get("/api/invoices/case-1/follow-up", headers=headers)
+    assert status_resp.json()["active_campaign"] is None
+
+
+@respx.mock
+def test_cancel_follow_up_404s_when_none_active(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post("/api/invoices/case-1/follow-up/cancel", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 404
+
+
+@respx.mock
 def test_list_project_invoices_endpoint(client: TestClient) -> None:
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})

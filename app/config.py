@@ -57,6 +57,27 @@ class Settings(BaseSettings):
     PROACTIVE_POLL_ENABLED: bool = False
     PROACTIVE_POLL_INTERVAL_SECONDS: int = 300
 
+    # ---- Manual follow-up emails (added 2026-07-16) ----
+    # A PM-triggered "follow up with the customer" campaign sends real email
+    # via Microsoft Graph /sendMail -- the same transport Lummus's own V2
+    # dunning engine uses (backend/app/services/integrations/
+    # graph_email_service.py), stamped with the same lineage headers/footer
+    # (see services/email_lineage.py) so a reply is caught by Lummus's real
+    # inbound webhook exactly like a reply to an automated dunning email --
+    # no new inbound-capture mechanism needed here. This needs its own Graph
+    # app registration with Mail.Send permission (a different scope than
+    # the SharePoint credentials above, which only cover Files.Read.All) --
+    # unset everywhere accessible, same blocker as Azure OpenAI/Teams/
+    # Document Intelligence/Search: built against an EmailSender interface
+    # (see services/email_sender.py) with a FakeEmailSender default so this
+    # is fully testable today; GraphEmailSender drops in with no call-site
+    # changes once the credential exists.
+    GRAPH_MAIL_TENANT_ID: str = ""
+    GRAPH_MAIL_CLIENT_ID: str = ""
+    GRAPH_MAIL_CLIENT_SECRET: str = ""
+    EMAIL_FROM_ADDRESS: str = ""
+    FOLLOWUP_POLL_INTERVAL_SECONDS: int = 300
+
     # ---- Document Intelligence (Phase 1B) ----
     # SharePoint (Graph API) — real dev creds, works today.
     SHAREPOINT_TENANT_ID: str = ""

@@ -114,7 +114,7 @@ def _pm_email(contacts: List[Dict[str, Any]]) -> Optional[str]:
     return next((c["email"] for c in contacts if c.get("email")), None)
 
 
-def _reminder_urls(case_id: str, pm_email: Optional[str]) -> tuple[str, str]:
+def _reminder_urls(case_id: str, pm_email: Optional[str]) -> tuple[str, str, str]:
     """Builds the Snooze/Add-comment magic-link URLs for one case's card.
 
     The token's `email` field is best-effort identity for display/audit
@@ -131,9 +131,11 @@ def _reminder_urls(case_id: str, pm_email: Optional[str]) -> tuple[str, str]:
     email = pm_email or "unknown@lummus.internal"
     snooze_token = create_magic_link_token(MagicLinkPayload(email=email, action="snooze", invoice_id=case_id))
     comment_token = create_magic_link_token(MagicLinkPayload(email=email, action="comment", invoice_id=case_id))
+    follow_up_token = create_magic_link_token(MagicLinkPayload(email=email, action="follow_up", invoice_id=case_id))
     return (
         f"{s.WEB_BASE_URL}/link?token={snooze_token}",
         f"{s.WEB_BASE_URL}/link?token={comment_token}",
+        f"{s.WEB_BASE_URL}/link?token={follow_up_token}",
     )
 
 
@@ -177,7 +179,7 @@ async def send_due_reminders(
         pm_email = _pm_email(contacts)
         for case in project_cases:
             stage = case["current_stage_code"]
-            snooze_url, comment_url = _reminder_urls(case["id"], pm_email)
+            snooze_url, comment_url, follow_up_url = _reminder_urls(case["id"], pm_email)
             card = cards.reminder_card(
                 case_key=case.get("case_key", case["id"]),
                 project_name=project_name,
@@ -186,6 +188,7 @@ async def send_due_reminders(
                 aging=case.get("primary_invoice_aging_status") or "unknown",
                 snooze_url=snooze_url,
                 comment_url=comment_url,
+                follow_up_url=follow_up_url,
                 due_date=case.get("primary_invoice_due_date"),
             )
             await messenger.send_card(conversation_id, card)

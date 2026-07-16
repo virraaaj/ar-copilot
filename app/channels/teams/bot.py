@@ -39,6 +39,11 @@ from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
 # redirecting, not a wrong action).
 _SNOOZE_INTENT = re.compile(r"\bsnooze|\bpause\b|\bhold off\b", re.IGNORECASE)
 _COMMENT_INTENT = re.compile(r"\bcomment|\badd a note\b|\blog a note\b", re.IGNORECASE)
+# "follow up"/"reach out" etc, checked before comment/snooze -- added
+# 2026-07-16 for the "have the agent email the customer on a schedule"
+# feature (see followup_engine.py). Deliberately checked first: "follow up
+# and add a note" should route to the follow-up setup form, not comment.
+_FOLLOW_UP_INTENT = re.compile(r"\bfollow[\s-]?up\b|\breach out\b|\bchase\b|\bemail the customer\b", re.IGNORECASE)
 
 
 @dataclass
@@ -80,6 +85,8 @@ class TeamsBot:
 
     @staticmethod
     def _detect_write_intent(text: str) -> Optional[str]:
+        if _FOLLOW_UP_INTENT.search(text):
+            return "follow_up"
         if _SNOOZE_INTENT.search(text):
             return "snooze"
         if _COMMENT_INTENT.search(text):
@@ -106,7 +113,7 @@ class TeamsBot:
             MagicLinkPayload(email=activity.user_id, action="pick_invoice", project_number=project_number, next_action=action)
         )
         url = f"{s.WEB_BASE_URL}/link?token={token}"
-        verb = "snooze" if action == "snooze" else "add a comment to"
+        verb = {"snooze": "snooze", "comment": "add a comment to", "follow_up": "set up follow-up emails for"}[action]
         await self._messenger.send_card(
             activity.conversation_id,
             cards.redirect_card(f"Sure -- pick which invoice you'd like to {verb} on the web.", url, button_title="Pick an invoice"),

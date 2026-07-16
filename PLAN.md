@@ -369,6 +369,62 @@ drops in once the credential exists, with no call-site changes.
   once `TEAMS_BOT_APP_ID`/`MICROSOFT_APP_PASSWORD` exist — no code changes
   expected, per the interface split above.
 
+### Phase 4.5 — Manual follow-up email campaigns (added 2026-07-16)
+
+⚠️ New feature, same day as the redirect-to-web rework above: a PM says
+"follow up with the customer" (Teams chat, or the web's Follow up button)
+and the agent runs a real recurring email campaign for that invoice —
+customer email, cadence, optional end date, all collected on one web form
+(reached the same way as snooze/comment: a magic link, or the project
+invoice picker if asked from chat without naming an invoice).
+
+**Architecture decision (confirmed with the user, not assumed):** rather
+than build a whole separate email-sending + inbound-reply-capture pipeline,
+this reuses Lummus's own real infrastructure. Lummus's V2 dunning engine
+already sends via Microsoft Graph `/sendMail` with tracking headers
+(`X-Dunning-Case-Id` etc, `backend/app/dunning_v2/actions/
+internal_email_renderer.py`) and already has a Graph webhook that matches
+replies back to the case by those same headers/a hidden body footer
+(`backend/app/dunning_v2/inbound/detector.py`). `services/email_lineage.py`
+stamps the exact same format, verified against that source. This means:
+sending this app's follow-up emails through the same transport makes
+Lummus's *existing* inbound webhook catch replies automatically — no new
+inbound-capture mechanism needed here, and replies land in the same
+`GET /cases/{id}/timeline` this app already reads (Comments section, for
+free).
+
+- **`services/email_sender.py`** — `EmailSender` interface, same swappable
+  pattern as everything else blocked on a real credential
+  (`FakeEmailSender` records sends; `GraphEmailSender` needs a Graph app
+  registration with **Mail.Send** — a different scope than the SharePoint
+  credentials, which only cover Files.Read.All — unset everywhere
+  accessible, same as Azure OpenAI/Teams/Document Intelligence/Search).
+- **`services/followup_store.py`** — one active campaign per invoice;
+  first send happens immediately, then repeats every `cadence_days` until
+  cancelled or `end_date` passes. Send history lives here locally, *not*
+  on the real Lummus timeline: `POST /response-events` hardcodes its
+  resulting event to "Inbound reply received" regardless of
+  `source_channel`, so logging an *outbound* send through it would
+  mislabel it (verified against `backend/app/dunning_v2/reviews/
+  service.py`, not assumed). The web UI merges this local history into
+  the Activity view client-side instead.
+- **`services/followup_engine.py`** — `send_due_followups` (the sender
+  poller) and `mirror_new_replies_to_teams` (watches the real timeline for
+  new `reply_received` events on cases with an active campaign and posts
+  them into that project's Teams chat — reuses the existing project-chat
+  model from Phase 4, no new infrastructure).
+- **Teams entry points**: a third `Action.OpenUrl` button ("Follow up") on
+  the reminder card, and a chat-intent pattern ("follow up", "reach out",
+  "chase") alongside the existing snooze/comment detection in `bot.py`,
+  routed through the same project-invoice-picker redirect.
+- **Accept:** verified live against real UAT data — a real campaign
+  created via the web form, `send_due_followups` run manually against the
+  `FakeEmailSender` produced a correctly V2-lineage-stamped email and the
+  send appeared in the invoice's Activity feed; the Teams chat-intent path
+  produced the correct redirect card. Real send/receive round-trip is
+  blocked on the Graph Mail.Send credential, same as every other
+  credential-blocked integration this session.
+
 ### Phase 5 — Proactive engine (remaining watchers)
 Phase 4 already covers stage-triggered reminders (the main "sent reminders"
 ask). What's left here: PM hasn't replied N days after outreach; snooze

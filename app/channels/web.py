@@ -37,9 +37,15 @@ from app.documents.index import get_index
 from app.documents.ingest import chunk_pages, extract_native_text
 from app.documents.sources.manual_upload import ManualUploadSource
 from app.guardrails.magic_link import MagicLinkError, verify_magic_link_token
-from app.guardrails.policy import PolicyViolation
+from app.guardrails.policy import (
+    PolicyViolation,
+    check_future_or_today,
+    check_positive_int,
+    check_valid_email,
+)
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
+from app.services.followup_store import FollowUpError, FollowUpStore
 
 router = APIRouter(prefix="/api")
 
@@ -122,10 +128,8 @@ async def exchange_magic_link(body: MagicLinkExchangeRequest) -> MagicLinkExchan
     except MagicLinkError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
-    if payload.action == "snooze":
-        redirect = f"/invoices/{payload.invoice_id}?action=snooze"
-    elif payload.action == "comment":
-        redirect = f"/invoices/{payload.invoice_id}?action=comment"
+    if payload.action in ("snooze", "comment", "follow_up"):
+        redirect = f"/invoices/{payload.invoice_id}?action={payload.action}"
     else:  # pick_invoice
         redirect = f"/projects/{payload.project_number}/pick-invoice?action={payload.next_action}"
 
@@ -354,6 +358,68 @@ async def resume_invoice_endpoint(
     counterpart to /snooze. The UI toggles between the two based on
     invoice.active_pause_id (non-null while a pause is in effect)."""
     return await tool_resume_invoice(backend, invoice_id=invoice_id)
+
+
+# ---------------------------------------------------------------------------
+# Manual follow-up email campaigns (added 2026-07-16). "Follow up with the
+# customer" (Teams chat, or the web) sets up a real email sent via
+# followup_engine.py's poller -- see that module and services/followup_store.py
+# for the full design. One active campaign per invoice; the send history
+# lives locally (see followup_store.py's docstring for why it's not on the
+# real Lummus timeline) and is merged into the UI's Activity view.
+# ---------------------------------------------------------------------------
+
+
+class CreateFollowUpRequest(BaseModel):
+    customer_email: str
+    cadence_days: int
+    end_date: Optional[str] = None  # ISO date, optional -- omitted means "until cancelled"
+
+
+@router.get("/invoices/{invoice_id}/follow-up")
+async def get_follow_up_status(
+    invoice_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    store = FollowUpStore()
+    active = await store.get_active_for_case(invoice_id)
+    history = await store.list_send_history(invoice_id)
+    return {"active_campaign": active, "send_history": history}
+
+
+@router.post("/invoices/{invoice_id}/follow-up")
+async def create_follow_up(
+    invoice_id: str,
+    body: CreateFollowUpRequest,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    try:
+        check_valid_email(body.customer_email)
+        check_positive_int(body.cadence_days, "cadence_days")
+        check_future_or_today(body.end_date, "end_date")
+    except PolicyViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    store = FollowUpStore()
+    try:
+        campaign_id = await store.create(
+            invoice_id, body.customer_email, requested_by=_user, cadence_days=body.cadence_days, end_date=body.end_date
+        )
+    except FollowUpError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"campaign_id": campaign_id}
+
+
+@router.post("/invoices/{invoice_id}/follow-up/cancel")
+async def cancel_follow_up(
+    invoice_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    store = FollowUpStore()
+    cancelled = await store.cancel(invoice_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="No active follow-up campaign for this invoice.")
+    return {"ok": True}
 
 
 @router.get("/invoices/{invoice_id}/timeline")

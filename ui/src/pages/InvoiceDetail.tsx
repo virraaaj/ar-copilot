@@ -7,9 +7,13 @@ import {
   snoozeInvoice,
   resumeInvoice,
   getEscalationPolicy,
+  getFollowUpStatus,
+  createFollowUp,
+  cancelFollowUp,
   type Invoice,
   type TimelineEvent,
   type EscalationStage,
+  type FollowUpStatus,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 
@@ -29,6 +33,7 @@ const EVENT_LABELS: Record<string, string> = {
   reply_received: "Comment",
   stage_transition: "Stage change",
   case_created: "Case opened",
+  followup_sent: "Follow-up email",
 };
 
 function humanizeEventType(eventType: string | null): string {
@@ -158,6 +163,79 @@ function SnoozeModal({
   );
 }
 
+function FollowUpModal({
+  onClose,
+  onConfirm,
+  submitting,
+  error,
+}: {
+  onClose: () => void;
+  onConfirm: (email: string, cadenceDays: number, endDate: string) => void;
+  submitting: boolean;
+  error: string | null;
+}) {
+  const [email, setEmail] = useState("");
+  const [cadenceDays, setCadenceDays] = useState("3");
+  const [endDate, setEndDate] = useState("");
+  const cadence = parseInt(cadenceDays, 10);
+  const canSubmit = email.trim().length > 0 && Number.isFinite(cadence) && cadence >= 1;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 px-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Follow up with the customer</h2>
+        <p className="mt-1 text-[12px] text-zinc-400">
+          Sends a follow-up email now, then repeats on the schedule below until you cancel it or the end date passes.
+        </p>
+
+        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Customer email</label>
+        <input
+          autoFocus
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="customer@example.com"
+          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+        />
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Every how many days</label>
+        <input
+          type="number"
+          min={1}
+          value={cadenceDays}
+          onChange={(e) => setCadenceDays(e.target.value)}
+          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+        />
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Until (optional)</label>
+        <input
+          type="date"
+          value={endDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+        />
+        {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={() => onConfirm(email.trim(), cadence, endDate)}
+            disabled={submitting || !canSubmit}
+            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {submitting ? "Starting..." : "Start follow-ups"}
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function InvoiceDetail() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const [searchParams] = useSearchParams();
@@ -180,6 +258,11 @@ export default function InvoiceDetail() {
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [stages, setStages] = useState<EscalationStage[] | null>(null);
+  const [followUp, setFollowUp] = useState<FollowUpStatus | null>(null);
+  const [showFollowUpModal, setShowFollowUpModal] = useState(requestedAction === "follow_up");
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
+  const [cancellingFollowUp, setCancellingFollowUp] = useState(false);
   const commentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -215,6 +298,39 @@ export default function InvoiceDetail() {
   }
 
   useEffect(loadTimeline, [token, invoiceId]);
+
+  function loadFollowUp() {
+    if (!token || !invoiceId) return;
+    getFollowUpStatus(token, invoiceId).then(setFollowUp).catch(() => setFollowUp(null));
+  }
+
+  useEffect(loadFollowUp, [token, invoiceId]);
+
+  async function submitFollowUp(email: string, cadenceDays: number, endDate: string) {
+    if (!token || !invoiceId) return;
+    setFollowUpSubmitting(true);
+    setFollowUpError(null);
+    try {
+      await createFollowUp(token, invoiceId, { customer_email: email, cadence_days: cadenceDays, end_date: endDate || undefined });
+      setShowFollowUpModal(false);
+      loadFollowUp();
+    } catch (e) {
+      setFollowUpError(String(e));
+    } finally {
+      setFollowUpSubmitting(false);
+    }
+  }
+
+  async function handleCancelFollowUp() {
+    if (!token || !invoiceId) return;
+    setCancellingFollowUp(true);
+    try {
+      await cancelFollowUp(token, invoiceId);
+      loadFollowUp();
+    } finally {
+      setCancellingFollowUp(false);
+    }
+  }
 
   async function submitComment() {
     if (!token || !invoiceId || !commentText.trim()) return;
@@ -285,8 +401,23 @@ export default function InvoiceDetail() {
     );
 
   const comments = timeline.filter((e) => e.event_type === "reply_received");
-  const activity = timeline.filter((e) => e.event_type !== "reply_received");
+  // Follow-up sends are logged locally (see followup_store.py's docstring
+  // for why -- the real backend's response-events endpoint hardcodes its
+  // resulting timeline event to "Inbound reply received", so using it for
+  // an outbound send would mislabel it). Merged in here so Activity reads
+  // as one coherent timeline instead of two separate lists.
+  const followUpEvents: TimelineEvent[] = (followUp?.send_history ?? []).map((s) => ({
+    event_type: "followup_sent",
+    title: "Follow-up email sent",
+    summary: `Sent to ${s.to_email}`,
+    actor: null,
+    at: s.sent_at,
+  }));
+  const activity = [...timeline.filter((e) => e.event_type !== "reply_received"), ...followUpEvents].sort(
+    (a, b) => (b.at ?? "").localeCompare(a.at ?? "")
+  );
   const isSnoozed = !!invoice.active_pause_id;
+  const activeCampaign = followUp?.active_campaign ?? null;
 
   const fields: [string, string | number | null][] = [
     ["Case key", invoice.case_key],
@@ -326,6 +457,14 @@ export default function InvoiceDetail() {
                 Snooze
               </button>
             )}
+            {!activeCampaign && (
+              <button
+                onClick={() => setShowFollowUpModal(true)}
+                className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+              >
+                Follow up
+              </button>
+            )}
             <button
               onClick={askAboutThis}
               className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
@@ -348,6 +487,24 @@ export default function InvoiceDetail() {
           </div>
         )}
         {resumeError && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{resumeError}</p>}
+
+        {activeCampaign && (
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-3 py-2 text-[13px] text-blue-700">
+            <span>
+              Following up with {activeCampaign.customer_email} every {activeCampaign.cadence_days} day
+              {activeCampaign.cadence_days === 1 ? "" : "s"}
+              {activeCampaign.end_date ? ` until ${activeCampaign.end_date}` : ""}
+              {activeCampaign.send_count > 0 ? ` (${activeCampaign.send_count} sent)` : ""}
+            </span>
+            <button
+              onClick={handleCancelFollowUp}
+              disabled={cancellingFollowUp}
+              className="shrink-0 rounded-full border border-blue-200 px-3 py-1 text-[12px] font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-40"
+            >
+              {cancellingFollowUp ? "Cancelling..." : "Cancel"}
+            </button>
+          </div>
+        )}
       </div>
 
       {showSnoozeModal && (
@@ -356,6 +513,15 @@ export default function InvoiceDetail() {
           onConfirm={submitSnooze}
           submitting={snoozing}
           error={snoozeError}
+        />
+      )}
+
+      {showFollowUpModal && (
+        <FollowUpModal
+          onClose={() => setShowFollowUpModal(false)}
+          onConfirm={submitFollowUp}
+          submitting={followUpSubmitting}
+          error={followUpError}
         />
       )}
 

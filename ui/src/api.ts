@@ -195,6 +195,54 @@ export async function resumeInvoice(token: string, invoiceId: string): Promise<v
   await request(`/invoices/${encodeURIComponent(invoiceId)}/resume`, token, { method: "POST" });
 }
 
+// Manual follow-up email campaigns (added 2026-07-16) -- "follow up with
+// the customer" from Teams or the web. See app/services/followup_engine.py
+// for how sends actually go out and how replies get mirrored back into
+// the project's Teams chat.
+export interface FollowUpCampaign {
+  id: string;
+  case_id: string;
+  customer_email: string;
+  requested_by: string;
+  cadence_days: number;
+  end_date: string | null;
+  status: string;
+  created_at: string;
+  next_send_at: string;
+  last_sent_at: string | null;
+  send_count: number;
+}
+
+export interface FollowUpSendRecord {
+  sent_at: string;
+  to_email: string;
+}
+
+export interface FollowUpStatus {
+  active_campaign: FollowUpCampaign | null;
+  send_history: FollowUpSendRecord[];
+}
+
+export async function getFollowUpStatus(token: string, invoiceId: string): Promise<FollowUpStatus> {
+  return request(`/invoices/${encodeURIComponent(invoiceId)}/follow-up`, token);
+}
+
+export async function createFollowUp(
+  token: string,
+  invoiceId: string,
+  body: { customer_email: string; cadence_days: number; end_date?: string }
+): Promise<{ campaign_id: string }> {
+  return request(`/invoices/${encodeURIComponent(invoiceId)}/follow-up`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function cancelFollowUp(token: string, invoiceId: string): Promise<void> {
+  await request(`/invoices/${encodeURIComponent(invoiceId)}/follow-up/cancel`, token, { method: "POST" });
+}
+
 export async function listBusinessUnits(token: string): Promise<BusinessUnit[]> {
   return request("/business-units", token);
 }
