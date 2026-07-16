@@ -57,6 +57,16 @@ class LoginResponse(BaseModel):
 @router.post("/auth/login", response_model=LoginResponse)
 async def login(body: LoginRequest) -> LoginResponse:
     s = get_settings()
+
+    # TEMPORARY domain gate (see config.py) -- checked before touching the
+    # backend at all, so a non-corehelix.ai email never even attempts a real
+    # login. Case-insensitive; a bare "@domain" match, not a substring check
+    # (so "corehelix.ai.evil.com" doesn't slip through).
+    if s.ALLOWED_EMAIL_DOMAIN:
+        domain = body.email.rsplit("@", 1)[-1].lower() if "@" in body.email else ""
+        if domain != s.ALLOWED_EMAIL_DOMAIN.lower():
+            raise HTTPException(status_code=403, detail=f"Only @{s.ALLOWED_EMAIL_DOMAIN} accounts can sign in right now.")
+
     client = BackendClient(s.BACKEND_API_URL, body.email, body.password)
     try:
         await client.verify_login()

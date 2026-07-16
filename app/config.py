@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # is empty.
     ADMIN_UPNS: str = "viraj.yadav@corehelix.ai"
 
+    # TEMPORARY (2026-07-16): only this email domain can log in at all. This
+    # is a blunt, stand-in gate -- not the real access-control model (that's
+    # ADMIN_UPNS / the guardrails identity.py work in PLAN.md §6). Set to ""
+    # to remove the restriction entirely once something better replaces it.
+    ALLOWED_EMAIL_DOMAIN: str = "corehelix.ai"
+
     # ---- Bot Framework / Teams (Phase 4) ----
     MICROSOFT_APP_ID: str = ""
     MICROSOFT_APP_PASSWORD: str = ""

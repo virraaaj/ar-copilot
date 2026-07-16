@@ -32,6 +32,10 @@ def client(tmp_path, monkeypatch) -> TestClient:
     # verify arbitrary submitted credentials, not just use the shared
     # service account) -- point it at the same mocked base URL as BASE.
     monkeypatch.setenv("BACKEND_API_URL", BASE)
+    # Disabled here so the other tests (which use @example.com) aren't
+    # coupled to the temporary domain gate -- see test_login_domain_gate
+    # below for that feature's own tests.
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAIN", "")
     import app.config as config_module
     monkeypatch.setattr(config_module, "_settings", config_module.Settings())
 
@@ -73,6 +77,56 @@ def test_login_failure_returns_401(client: TestClient) -> None:
     resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "wrong"})
 
     assert resp.status_code == 401
+
+
+@respx.mock
+def test_login_rejects_non_allowed_domain(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAIN", "corehelix.ai")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+
+    assert resp.status_code == 403
+    assert "corehelix.ai" in resp.json()["detail"]
+
+
+@respx.mock
+def test_login_rejects_lookalike_domain_suffix(client: TestClient, monkeypatch) -> None:
+    """'corehelix.ai.evil.com' must not slip through a naive .endswith() check."""
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAIN", "corehelix.ai")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    resp = client.post("/api/auth/login", json={"email": "user@corehelix.ai.evil.com", "password": "pw"})
+
+    assert resp.status_code == 403
+
+
+@respx.mock
+def test_login_accepts_allowed_domain_case_insensitive(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAIN", "corehelix.ai")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+
+    resp = client.post("/api/auth/login", json={"email": "User@CoreHelix.AI", "password": "pw"})
+
+    assert resp.status_code == 200
+
+
+@respx.mock
+def test_login_domain_gate_checked_before_backend_call(client: TestClient, monkeypatch) -> None:
+    """A rejected domain shouldn't even attempt a real backend login."""
+    monkeypatch.setenv("ALLOWED_EMAIL_DOMAIN", "corehelix.ai")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+    # No respx route registered for /api/v1/auth/login at all -- if the
+    # handler tried to call the backend, respx would raise AllMockedAssertionError.
+
+    resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+
+    assert resp.status_code == 403
 
 
 @respx.mock
