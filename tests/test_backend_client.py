@@ -120,3 +120,26 @@ async def test_update_stage_rule_patches_by_id(client: BackendClient) -> None:
     assert result["transition_rule_json"]["max_days_in_stage"] == 10
     assert route.called
     await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_log_response_event_uses_real_schema_field_names(client: BackendClient) -> None:
+    """Regression test: ResponseEventCreate (backend/app/dunning_v2/api/
+    schemas.py) has no response_category or raw_text field -- an earlier
+    version of this method sent those, and FastAPI/Pydantic silently drops
+    unrecognized fields rather than rejecting the request, so the comment
+    text was lost without any error ever surfacing. Confirmed live against
+    the real UAT backend this session."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    route = respx.post(f"{BASE}/api/v2/dunning/response-events").mock(
+        return_value=httpx.Response(200, json={"response_event_id": "re-1", "review_task_id": "rt-1", "case_id": "case-1"})
+    )
+
+    await client.log_response_event("case-1", raw_excerpt="Paying next week", source_channel="manual_only")
+
+    sent_body = route.calls.last.request.content
+    assert b"raw_excerpt" in sent_body
+    assert b"response_category" not in sent_body
+    assert b"raw_text" not in sent_body
+    await client.close()

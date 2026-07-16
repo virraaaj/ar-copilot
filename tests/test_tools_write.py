@@ -1,6 +1,8 @@
 """Phase 3 tests: write tools + policy enforcement, against a respx-mocked backend."""
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -89,8 +91,30 @@ async def test_add_comment(client: BackendClient) -> None:
     result = await add_comment(client, "case-1", comment="Customer confirmed payment next week", source_channel="teams")
 
     assert result["action"] == "commented"
-    sent_body = comment_route.calls.last.request.content
-    assert b"teams" in sent_body
+    sent_body = json.loads(comment_route.calls.last.request.content)
+    # Regression: must use the real ResponseEventCreate field names
+    # (raw_excerpt), not the old raw_text/response_category, which the real
+    # backend silently ignores rather than rejecting -- confirmed live
+    # against the UAT backend this session, not just here.
+    assert sent_body == {"case_id": "case-1", "source_channel": "teams", "raw_excerpt": "Customer confirmed payment next week"}
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_add_comment_defaults_to_manual_only_not_invalid_ar_copilot(client: BackendClient) -> None:
+    """The old default source_channel="ar_copilot" isn't a valid StageChannel
+    value on the real backend (email/voice_call/sms/manual_only/teams) --
+    would have hard-failed with a 422 the moment anything used the default."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    await add_comment(client, "case-1", comment="no explicit channel given")
+
+    # add_comment's own default parameter, not a network assertion -- the
+    # important thing is it's a real StageChannel value.
+    import inspect
+    assert inspect.signature(add_comment).parameters["source_channel"].default == "manual_only"
     await client.close()
 
 

@@ -173,19 +173,34 @@ class BackendClient:
     async def log_response_event(
         self,
         case_id: str,
-        response_category: str,
-        raw_text: str,
-        source_channel: str = "ar_copilot",
-        promised_date: Optional[str] = None,
+        raw_excerpt: str,
+        source_channel: str = "manual_only",
+        invoice_id: Optional[str] = None,
+        suggested_category: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """POSTs to /api/v2/dunning/response-events. Field names and the
+        source_channel enum (email/voice_call/sms/manual_only/teams) are
+        matched exactly against ResponseEventCreate (backend/app/dunning_v2/
+        api/schemas.py) and StageChannel (backend/app/dunning_v2/enums.py) --
+        verified against source, not assumed. An earlier version of this
+        method sent response_category/raw_text (neither field exists on the
+        real schema) and defaulted source_channel to the invalid value
+        "ar_copilot" -- FastAPI/Pydantic silently drops unrecognized fields
+        rather than erroring, so every comment logged through it had its
+        text silently discarded, and the invalid default channel would have
+        hard-failed with a 422 the moment anything relied on it doing so.
+        `record_response()` (backend/app/dunning_v2/reviews/service.py) always
+        emits a REPLY_RECEIVED timeline event, so a correctly-logged comment
+        here does show up via get_case_timeline()."""
         body: Dict[str, Any] = {
             "case_id": case_id,
-            "response_category": response_category,
             "source_channel": source_channel,
-            "raw_text": raw_text,
+            "raw_excerpt": raw_excerpt,
         }
-        if promised_date:
-            body["promised_date"] = promised_date
+        if invoice_id:
+            body["invoice_id"] = invoice_id
+        if suggested_category:
+            body["suggested_category"] = suggested_category
         resp = await self._request("POST", "/api/v2/dunning/response-events", json=body)
         return self._ok_or_raise(resp, "Log response")
 

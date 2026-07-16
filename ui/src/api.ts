@@ -60,6 +60,14 @@ export interface PinnedInvoice {
   label: string;
 }
 
+export interface TimelineEvent {
+  event_type: string | null;
+  title: string | null;
+  summary: string | null;
+  actor: string | null;
+  at: string | null;
+}
+
 export type ChatEvent =
   | { type: "tool_call"; name: string; permitted: boolean }
   | { type: "answer"; content: string; truncated: boolean };
@@ -123,6 +131,18 @@ export async function updateEscalationStage(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(update),
+  });
+}
+
+export async function getInvoiceTimeline(token: string, invoiceId: string): Promise<TimelineEvent[]> {
+  return request(`/invoices/${encodeURIComponent(invoiceId)}/timeline`, token);
+}
+
+export async function addComment(token: string, invoiceId: string, comment: string): Promise<void> {
+  await request(`/invoices/${encodeURIComponent(invoiceId)}/comments`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
   });
 }
 

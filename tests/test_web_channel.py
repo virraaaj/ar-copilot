@@ -165,6 +165,71 @@ def test_invoices_endpoint_with_valid_session(client: TestClient) -> None:
 
 
 @respx.mock
+def test_get_invoice_timeline(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1/timeline").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [{"event_type": "reply_received", "event_title": "Inbound reply received", "event_summary": "Paying Friday"}]},
+        )
+    )
+
+    resp = client.get("/api/invoices/case-1/timeline", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["summary"] == "Paying Friday"
+
+
+@respx.mock
+def test_add_comment_endpoint_uses_correct_backend_field_names(client: TestClient) -> None:
+    """Regression test for the real bug found this session: an earlier
+    version of log_response_event sent response_category/raw_text, neither
+    of which exist on the real ResponseEventCreate schema, so the comment
+    text was silently dropped. This asserts the actual outgoing request body
+    uses the real field names (raw_excerpt, source_channel="manual_only")."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    comment_route = respx.post(f"{BASE}/api/v2/dunning/response-events").mock(
+        return_value=httpx.Response(200, json={"response_event_id": "re-1", "review_task_id": "rt-1", "case_id": "case-1"})
+    )
+
+    resp = client.post(
+        "/api/invoices/case-1/comments",
+        json={"comment": "Customer confirmed payment Friday"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    sent_body = json.loads(comment_route.calls.last.request.content)
+    assert sent_body["raw_excerpt"] == "Customer confirmed payment Friday"
+    assert sent_body["source_channel"] == "manual_only"
+    assert "response_category" not in sent_body
+    assert "raw_text" not in sent_body
+
+
+@respx.mock
+def test_add_comment_endpoint_rejects_empty_comment(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    comment_route = respx.post(f"{BASE}/api/v2/dunning/response-events")
+
+    resp = client.post(
+        "/api/invoices/case-1/comments",
+        json={"comment": "   "},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+    assert not comment_route.called
+
+
+@respx.mock
 def test_get_escalation_policy_composes_stages_and_rules(client: TestClient) -> None:
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})

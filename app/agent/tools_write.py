@@ -40,13 +40,14 @@ async def add_comment(
     client: BackendClient,
     invoice_id: str,
     comment: str,
-    source_channel: str = "ar_copilot",
+    source_channel: str = "manual_only",
 ) -> Dict[str, Any]:
-    """Log a comment against an invoice."""
+    """Log a comment against an invoice. source_channel must be one of the
+    backend's real StageChannel values (email/voice_call/sms/manual_only/
+    teams) -- "manual_only" is the fit for a comment entered through the web
+    UI or agent chat; the Teams channel (bot.py) passes "teams" explicitly."""
     check_nonempty_text(comment, "comment")
-    result = await client.log_response_event(
-        invoice_id, response_category="comment", raw_text=comment, source_channel=source_channel
-    )
+    result = await client.log_response_event(invoice_id, raw_excerpt=comment, source_channel=source_channel)
     return {"invoice_id": invoice_id, "action": "commented", "comment": comment, "result": result}
 
 

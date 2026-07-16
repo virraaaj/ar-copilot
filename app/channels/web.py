@@ -27,11 +27,14 @@ from app.agent.tools_documents import list_recent_documents as tool_list_recent_
 from app.agent.tools_documents import search_documents as tool_search_documents
 from app.agent.tools_read import aging_summary as tool_aging_summary
 from app.agent.tools_read import get_invoice as tool_get_invoice
+from app.agent.tools_read import get_timeline as tool_get_timeline
 from app.agent.tools_read import list_invoices as tool_list_invoices
+from app.agent.tools_write import add_comment as tool_add_comment
 from app.config import get_settings
 from app.documents.index import get_index
 from app.documents.ingest import chunk_pages, extract_native_text
 from app.documents.sources.manual_upload import ManualUploadSource
+from app.guardrails.policy import PolicyViolation
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
 
@@ -127,6 +130,43 @@ async def aging_summary_endpoint(
     backend: BackendClient = Depends(get_backend_client),
 ) -> Dict[str, Any]:
     return await tool_aging_summary(backend, business_unit_id=business_unit_id)
+
+
+# ---------------------------------------------------------------------------
+# Invoice timeline + comments (added 2026-07-16). Channel-agnostic by
+# construction: a comment logged here (source_channel="manual_only") and one
+# logged from Teams (source_channel="teams", see channels/teams/bot.py) both
+# land as reply_received events on the same backend timeline -- verified
+# live against the real UAT backend, not assumed. This endpoint is just a
+# window onto that same timeline; there is no separate "web comments" store.
+# ---------------------------------------------------------------------------
+
+
+class AddCommentRequest(BaseModel):
+    comment: str
+
+
+@router.get("/invoices/{invoice_id}/timeline")
+async def get_invoice_timeline_endpoint(
+    invoice_id: str,
+    limit: int = 25,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    return await tool_get_timeline(backend, invoice_id=invoice_id, limit=limit)
+
+
+@router.post("/invoices/{invoice_id}/comments")
+async def add_comment_endpoint(
+    invoice_id: str,
+    body: AddCommentRequest,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    try:
+        return await tool_add_comment(backend, invoice_id=invoice_id, comment=body.comment, source_channel="manual_only")
+    except PolicyViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
