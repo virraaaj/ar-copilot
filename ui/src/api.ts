@@ -366,6 +366,11 @@ export async function uploadDocument(token: string, file: File, docType?: string
   return resp.json();
 }
 
+export interface ChatHistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 // SSE isn't easily done via fetch()'s streaming body in a cross-browser-safe
 // way with auth headers (EventSource doesn't support custom headers at all),
 // so this reads the streamed body directly and parses `data: ` lines as they
@@ -373,12 +378,13 @@ export async function uploadDocument(token: string, file: File, docType?: string
 export async function* streamChat(
   token: string,
   message: string,
-  pinnedInvoice?: PinnedInvoice
+  pinnedInvoice?: PinnedInvoice,
+  history?: ChatHistoryMessage[]
 ): AsyncGenerator<ChatEvent> {
   const resp = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ message, pinned_invoice: pinnedInvoice }),
+    body: JSON.stringify({ message, pinned_invoice: pinnedInvoice, history }),
   });
   if (!resp.ok || !resp.body) {
     const body = await resp.json().catch(() => ({}));

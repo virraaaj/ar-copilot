@@ -87,6 +87,42 @@ async def test_pause_case_posts_reason(client: BackendClient) -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_pause_case_normalizes_bare_date_to_datetime(client: BackendClient) -> None:
+    """Regression test for a real bug found live: the web form's
+    <input type="date"> (and the agent tool schema, which says "ISO date")
+    only ever produce a bare YYYY-MM-DD, but the real backend's Pydantic
+    schema for ends_at requires a full datetime and 422s on a bare date
+    ("invalid datetime separator, expected `T`..."). Every snooze with a
+    resume date was broken until this was fixed."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    pause_route = respx.post(f"{BASE}/api/v2/dunning/cases/case-1/pause").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    await client.pause_case("case-1", reason="dispute", ends_at="2026-08-01")
+
+    sent_body = json.loads(pause_route.calls.last.request.content)
+    assert sent_body["ends_at"] == "2026-08-01T00:00:00"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_pause_case_leaves_a_full_datetime_untouched(client: BackendClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    pause_route = respx.post(f"{BASE}/api/v2/dunning/cases/case-1/pause").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    await client.pause_case("case-1", reason="dispute", ends_at="2026-08-01T09:30:00")
+
+    sent_body = json.loads(pause_route.calls.last.request.content)
+    assert sent_body["ends_at"] == "2026-08-01T09:30:00"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_add_project_contact_rejects_bad_type(client: BackendClient) -> None:
     # Validation happens before any HTTP call, so no routes are mocked/expected.
     with pytest.raises(BackendError, match="contact_type must be one of"):

@@ -36,6 +36,7 @@ from app.config import get_settings
 from app.documents.index import get_index
 from app.documents.ingest import chunk_pages, extract_native_text
 from app.documents.sources.manual_upload import ManualUploadSource
+from app.guardrails.identity import resolve_role
 from app.guardrails.magic_link import MagicLinkError, verify_magic_link_token
 from app.guardrails.policy import (
     PolicyViolation,
@@ -657,7 +658,7 @@ async def chat(
         # the final answer -- real progress updates, just not token-by-token
         # (that needs streaming support in AzureOpenAIService.chat() itself,
         # not yet built -- there's no live model to stream from yet anyway).
-        result = await loop.run(body.message, role="viewer", history=history, on_tool_call=collect_tool_call)
+        result = await loop.run(body.message, role=resolve_role(_user), history=history, on_tool_call=collect_tool_call)
         for e in events:
             yield e
         yield _sse_event("answer", {"content": result.answer, "truncated": result.truncated})

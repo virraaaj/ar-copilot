@@ -1,12 +1,16 @@
 """
 Identity → role resolution (PLAN.md §6.1). Roles: `admin` (everything),
-`pm` (read tools + snooze/resume/comment), `viewer` (read-only).
+`pm` (read tools + snooze/resume/comment/start_follow_up), `viewer`
+(read-only).
 
-Teams users default to `pm` (not `viewer`) — the whole point of Phase 4 is
-letting a PM act on their own invoices from chat/cards, so a Teams identity
-that isn't in ADMIN_UPNS still needs write access to exactly those three
-tools. The web channel (Phase 2) still defaults to `viewer` for its shared
-single-login session — that's a separate call site, unaffected by this.
+Both Teams and the web chat default to `pm`, not `viewer` (changed
+2026-07-16 for the web side -- see channels/web.py's /chat endpoint):
+anyone who reached chat already authenticated with a real Lummus login
+(or a Teams identity), and the whole point of write tools existing is
+letting that person act on invoices conversationally, not just via the
+dedicated web forms. `viewer` still exists for contexts where read-only
+is the right default (none currently call resolve_role with it, but the
+role and the registry-level enforcement both stay in place).
 """
 from __future__ import annotations
 

@@ -900,6 +900,104 @@ def test_chat_streams_tool_call_then_answer(client: TestClient) -> None:
 
 
 @respx.mock
+def test_chat_can_execute_a_write_tool(client: TestClient) -> None:
+    """Regression test for a real gap found live: web chat used to hardcode
+    role="viewer", so add_comment/snooze_invoice/etc were never in the
+    model's tool list no matter who was logged in -- every write request
+    silently had nothing to call. Now any logged-in user resolves to at
+    least "pm" (see guardrails/identity.py), matching Teams."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    comment_route = respx.post(f"{BASE}/api/v2/dunning/response-events").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    def make_tool_call(call_id, name, arguments):
+        return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(arguments)))
+
+    def make_message(content=None, tool_calls=None):
+        return SimpleNamespace(content=content, tool_calls=tool_calls)
+
+    class ScriptedLLM:
+        def __init__(self, responses):
+            self._responses = list(responses)
+
+        async def chat(self, messages, tools=None, tool_choice="auto"):
+            return self._responses.pop(0)
+
+    scripted = ScriptedLLM(
+        [
+            make_message(tool_calls=[make_tool_call("t1", "add_comment", {"invoice_id": "case-1", "comment": "Paying next week"})]),
+            make_message(content="Done -- I've logged that comment."),
+        ]
+    )
+    import app.channels.web as web_module
+
+    original_get_llm = web_module.get_llm
+    web_module.get_llm = lambda: scripted
+    try:
+        resp = client.post(
+            "/api/chat",
+            json={"message": "add a comment saying they're paying next week"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        web_module.get_llm = original_get_llm
+
+    events = [json.loads(line[len("data: "):]) for line in resp.text.splitlines() if line.startswith("data: ")]
+    assert events[0] == {"type": "tool_call", "name": "add_comment", "permitted": True}
+    assert comment_route.called
+
+
+@respx.mock
+def test_chat_threads_conversation_history_to_the_model(client: TestClient) -> None:
+    """Regression test: the frontend now sends prior turns as `history` so
+    a follow-up message ("paying next week") can be understood in the
+    context of an earlier question ("what would you like the comment to
+    say?") -- verifies the server actually forwards that history into the
+    messages the model sees, not just accepts and drops it."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    captured = {}
+
+    def make_message(content=None, tool_calls=None):
+        return SimpleNamespace(content=content, tool_calls=tool_calls)
+
+    class CapturingLLM:
+        async def chat(self, messages, tools=None, tool_choice="auto"):
+            captured["messages"] = messages
+            return make_message(content="ok")
+
+    import app.channels.web as web_module
+
+    original_get_llm = web_module.get_llm
+    web_module.get_llm = lambda: CapturingLLM()
+    try:
+        client.post(
+            "/api/chat",
+            json={
+                "message": "paying next week",
+                "history": [
+                    {"role": "user", "content": "I want to add a comment"},
+                    {"role": "assistant", "content": "Sure -- what would you like the comment to say?"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        web_module.get_llm = original_get_llm
+
+    joined = json.dumps(captured["messages"])
+    assert "I want to add a comment" in joined
+    assert "what would you like the comment to say" in joined
+    assert "paying next week" in joined
+
+
+@respx.mock
 def test_chat_with_pinned_invoice_includes_id_in_history_not_response(client: TestClient) -> None:
     """The raw invoice_id must reach the model (via history) but the
     endpoint's own response shape never needs to surface it beyond what the

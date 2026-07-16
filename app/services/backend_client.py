@@ -151,7 +151,13 @@ class BackendClient:
     async def pause_case(self, case_id: str, reason: str, ends_at: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {"reason": reason}
         if ends_at:
-            body["ends_at"] = ends_at
+            # The web form's <input type="date"> (and the agent, which was
+            # told "ISO date") only ever produce a bare YYYY-MM-DD, but the
+            # real backend's Pydantic schema requires a full ISO datetime --
+            # confirmed live: a bare date 422s with "invalid datetime
+            # separator, expected `T`...". Normalize to midnight on that
+            # date rather than push this backend quirk onto every caller.
+            body["ends_at"] = ends_at if "T" in ends_at else f"{ends_at}T00:00:00"
         resp = await self._request("POST", f"/api/v2/dunning/cases/{case_id}/pause", json=body)
         return self._ok_or_raise(resp, "Snooze invoice")
 

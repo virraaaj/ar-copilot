@@ -1,5 +1,5 @@
 import { useState, useRef, type FormEvent } from "react";
-import { streamChat, ApiError } from "../api";
+import { streamChat, ApiError, type ChatHistoryMessage } from "../api";
 import { useSession } from "../context/SessionContext";
 
 interface DisplayMessage {
@@ -49,12 +49,20 @@ export default function Chat() {
 
   async function sendQuestion(question: string) {
     if (!token || sending) return;
+    // Prior turns only (this question isn't in `messages` yet) -- lets the
+    // agent understand a reply like "paying next week" in the context of
+    // its own preceding question ("what would you like the comment to
+    // say?") instead of treating every message as a fresh conversation.
+    const priorHistory: ChatHistoryMessage[] = messages
+      .filter((m): m is DisplayMessage & { role: "user" | "assistant" } => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, content: m.content }));
+
     setInput("");
     setMessages((m) => [...m, { role: "user", content: question }, { role: "progress", content: "Thinking" }]);
     setSending(true);
 
     try {
-      for await (const event of streamChat(token, question, pinnedInvoice ?? undefined)) {
+      for await (const event of streamChat(token, question, pinnedInvoice ?? undefined, priorHistory)) {
         if (event.type === "tool_call") {
           // Replace the standing "Thinking" bubble with what it's actually
           // doing, rather than stacking a new bubble on top of it.

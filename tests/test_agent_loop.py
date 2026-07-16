@@ -189,3 +189,57 @@ async def test_on_tool_call_hook_fires_for_each_call(backend: BackendClient) -> 
     assert seen == ["list_invoices"]
     assert result.answer == "done"
     await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_multi_turn_slot_filling_completes_a_write_action(backend: BackendClient) -> None:
+    """End-to-end regression test for a real gap found live: the web chat
+    never actually threaded conversation history between HTTP requests, so
+    a clarifying question ("what would you like the comment to say?")
+    followed by the user's answer arrived as two unrelated conversations --
+    the second call had no idea what "paying next week" was replying to.
+    Verified live against the real UAT backend during this session; this
+    is the same flow with a mocked backend so it runs in CI.
+
+    Turn 1: the model has enough to know it needs a comment tool but is
+    missing the comment text, so it asks instead of calling the tool.
+    Turn 2: the prior turn is threaded in via `history`; the model now has
+    everything and calls add_comment for real."""
+    _mock_login()
+    comment_route = respx.post(f"{BASE}/api/v2/dunning/response-events").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    registry = build_registry()
+
+    llm_turn1 = ScriptedLLM([make_message(content="Sure -- what would you like the comment to say?")])
+    loop_turn1 = AgentLoop(llm=llm_turn1, registry=registry, backend_client=backend)
+    result1 = await loop_turn1.run("I want to add a comment on case-1", role="pm")
+
+    assert result1.tool_calls == []  # nothing was called yet -- info was missing
+    assert "what would you like" in result1.answer.lower()
+
+    history = [
+        {"role": "user", "content": "I want to add a comment on case-1"},
+        {"role": "assistant", "content": result1.answer},
+    ]
+    llm_turn2 = ScriptedLLM(
+        [
+            make_message(tool_calls=[make_tool_call("t1", "add_comment", {"invoice_id": "case-1", "comment": "paying next week"})]),
+            make_message(content="Done -- I've logged that comment."),
+        ]
+    )
+    loop_turn2 = AgentLoop(llm=llm_turn2, registry=registry, backend_client=backend)
+    result2 = await loop_turn2.run("paying next week", role="pm", history=history)
+
+    assert result2.tool_calls[0].name == "add_comment"
+    assert result2.tool_calls[0].permitted is True
+    assert comment_route.called
+    sent_body = json.loads(comment_route.calls.last.request.content)
+    assert sent_body["raw_excerpt"] == "paying next week"
+    # The second model call must have actually seen the first turn.
+    second_call_messages = llm_turn2.calls[0]["messages"]
+    joined = json.dumps(second_call_messages)
+    assert "I want to add a comment on case-1" in joined
+    assert "what would you like the comment to say" in joined.lower()
+    await backend.close()
