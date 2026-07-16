@@ -270,44 +270,85 @@ Three pages, deliberately small (a 4th, Documents, is added in Phase 1B):
   invoice without the user ever seeing/typing its raw ID.
 
 ### Phase 3 — Write actions with confirm-before-execute
-- Write tools: `snooze_invoice`, `resume_invoice`, `close_invoice`,
-  `add_comment`, `update_project_contact`, `trigger_outreach`.
+- Write tools: `snooze_invoice`, `resume_invoice`, `add_comment`. (`close_invoice`,
+  `update_project_contact`, `trigger_outreach` deferred — not needed for the
+  Teams reach-out work below; add if/when something actually calls for them.)
 - Two-step protocol: agent proposes → returns a structured confirmation
   (action, target, params, consequence) → user confirms in UI/chat → only then
-  execute. Never execute a write in the same turn it was proposed.
+  execute. Never execute a write in the same turn it was proposed. On a card
+  (Phase 4), the card *is* the proposal and submitting its form *is* the
+  confirmation — no extra double-confirm turn on top of that.
 - Every executed write goes to the audit log (who, what, when, tool args,
   backend response).
-- Rules engine in `policy.py`: e.g. snooze on Pre-Due → refuse with the reason;
-  close requires a reason string; contact edits echo the before/after.
+- Rules engine in `policy.py`: snooze on Pre-Due → refuse with the reason;
+  every write requires a reason string; new `pm` role (§6) gets exactly these
+  three write tools, nothing else.
 - **Accept:** "snooze INV-X for 2 weeks, dispute" round-trips with confirmation;
   audit row exists; refusals tested for each policy rule.
 
-### Phase 4 — Teams channel adapter
-- Bot Framework messaging endpoint reusing `lummus-teams-bot`'s app
-  registration pattern (`appPackage/`, `deploy/azure-deploy.md` there document
-  the setup — follow them rather than re-deriving).
-- Adaptive Cards for confirmations (Confirm/Cancel buttons) and invoice
-  summaries; plain markdown for answers.
-- **Invoice disambiguation cards:** when the agent needs to disambiguate
-  between multiple invoices (per Phase 1's resolution rule), it renders an
-  Adaptive Card with one tappable option per match, labeled with
-  customer/amount/due date only. Each option's `Action.Submit` carries the
-  invoice ID as hidden card data — tapping it continues the conversation with
-  that invoice already resolved, no typing required.
-- Same guardrails: Teams AAD identity → `identity.py` → role.
-- **Accept:** the Phase 1/3 test conversations work in a real Teams 1:1 chat.
-  A query that matches multiple invoices produces a disambiguation card, and
-  tapping an option correctly resolves to that invoice without the user typing
-  an ID.
+### Phase 4 — Teams: proactive reach-out + conversational AI in the same chat
 
-### Phase 5 — Proactive engine
-- `watchers.py` polling loop (start simple; no queues): detects — new invoice
-  entered Escalation/Final; PM hasn't replied N days after outreach; snooze
-  expiring in 48h; review task idle > N days.
-- Each finding → a proactive Teams message (or web notification) with a dedupe
-  key in SQLite (one nudge per finding, ever, unless state regresses).
-- **Accept:** seed a scenario in the UAT stack, watcher fires exactly once,
-  visible in audit log.
+⚠️ Reprioritized 2026-07-16 (was going to follow Phase 5): bring over the
+in-Teams reach-out UX from the earlier bot work — reminder cards asking for a
+comment or a snooze, the same way stage-triggered notifications used to work
+— *and* let the user have the same AI-reasoning conversation (Phase 1's agent
+core, unmodified) in that identical chat. One Teams surface, two entry
+points: cards for the structured ask, free text for anything else.
+
+**Credential reality (checked, not assumed):** the in-app bot's own
+registration (`TEAMS_BOT_APP_ID`) and `MICROSOFT_APP_PASSWORD` are both
+unset everywhere accessible — same blocker as Azure OpenAI. Built against a
+`TeamsMessenger` interface (mirrors `DocumentSource`/`DocumentIndex`'s
+pattern): a `FakeMessenger` records what would have been sent so everything
+below is fully testable today; a real Bot-Framework-backed implementation
+drops in once the credential exists, with no call-site changes.
+
+- **Adaptive Cards** (`app/channels/teams/cards.py`), copy and fields mirror
+  the proven cards from the earlier bot (verified against real screenshots
+  this session, not reinvented):
+  - Reminder card: stage banner, Invoice details (invoice/amount/aging), due
+    date, "Action needed" callout, Snooze + Add comment buttons.
+  - Snooze form card: Reason, Resume-on date, Confirm.
+  - Comment form card: Comment text, optional Expected-payment date, Save.
+  - Confirmation cards for both, echoing what was recorded.
+  - Invoice disambiguation card (from Phase 1's resolution rule): one
+    tappable option per match, human-readable label only, invoice_id riding
+    as hidden `Action.Submit` data.
+- **Free-form AI chat**: any plain-text message in the same conversation
+  routes straight through the *existing, unmodified* `AgentLoop` — same
+  tools, same guardrails, same invoice-ID-free resolution as the web Chat
+  page. Nothing Teams-specific about the reasoning; the adapter's only job is
+  translating Activity in/out and rendering the answer as text or (for
+  results with 2+ invoices) a disambiguation card.
+- **Identity → role**: Teams AAD id resolves to `pm` (default) or `admin`
+  (via `ADMIN_UPNS`) through `identity.py` — a PM can snooze/comment on
+  invoices via cards or chat; only an admin gets the rest of Phase 1's tools.
+- **Proactive send** (`app/channels/teams/proactive.py`, pulled forward from
+  Phase 5 since it's the actual point of "sent reminders" — this doesn't
+  need the rest of Phase 5's watchers, just this one path): a poller checks
+  cases entering outreach stages (reminder/first/second/escalation/final),
+  resolves the PM's stored Teams conversation reference
+  (`conversation_store.py`, SQLite — mirrors the earlier bot's store; a PM
+  must have messaged the bot once, or been installed org-wide, before a DM
+  is possible — a real Teams platform constraint, not a bug), and sends the
+  reminder card. Dedup key = (case_id, stage) so a nudge fires once, ever,
+  per stage.
+- **Accept:** with `FakeMessenger`, a seeded case reaching `first_notice`
+  produces exactly one reminder-card send; tapping its Snooze button (via a
+  simulated Adaptive Card submit Activity) round-trips through
+  `snooze_invoice` and produces a confirmation card; a plain-text question in
+  the same fake conversation gets routed through `AgentLoop` and produces a
+  real, tool-grounded answer. Re-run against a real Bot Framework connection
+  once `TEAMS_BOT_APP_ID`/`MICROSOFT_APP_PASSWORD` exist — no code changes
+  expected, per the interface split above.
+
+### Phase 5 — Proactive engine (remaining watchers)
+Phase 4 already covers stage-triggered reminders (the main "sent reminders"
+ask). What's left here: PM hasn't replied N days after outreach; snooze
+expiring in 48h; review task idle > N days. Same dedup/audit pattern as
+Phase 4's poller — this phase is now small.
+- **Accept:** seed each remaining scenario in the UAT stack, watcher fires
+  exactly once per scenario, visible in audit log.
 
 ### Phase 6 — Meeting-join spike (timeboxed: 2 days, then stop and write up)
 ⚠️ Different tech entirely (Graph Cloud Communications / ACS meeting join).
@@ -323,8 +364,10 @@ recommendation. Do not build product code in this phase.
 
 1. **Identity & roles** — allowlist in SQLite, editable at runtime by admins
    (pattern from `lummus-teams-bot/services/admin_store.py`). Roles: `admin`
-   (everything), `viewer` (read-only tools). Default admin:
-   `viraj.yadav@corehelix.ai`. Unknown user → polite refusal, logged.
+   (everything), `pm` (Phase 4: read tools + exactly `snooze_invoice`/
+   `resume_invoice`/`add_comment`, nothing else), `viewer` (read-only tools).
+   Default admin: `viraj.yadav@corehelix.ai`. Unknown user → polite refusal,
+   logged.
 2. **Read/write separation** — enforced by the registry, not the prompt. A
    viewer's tool list simply doesn't contain write tools.
 3. **Injection hygiene** — anything fetched from the backend (comments, emails,
