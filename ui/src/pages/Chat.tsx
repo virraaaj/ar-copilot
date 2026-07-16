@@ -21,6 +21,19 @@ function ThinkingDots() {
   );
 }
 
+// Shown as one-click chips once an invoice is pinned (the "Ask about this"
+// handoff from Dashboard/InvoiceDetail) and before the user has typed
+// anything -- the questions someone actually reaches for first when they
+// land here about one specific invoice, so they don't have to type them.
+const PINNED_INVOICE_SUGGESTIONS = [
+  "When is this due?",
+  "What's the current stage, and what happens next?",
+  "How much is outstanding?",
+  "Has the customer replied recently?",
+  "Summarize recent activity on this invoice.",
+  "Who are the contacts for this project?",
+];
+
 export default function Chat() {
   const { token, pinnedInvoice, setPinnedInvoice } = useSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -30,9 +43,12 @@ export default function Chat() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!token || !input.trim() || sending) return;
+    if (!input.trim()) return;
+    await sendQuestion(input.trim());
+  }
 
-    const question = input.trim();
+  async function sendQuestion(question: string) {
+    if (!token || sending) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: question }, { role: "progress", content: "Thinking" }]);
     setSending(true);
@@ -82,10 +98,26 @@ export default function Chat() {
         </div>
       )}
 
+      {pinnedInvoice && messages.length === 0 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {PINNED_INVOICE_SUGGESTIONS.map((q) => (
+            <button
+              key={q}
+              onClick={() => sendQuestion(q)}
+              className="rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         {messages.length === 0 && (
           <p className="text-[13px] text-zinc-400">
-            Ask about invoices, documents, or aging — e.g. "which invoices are overdue past 60 days?"
+            {pinnedInvoice
+              ? "Pick a question above, or ask your own."
+              : 'Ask about invoices, documents, or aging — e.g. "which invoices are overdue past 60 days?"'}
           </p>
         )}
         {messages.map((m, i) => (
