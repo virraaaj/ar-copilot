@@ -1,6 +1,32 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 body {
   margin: 0;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  background: #fafafa;
+  color: #18181b;
+}
+
+/* Rely on the OS scrollbar, but keep it unobtrusive on webkit. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 999px;
+  border: 2px solid #fafafa;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
 }

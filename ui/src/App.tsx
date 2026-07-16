@@ -12,10 +12,10 @@ function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
   if (!token) return <Navigate to="/login" replace />;
   return (
-    <>
+    <div className="min-h-screen bg-[#fafafa]">
       <NavBar />
       {children}
-    </>
+    </div>
   );
 }
 
