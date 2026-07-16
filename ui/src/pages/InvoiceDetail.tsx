@@ -5,6 +5,7 @@ import {
   getInvoiceTimeline,
   addComment,
   snoozeInvoice,
+  resumeInvoice,
   getEscalationPolicy,
   type Invoice,
   type TimelineEvent,
@@ -33,6 +34,22 @@ const EVENT_LABELS: Record<string, string> = {
 function humanizeEventType(eventType: string | null): string {
   if (!eventType) return "Event";
   return EVENT_LABELS[eventType] ?? eventType.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+// Comments posted through this app are prefixed "[email] text" by the
+// backend (see web.py's add_comment_endpoint) -- the real backend has no
+// per-comment author field this app can set, since every write goes
+// through one shared service account, so the prefix is the only place the
+// actual commenting user's identity survives. Older comments (posted
+// before this existed, or via a raw API call) won't match and just show
+// as-is with no author.
+const COMMENT_AUTHOR_PATTERN = /^\[([^\]]+)\]\s?(.*)$/s;
+
+function parseCommentAuthor(text: string | null): { author: string | null; body: string } {
+  if (!text) return { author: null, body: "--" };
+  const match = text.match(COMMENT_AUTHOR_PATTERN);
+  if (!match) return { author: null, body: text };
+  return { author: match[1], body: match[2] };
 }
 
 function StageRail({ stages, currentStageCode }: { stages: EscalationStage[]; currentStageCode: string | null }) {
@@ -79,6 +96,68 @@ function StageRail({ stages, currentStageCode }: { stages: EscalationStage[]; cu
   );
 }
 
+function SnoozeModal({
+  onClose,
+  onConfirm,
+  submitting,
+  error,
+}: {
+  onClose: () => void;
+  onConfirm: (reason: string, resumeDate: string) => void;
+  submitting: boolean;
+  error: string | null;
+}) {
+  const [reason, setReason] = useState("");
+  const [resumeDate, setResumeDate] = useState("");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Snooze a follow-up</h2>
+        <p className="mt-1 text-[12px] text-zinc-400">Pauses dunning outreach on this invoice until you resume it.</p>
+
+        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Reason</label>
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. customer disputing amount"
+          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+        />
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Resume on (optional)</label>
+        <input
+          type="date"
+          value={resumeDate}
+          onChange={(e) => setResumeDate(e.target.value)}
+          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+        />
+        {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            onClick={() => onConfirm(reason, resumeDate)}
+            disabled={submitting || !reason.trim()}
+            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {submitting ? "Snoozing..." : "Confirm snooze"}
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function InvoiceDetail() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const [searchParams] = useSearchParams();
@@ -95,12 +174,11 @@ export default function InvoiceDetail() {
   const [commentText, setCommentText] = useState("");
   const [posting, setPosting] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
-  const [showSnoozeForm, setShowSnoozeForm] = useState(requestedAction === "snooze");
-  const [snoozeReason, setSnoozeReason] = useState("");
-  const [snoozeResumeDate, setSnoozeResumeDate] = useState("");
+  const [showSnoozeModal, setShowSnoozeModal] = useState(requestedAction === "snooze");
   const [snoozing, setSnoozing] = useState(false);
   const [snoozeError, setSnoozeError] = useState<string | null>(null);
-  const [snoozeConfirmed, setSnoozeConfirmed] = useState<string | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [stages, setStages] = useState<EscalationStage[] | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,10 +198,12 @@ export default function InvoiceDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoice]);
 
-  useEffect(() => {
+  function loadInvoice() {
     if (!token || !invoiceId) return;
     getInvoice(token, invoiceId).then(setInvoice).catch((e) => setError(String(e)));
-  }, [token, invoiceId]);
+  }
+
+  useEffect(loadInvoice, [token, invoiceId]);
 
   function loadTimeline() {
     if (!token || !invoiceId) return;
@@ -151,20 +231,34 @@ export default function InvoiceDetail() {
     }
   }
 
-  async function submitSnooze() {
-    if (!token || !invoiceId || !snoozeReason.trim()) return;
+  async function submitSnooze(reason: string, resumeDate: string) {
+    if (!token || !invoiceId || !reason.trim()) return;
     setSnoozing(true);
     setSnoozeError(null);
     try {
-      await snoozeInvoice(token, invoiceId, snoozeReason.trim(), snoozeResumeDate || undefined);
-      setSnoozeConfirmed(snoozeReason.trim());
-      setSnoozeReason("");
-      setSnoozeResumeDate("");
-      setShowSnoozeForm(false);
+      await snoozeInvoice(token, invoiceId, reason.trim(), resumeDate || undefined);
+      setShowSnoozeModal(false);
+      loadInvoice(); // active_pause_id flips, which flips the button to "Resume"
+      loadTimeline();
     } catch (e) {
       setSnoozeError(String(e));
     } finally {
       setSnoozing(false);
+    }
+  }
+
+  async function handleResume() {
+    if (!token || !invoiceId) return;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await resumeInvoice(token, invoiceId);
+      loadInvoice(); // active_pause_id clears, which flips the button back to "Snooze"
+      loadTimeline();
+    } catch (e) {
+      setResumeError(String(e));
+    } finally {
+      setResuming(false);
     }
   }
 
@@ -192,6 +286,7 @@ export default function InvoiceDetail() {
 
   const comments = timeline.filter((e) => e.event_type === "reply_received");
   const activity = timeline.filter((e) => e.event_type !== "reply_received");
+  const isSnoozed = !!invoice.active_pause_id;
 
   const fields: [string, string | number | null][] = [
     ["Case key", invoice.case_key],
@@ -215,12 +310,22 @@ export default function InvoiceDetail() {
             {invoice.project_name ?? invoice.project_number ?? "Invoice"}
           </h1>
           <div className="flex gap-2">
-            <button
-              onClick={() => setShowSnoozeForm((v) => !v)}
-              className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
-            >
-              Snooze
-            </button>
+            {isSnoozed ? (
+              <button
+                onClick={handleResume}
+                disabled={resuming}
+                className="rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-[13px] font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {resuming ? "Resuming..." : "Resume"}
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowSnoozeModal(true)}
+                className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+              >
+                Snooze
+              </button>
+            )}
             <button
               onClick={askAboutThis}
               className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
@@ -237,50 +342,21 @@ export default function InvoiceDetail() {
             </div>
           ))}
         </dl>
+        {isSnoozed && (
+          <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-700">
+            Snoozed &mdash; reminders are paused until this is resumed.
+          </div>
+        )}
+        {resumeError && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{resumeError}</p>}
       </div>
 
-      {snoozeConfirmed && (
-        <div className="mt-4 rounded-2xl border border-emerald-200/70 bg-emerald-50 px-5 py-3 text-[13px] text-emerald-700">
-          Snoozed &mdash; "{snoozeConfirmed}"
-        </div>
-      )}
-
-      {showSnoozeForm && (
-        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Snooze a follow-up</h2>
-          <p className="mt-1 text-[12px] text-zinc-400">Pauses dunning outreach on this invoice until you resume it.</p>
-
-          <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Reason</label>
-          <input
-            value={snoozeReason}
-            onChange={(e) => setSnoozeReason(e.target.value)}
-            placeholder="e.g. customer disputing amount"
-            className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
-          />
-          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Resume on (optional)</label>
-          <input
-            type="date"
-            value={snoozeResumeDate}
-            onChange={(e) => setSnoozeResumeDate(e.target.value)}
-            className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
-          />
-          {snoozeError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{snoozeError}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={submitSnooze}
-              disabled={snoozing || !snoozeReason.trim()}
-              className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {snoozing ? "Snoozing..." : "Confirm snooze"}
-            </button>
-            <button
-              onClick={() => setShowSnoozeForm(false)}
-              className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+      {showSnoozeModal && (
+        <SnoozeModal
+          onClose={() => setShowSnoozeModal(false)}
+          onConfirm={submitSnooze}
+          submitting={snoozing}
+          error={snoozeError}
+        />
       )}
 
       {stages && stages.length > 0 && <StageRail stages={stages} currentStageCode={invoice.stage} />}
@@ -318,12 +394,18 @@ export default function InvoiceDetail() {
             <li className="text-[13px] text-zinc-400">No comments yet.</li>
           )}
           {!timelineLoading &&
-            comments.map((event, i) => (
-              <li key={i} className="border-l-2 border-zinc-100 pl-4">
-                <div className="text-[11px] font-medium text-zinc-400">{when(event.at)}</div>
-                <p className="mt-1 text-[13px] text-zinc-800">{event.summary ?? event.title ?? "--"}</p>
-              </li>
-            ))}
+            comments.map((event, i) => {
+              const { author, body } = parseCommentAuthor(event.summary ?? event.title);
+              return (
+                <li key={i} className="border-l-2 border-zinc-100 pl-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-semibold text-zinc-700">{author ?? "Unknown user"}</span>
+                    <span className="text-[11px] text-zinc-400">{when(event.at)}</span>
+                  </div>
+                  <p className="mt-1 text-[13px] text-zinc-800">{body}</p>
+                </li>
+              );
+            })}
         </ul>
       </div>
 

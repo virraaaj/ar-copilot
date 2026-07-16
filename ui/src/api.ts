@@ -13,6 +13,10 @@ export interface Invoice {
   due_date: string | null;
   open_amount: number | null;
   aging_status: string | null;
+  // Only present on the single-invoice detail response (get_invoice's
+  // full=True projection) -- non-null while a snooze is currently in
+  // effect. Drives the Snooze/Resume button toggle on InvoiceDetail.tsx.
+  active_pause_id?: string | null;
 }
 
 export interface AgingSummary {
@@ -146,6 +150,10 @@ export async function snoozeInvoice(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason, resume_date: resumeDate || undefined }),
   });
+}
+
+export async function resumeInvoice(token: string, invoiceId: string): Promise<void> {
+  await request(`/invoices/${encodeURIComponent(invoiceId)}/resume`, token, { method: "POST" });
 }
 
 export async function getEscalationPolicy(token: string): Promise<EscalationPolicy> {

@@ -216,14 +216,42 @@ def test_add_comment_endpoint_uses_correct_backend_field_names(client: TestClien
 
     assert resp.status_code == 200
     sent_body = json.loads(comment_route.calls.last.request.content)
-    assert sent_body["raw_excerpt"] == "Customer confirmed payment Friday"
+    assert sent_body["raw_excerpt"] == "[user@example.com] Customer confirmed payment Friday"
     assert sent_body["source_channel"] == "manual_only"
     assert "response_category" not in sent_body
     assert "raw_text" not in sent_body
 
 
 @respx.mock
+def test_add_comment_endpoint_prefixes_the_logged_in_user(client: TestClient) -> None:
+    """The real backend has no per-comment author field this app can set
+    (every write goes through one shared service account) -- the "[email]"
+    prefix is the only place the actual commenting user's identity
+    survives, and InvoiceDetail.tsx parses it back out for display."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "pm@corehelix.ai", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    comment_route = respx.post(f"{BASE}/api/v2/dunning/response-events").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    client.post(
+        "/api/invoices/case-1/comments",
+        json={"comment": "Paying next week"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    sent_body = json.loads(comment_route.calls.last.request.content)
+    assert sent_body["raw_excerpt"] == "[pm@corehelix.ai] Paying next week"
+
+
+@respx.mock
 def test_add_comment_endpoint_rejects_empty_comment(client: TestClient) -> None:
+    """Regression test: the email prefix is non-empty on its own, so
+    whitespace-only input must be rejected *before* prefixing -- otherwise
+    the tool-level empty check never sees an empty string and this would
+    silently succeed instead of 422ing."""
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
     token = login_resp.json()["session_token"]
@@ -311,6 +339,28 @@ def test_snooze_invoice_endpoint_refuses_pre_due_with_422(client: TestClient) ->
 
     assert resp.status_code == 422
     assert not pause_route.called
+
+
+@respx.mock
+def test_resume_invoice_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resume_route = respx.post(f"{BASE}/api/v2/dunning/cases/case-1/resume").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    resp = client.post("/api/invoices/case-1/resume", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()["action"] == "resumed"
+    assert resume_route.called
+
+
+def test_resume_invoice_endpoint_requires_session(client: TestClient) -> None:
+    resp = client.post("/api/invoices/case-1/resume")
+    assert resp.status_code == 401
 
 
 @respx.mock

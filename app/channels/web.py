@@ -30,6 +30,7 @@ from app.agent.tools_read import get_invoice as tool_get_invoice
 from app.agent.tools_read import get_timeline as tool_get_timeline
 from app.agent.tools_read import list_invoices as tool_list_invoices
 from app.agent.tools_write import add_comment as tool_add_comment
+from app.agent.tools_write import resume_invoice as tool_resume_invoice
 from app.agent.tools_write import snooze_invoice as tool_snooze_invoice
 from app.config import get_settings
 from app.documents.index import get_index
@@ -217,6 +218,18 @@ async def snooze_invoice_endpoint(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@router.post("/invoices/{invoice_id}/resume")
+async def resume_invoice_endpoint(
+    invoice_id: str,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Resumes dunning outreach on a previously-snoozed invoice -- the
+    counterpart to /snooze. The UI toggles between the two based on
+    invoice.active_pause_id (non-null while a pause is in effect)."""
+    return await tool_resume_invoice(backend, invoice_id=invoice_id)
+
+
 @router.get("/invoices/{invoice_id}/timeline")
 async def get_invoice_timeline_endpoint(
     invoice_id: str,
@@ -234,8 +247,25 @@ async def add_comment_endpoint(
     _user: str = Depends(require_session),
     backend: BackendClient = Depends(get_backend_client),
 ) -> Dict[str, Any]:
+    """The real backend's timeline has no per-comment "who posted this"
+    field usable here: every write goes through one shared service account
+    (see module docstring), so a comment's actor_id on the backend is
+    always that service account, never the actual logged-in/Teams user.
+    The only place that identity survives is the comment text itself, so
+    it's prefixed here in a fixed, parseable shape ("[email] text") --
+    the UI (InvoiceDetail.tsx) parses it back out to show the author
+    separately. Every comment now flows through this one endpoint
+    (including ones that started from a Teams magic link, which carries
+    the same-shaped session), so this is the single place to do it."""
+    # Validated on the raw text, before the "[email] " prefix is added --
+    # otherwise a whitespace-only comment would always pass the tool's own
+    # non-empty check once prefixed, since the prefix alone is non-empty.
+    if not body.comment.strip():
+        raise HTTPException(status_code=422, detail="comment must not be empty")
+
+    prefixed = f"[{_user}] {body.comment}"
     try:
-        return await tool_add_comment(backend, invoice_id=invoice_id, comment=body.comment, source_channel="manual_only")
+        return await tool_add_comment(backend, invoice_id=invoice_id, comment=prefixed, source_channel="manual_only")
     except PolicyViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
