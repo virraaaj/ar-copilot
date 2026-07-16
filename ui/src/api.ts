@@ -37,6 +37,24 @@ export interface DocumentRef {
   size_bytes: number | null;
 }
 
+export interface EscalationStage {
+  stage_id: string;
+  stage_rule_id: string | null;
+  stage_code: string;
+  stage_name: string;
+  sequence_order: number;
+  is_terminal_stage: boolean;
+  min_days_in_stage: number | null;
+  max_days_in_stage: number | null;
+}
+
+export interface EscalationPolicy {
+  policy_id: string;
+  version_id: string;
+  version_label: string | null;
+  stages: EscalationStage[];
+}
+
 export interface PinnedInvoice {
   invoice_id: string;
   label: string;
@@ -89,6 +107,23 @@ export async function getInvoice(token: string, invoiceId: string): Promise<Invo
 
 export async function getAgingSummary(token: string): Promise<AgingSummary> {
   return request("/aging-summary", token);
+}
+
+export async function getEscalationPolicy(token: string): Promise<EscalationPolicy> {
+  return request("/escalation-policy", token);
+}
+
+export async function updateEscalationStage(
+  token: string,
+  versionId: string,
+  stageRuleId: string,
+  update: { max_days_in_stage?: number; min_days_in_stage?: number }
+): Promise<void> {
+  await request(`/escalation-policy/versions/${versionId}/stage-rules/${stageRuleId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
 }
 
 export async function listDocuments(token: string, docType?: string): Promise<DocumentRef[]> {

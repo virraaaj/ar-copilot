@@ -130,6 +130,100 @@ async def aging_summary_endpoint(
 
 
 # ---------------------------------------------------------------------------
+# Escalation policy (added 2026-07-16) — a real client to the Lummus backend's
+# existing dunning_v2 policy API (backend/app/dunning_v2/api/policies.py),
+# not a new capability invented here. Edits apply directly to the current
+# published version (confirmed against that module's own comment: "Edits are
+# accepted on draft and published versions") — no separate draft/validate/
+# publish workflow surfaced here, since this page is meant as a simple global
+# settings screen, not the full policy-authoring tool the Lummus admin pages
+# already are.
+# ---------------------------------------------------------------------------
+
+
+class StageThresholdUpdate(BaseModel):
+    max_days_in_stage: Optional[int] = None
+    min_days_in_stage: Optional[int] = None
+
+
+async def _find_global_policy(backend: BackendClient) -> Dict[str, Any]:
+    policies = await backend.list_policies(scope_type="global")
+    if not policies:
+        raise HTTPException(status_code=404, detail="No global escalation policy found.")
+    return policies[0]
+
+
+async def _find_published_version(backend: BackendClient, policy_id: str) -> Dict[str, Any]:
+    versions = await backend.list_policy_versions(policy_id)
+    published = [v for v in versions if v.get("is_current_published")]
+    if not published:
+        raise HTTPException(status_code=404, detail="This policy has no published version.")
+    return published[0]
+
+
+@router.get("/escalation-policy")
+async def get_escalation_policy(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    policy = await _find_global_policy(backend)
+    version = await _find_published_version(backend, policy["id"])
+    stages = await backend.list_policy_stages(version["id"])
+    rules = await backend.list_stage_rules(version["id"])
+    rules_by_stage = {r["stage_id"]: r for r in rules}
+
+    stage_list = []
+    for s in sorted(stages, key=lambda x: x["sequence_order"]):
+        rule = rules_by_stage.get(s["id"])
+        transition = (rule or {}).get("transition_rule_json") or {}
+        stage_list.append(
+            {
+                "stage_id": s["id"],
+                "stage_rule_id": rule["id"] if rule else None,
+                "stage_code": s["stage_code"],
+                "stage_name": s["stage_name"],
+                "sequence_order": s["sequence_order"],
+                "is_terminal_stage": s["is_terminal_stage"],
+                "min_days_in_stage": transition.get("min_days_in_stage"),
+                "max_days_in_stage": transition.get("max_days_in_stage"),
+            }
+        )
+
+    return {
+        "policy_id": policy["id"],
+        "version_id": version["id"],
+        "version_label": version.get("display_label"),
+        "stages": stage_list,
+    }
+
+
+@router.patch("/escalation-policy/versions/{version_id}/stage-rules/{stage_rule_id}")
+async def update_escalation_stage(
+    version_id: str,
+    stage_rule_id: str,
+    body: StageThresholdUpdate,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    # The backend's PATCH replaces transition_rule_json wholesale, so fetch
+    # the current value fresh and merge in just what changed -- never trust
+    # client-side state as the merge base, it may be stale.
+    rules = await backend.list_stage_rules(version_id)
+    current = next((r for r in rules if r["id"] == stage_rule_id), None)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Stage rule not found in that policy version.")
+
+    transition = dict(current.get("transition_rule_json") or {})
+    if body.max_days_in_stage is not None:
+        transition["max_days_in_stage"] = body.max_days_in_stage
+    if body.min_days_in_stage is not None:
+        transition["min_days_in_stage"] = body.min_days_in_stage
+
+    result = await backend.update_stage_rule(stage_rule_id, {"transition_rule_json": transition})
+    return {"stage_rule_id": stage_rule_id, "transition_rule_json": result.get("transition_rule_json")}
+
+
+# ---------------------------------------------------------------------------
 # Documents (PLAN.md §5 Phase 1B UI)
 # ---------------------------------------------------------------------------
 

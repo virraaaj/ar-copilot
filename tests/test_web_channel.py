@@ -164,6 +164,111 @@ def test_invoices_endpoint_with_valid_session(client: TestClient) -> None:
     assert resp.json()[0]["project_name"] == "Meridian Bay"
 
 
+@respx.mock
+def test_get_escalation_policy_composes_stages_and_rules(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    respx.get(f"{BASE}/api/v2/dunning/policies").mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "pol-1", "scope_type": "global"}]})
+    )
+    respx.get(f"{BASE}/api/v2/dunning/policies/pol-1/versions").mock(
+        return_value=httpx.Response(
+            200, json={"items": [{"id": "ver-1", "is_current_published": True, "display_label": "v1"}]}
+        )
+    )
+    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stages").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "stage-2", "stage_code": "first_notice", "stage_name": "First Notice", "sequence_order": 2, "is_terminal_stage": False},
+                {"id": "stage-1", "stage_code": "reminder", "stage_name": "Reminder", "sequence_order": 1, "is_terminal_stage": False},
+            ],
+        )
+    )
+    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "rule-1", "stage_id": "stage-1", "transition_rule_json": {"max_days_in_stage": 7}},
+                {"id": "rule-2", "stage_id": "stage-2", "transition_rule_json": {"max_days_in_stage": 14}},
+            ],
+        )
+    )
+
+    resp = client.get("/api/escalation-policy", headers=headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["version_id"] == "ver-1"
+    # Sorted by sequence_order even though the stages endpoint returned them out of order.
+    assert [s["stage_code"] for s in body["stages"]] == ["reminder", "first_notice"]
+    assert body["stages"][0]["max_days_in_stage"] == 7
+    assert body["stages"][0]["stage_rule_id"] == "rule-1"
+
+
+@respx.mock
+def test_update_escalation_stage_merges_not_clobbers_transition_json(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "rule-1",
+                    "stage_id": "stage-1",
+                    "transition_rule_json": {"max_days_in_stage": 7, "require_at_least_one_action_sent": True},
+                }
+            ],
+        )
+    )
+    patch_route = respx.patch(f"{BASE}/api/v2/dunning/stage-rules/rule-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "rule-1", "transition_rule_json": {"max_days_in_stage": 10, "require_at_least_one_action_sent": True}},
+        )
+    )
+
+    resp = client.patch(
+        "/api/escalation-policy/versions/ver-1/stage-rules/rule-1",
+        json={"max_days_in_stage": 10},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    # The sibling field must have been preserved in the outgoing PATCH body,
+    # not dropped -- this is the whole point of fetch-then-merge.
+    sent_body = json.loads(patch_route.calls.last.request.content)
+    assert sent_body["transition_rule_json"]["require_at_least_one_action_sent"] is True
+    assert sent_body["transition_rule_json"]["max_days_in_stage"] == 10
+
+
+@respx.mock
+def test_update_escalation_stage_404s_on_unknown_rule_id(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+
+    resp = client.patch(
+        "/api/escalation-policy/versions/ver-1/stage-rules/nonexistent",
+        json={"max_days_in_stage": 10},
+        headers=headers,
+    )
+
+    assert resp.status_code == 404
+
+
 def test_upload_ingest_and_search_document(client: TestClient) -> None:
     respx_router = respx.mock
     with respx_router:

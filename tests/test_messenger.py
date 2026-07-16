@@ -34,6 +34,26 @@ def test_get_messenger_defaults_to_fake_without_credentials(monkeypatch):
     assert isinstance(result, FakeMessenger)
 
 
+def test_get_messenger_stays_fake_with_app_id_but_no_password(monkeypatch):
+    """Locks in the real current state (2026-07-16): App ID + tenant ID were
+    recovered from Lummus's CI config, but the secret was never committed
+    anywhere -- only the App ID being set must NOT be enough to switch over."""
+    monkeypatch.setenv("MICROSOFT_APP_ID", "815a093a-e8a9-436c-9bcf-f58959b23a9b")
+    monkeypatch.setenv("MICROSOFT_APP_TENANT_ID", "21a36225-a922-460b-a044-4bf9bfe5d7fc")
+    monkeypatch.setenv("MICROSOFT_APP_PASSWORD", "")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://placeholder/")
+    monkeypatch.setenv("AZURE_OPENAI_KEY", "placeholder")
+    import app.config as config_module
+    import app.channels.teams.messenger as messenger_module
+
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+    monkeypatch.setattr(messenger_module, "_messenger", None)
+
+    result = get_messenger()
+
+    assert isinstance(result, FakeMessenger)
+
+
 def test_bot_framework_messenger_raises_clear_error_without_credentials(monkeypatch):
     monkeypatch.setenv("MICROSOFT_APP_ID", "")
     monkeypatch.setenv("MICROSOFT_APP_PASSWORD", "")

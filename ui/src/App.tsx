@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import InvoiceDetail from "./pages/InvoiceDetail";
 import Chat from "./pages/Chat";
 import Documents from "./pages/Documents";
+import EscalationPolicy from "./pages/EscalationPolicy";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -52,6 +53,14 @@ export default function App() {
         element={
           <RequireSession>
             <Documents />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/escalation-policy"
+        element={
+          <RequireSession>
+            <EscalationPolicy />
           </RequireSession>
         }
       />
