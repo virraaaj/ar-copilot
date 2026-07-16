@@ -176,6 +176,12 @@ ar-copilot/
   client-side from cases: totals by bucket/BU/project).
 - The registry marks every tool `read` or `write`. Phase 1 registers zero write
   tools; the loop must *reject* (not silently skip) any write-tool call.
+- **Invoice-ID-free resolution:** never ask the user for an invoice number.
+  Search by whatever criteria they gave (customer name, project, aging bucket,
+  amount range) via `list_invoices`. If the search returns more than one
+  match, present a short disambiguation list using only human-readable fields
+  (customer, amount, due date, stage) — never surface the raw invoice ID as
+  something the user is expected to read back or type.
 - CLI harness (`python -m app.cli "which invoices are worst?"`) for fast
   iteration without Teams or the UI.
 - **Accept:** it answers multi-step questions that require chaining tools, e.g.
@@ -248,14 +254,20 @@ decides to call.
 ### Phase 2 — Minimal web UI
 Three pages, deliberately small (a 4th, Documents, is added in Phase 1B):
 - **Dashboard** — aging summary tiles (total open, by bucket), invoice table
-  (status/stage filters), snoozed list. Read-only.
+  (status/stage filters), snoozed list. Read-only. Each row gets an "Ask about
+  this" action; clicking it opens the Chat page with that invoice pinned as
+  context — shown to the user as a small chip (e.g. "Re: Meridian Bay — $1.25M,
+  21 days overdue") above the input, not the raw ID. The user then types their
+  own question in plain language; the ID rides along invisibly in the actual
+  API call to the agent.
 - **Invoice detail** — timeline, contacts, comments for one invoice.
 - **Chat** — the same agent, streamed (SSE). This is the primary iteration
   surface for agent quality from here on.
 - Login: reuse the backend's JWT login; store token in memory (this is a dev
   tool, not production auth).
 - **Accept:** `npm run build` output served by FastAPI; all three pages work
-  against the UAT stack.
+  against the UAT stack. The Dashboard → Chat handoff correctly pins the
+  invoice without the user ever seeing/typing its raw ID.
 
 ### Phase 3 — Write actions with confirm-before-execute
 - Write tools: `snooze_invoice`, `resume_invoice`, `close_invoice`,
@@ -276,8 +288,17 @@ Three pages, deliberately small (a 4th, Documents, is added in Phase 1B):
   the setup — follow them rather than re-deriving).
 - Adaptive Cards for confirmations (Confirm/Cancel buttons) and invoice
   summaries; plain markdown for answers.
+- **Invoice disambiguation cards:** when the agent needs to disambiguate
+  between multiple invoices (per Phase 1's resolution rule), it renders an
+  Adaptive Card with one tappable option per match, labeled with
+  customer/amount/due date only. Each option's `Action.Submit` carries the
+  invoice ID as hidden card data — tapping it continues the conversation with
+  that invoice already resolved, no typing required.
 - Same guardrails: Teams AAD identity → `identity.py` → role.
 - **Accept:** the Phase 1/3 test conversations work in a real Teams 1:1 chat.
+  A query that matches multiple invoices produces a disambiguation card, and
+  tapping an option correctly resolves to that invoice without the user typing
+  an ID.
 
 ### Phase 5 — Proactive engine
 - `watchers.py` polling loop (start simple; no queues): detects — new invoice
