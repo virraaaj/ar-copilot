@@ -39,10 +39,15 @@ class AzureOpenAIService:
     ):
         """One round-trip to the model. Returns the raw message object so the
         caller can inspect tool_calls vs content."""
+        # No `temperature` override -- confirmed live against the real
+        # deployment (gpt-5-mini): reasoning-family GPT-5 models reject any
+        # non-default temperature ("Only the default (1) value is
+        # supported"), unlike GPT-4-class models. Omitting it lets the API
+        # use that default rather than hardcoding a value that only works
+        # for some model families.
         kwargs: Dict[str, Any] = {
             "model": self._deployment,  # Azure uses the deployment name here
             "messages": messages,
-            "temperature": 0.1,
         }
         if tools:
             kwargs["tools"] = tools
