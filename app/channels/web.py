@@ -27,6 +27,7 @@ from app.agent.tools_documents import list_recent_documents as tool_list_recent_
 from app.agent.tools_documents import search_documents as tool_search_documents
 from app.agent.tools_read import aging_summary as tool_aging_summary
 from app.agent.tools_read import get_invoice as tool_get_invoice
+from app.agent.tools_read import get_project_digest as tool_get_project_digest
 from app.agent.tools_read import get_timeline as tool_get_timeline
 from app.agent.tools_read import list_invoices as tool_list_invoices
 from app.agent.tools_write import add_comment as tool_add_comment
@@ -180,6 +181,20 @@ async def list_project_invoices_endpoint(
     specific invoice, they land here to pick one from just that project's
     pooled invoices, matching the project-level group-chat model."""
     return await tool_list_invoices(backend, project_id=project_number, limit=200)
+
+
+@router.get("/projects/{project_number}/digest")
+async def get_project_digest_endpoint(
+    project_number: str,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Backs the AR Health dashboard tab (added 2026-07-17): on-demand AR
+    health + customer payment-pattern projections for one project -- the
+    same computation the weekly Teams digest card uses (services/
+    digest_engine.py), available whenever someone opens the tab rather
+    than only once a week."""
+    return await tool_get_project_digest(backend, project_number=project_number)
 
 
 @router.get("/business-units")

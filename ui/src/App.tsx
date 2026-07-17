@@ -12,6 +12,7 @@ import MagicLink from "./pages/MagicLink";
 import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 import ProjectContacts from "./pages/ProjectContacts";
 import DefaultProjectContacts from "./pages/DefaultProjectContacts";
+import ARHealth from "./pages/ARHealth";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -66,6 +67,14 @@ export default function App() {
         element={
           <RequireSession>
             <Documents />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/ar-health"
+        element={
+          <RequireSession>
+            <ARHealth />
           </RequireSession>
         }
       />

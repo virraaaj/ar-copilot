@@ -1,4 +1,5 @@
-import { useState, useRef, type FormEvent } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { streamChat, ApiError, type ChatHistoryMessage } from "../api";
 import { useSession } from "../context/SessionContext";
 
@@ -40,6 +41,9 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialQuestionSent = useRef(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -87,6 +91,20 @@ export default function Chat() {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }
+
+  useEffect(() => {
+    // Set by ARHealth.tsx's "Ask about this" handoff (and reusable by any
+    // future page that wants to hand a pre-formed question to Chat) --
+    // consumed once, then cleared from history state so navigating back
+    // here later doesn't resend it.
+    const initialQuestion = (location.state as { initialQuestion?: string } | null)?.initialQuestion;
+    if (initialQuestion && !initialQuestionSent.current && token) {
+      initialQuestionSent.current = true;
+      sendQuestion(initialQuestion);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   return (
     <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8">

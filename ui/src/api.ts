@@ -183,6 +183,36 @@ export async function listProjectInvoices(token: string, projectNumber: string):
   return request(`/projects/${encodeURIComponent(projectNumber)}/invoices`, token);
 }
 
+// AR-health digest (added 2026-07-17) -- on-demand version of the weekly
+// Teams digest card, see app/services/digest_engine.py for the AR-health
+// and customer-projection computation this mirrors.
+export interface ProjectHealth {
+  open_invoice_count: number;
+  total_open_amount: number;
+  overdue_count: number;
+  overdue_amount: number;
+  by_stage: Record<string, number>;
+}
+
+export interface CustomerProjection {
+  customer_id: string;
+  sample_size: number;
+  avg_days_relative_to_due: number | null;
+  risk: "low" | "medium" | "high" | "unknown";
+}
+
+export interface ProjectDigest {
+  project_number: string;
+  found: boolean;
+  project_name?: string;
+  health?: ProjectHealth;
+  customer_projections?: CustomerProjection[];
+}
+
+export async function getProjectDigest(token: string, projectNumber: string): Promise<ProjectDigest> {
+  return request(`/projects/${encodeURIComponent(projectNumber)}/digest`, token);
+}
+
 export async function snoozeInvoice(
   token: string,
   invoiceId: string,

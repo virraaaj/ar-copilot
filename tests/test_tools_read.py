@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from app.agent.tools_read import get_timeline, list_invoices
+from app.agent.tools_read import get_project_digest, get_timeline, list_invoices
 from app.services.backend_client import BackendClient
 
 BASE = "http://test-backend"
@@ -92,4 +92,51 @@ async def test_list_invoices_surfaces_the_real_invoice_number(client: BackendCli
 
     assert invoices[0]["invoice_no"] == "UAT-RND-002"
     assert invoices[0]["case_key"] == "V2-AUTO-RND-002"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_project_digest_returns_health_and_projections(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "case-1",
+                        "case_status": "active",
+                        "current_stage_code": "reminder",
+                        "project_name": "Meridian Bay",
+                        "customer_id": "cust-1",
+                        "primary_invoice_open_amount": 1000,
+                        "primary_invoice_due_date": "2020-01-01",
+                    }
+                ]
+            },
+        )
+    )
+    respx.get(f"{BASE}/api/v2/dunning/cases", params={"customer_id": "cust-1", "case_status": "closed_paid", "limit": "50"}).mock(
+        return_value=httpx.Response(200, json={"items": []})
+    )
+
+    digest = await get_project_digest(client, project_number="PN-1")
+
+    assert digest["found"] is True
+    assert digest["project_name"] == "Meridian Bay"
+    assert digest["health"]["open_invoice_count"] == 1
+    assert digest["customer_projections"][0]["customer_id"] == "cust-1"
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_project_digest_not_found_when_no_cases(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": []}))
+
+    digest = await get_project_digest(client, project_number="PN-unknown")
+
+    assert digest == {"project_number": "PN-unknown", "found": False}
     await client.close()

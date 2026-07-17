@@ -29,6 +29,9 @@ export default function NavBar() {
             <NavLink to="/documents" className={linkClass}>
               Documents
             </NavLink>
+            <NavLink to="/ar-health" className={linkClass}>
+              AR Health
+            </NavLink>
             <NavLink to="/escalation-policy" className={linkClass}>
               Escalation Policy
             </NavLink>

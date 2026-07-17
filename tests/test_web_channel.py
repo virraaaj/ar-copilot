@@ -497,6 +497,44 @@ def test_list_project_invoices_endpoint(client: TestClient) -> None:
 
 
 @respx.mock
+def test_get_project_digest_endpoint(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "case-1",
+                        "case_status": "active",
+                        "current_stage_code": "reminder",
+                        "project_name": "Meridian Bay",
+                        "customer_id": "cust-1",
+                        "primary_invoice_open_amount": 1000,
+                    }
+                ]
+            },
+        )
+    )
+
+    resp = client.get("/api/projects/PN-1/digest", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["found"] is True
+    assert body["project_name"] == "Meridian Bay"
+    assert body["health"]["open_invoice_count"] == 1
+
+
+def test_get_project_digest_endpoint_requires_session(client: TestClient) -> None:
+    resp = client.get("/api/projects/PN-1/digest")
+    assert resp.status_code == 401
+
+
+@respx.mock
 def test_list_business_units_endpoint(client: TestClient) -> None:
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
