@@ -425,6 +425,48 @@ free).
   blocked on the Graph Mail.Send credential, same as every other
   credential-blocked integration this session.
 
+### Phase 4.6 — Weekly AR-health digest + a real background scheduler (added 2026-07-17)
+
+⚠️ First of the "intelligent AI features for enterprise scale" ideation
+round: a weekly digest card per project chat, AR health (open exposure,
+overdue count/amount, stage mix, trend vs last week) plus a payment-pattern
+projection per customer, derived from that customer's own closed-case
+history.
+
+**Projection methodology** (services/digest_engine.py's module docstring
+has the full reasoning): the real backend has no dedicated "paid_at" field
+on a case (verified against live UAT data), so `updated_at` is used as a
+resolution-date proxy. `avg_days_relative_to_due` = mean(resolved_date -
+due_date) across a customer's closed cases; sample_size is always shown
+alongside it so a one-invoice history reads as low-confidence, not
+false-confidence. This is an estimate stated as one, not a hidden model.
+
+**Real gap fixed alongside this:** none of this session's proactive
+pollers (send_due_reminders, send_due_followups,
+mirror_new_replies_to_teams) had ever actually run unattended — they only
+ran when manually invoked from a script this session. main.py now has a
+real FastAPI lifespan-managed background scheduler (`_poll_loop`) that
+runs each poller on its own configured interval, gated by its own
+`*_POLL_ENABLED` flag (all default False so a fresh checkout does
+nothing until explicitly turned on). A failing tick logs and waits for
+the next one rather than killing the loop.
+
+- **`services/digest_store.py`** — per-project snapshot (for week-over-week
+  trend) + dedup so a project gets at most one digest per ISO week.
+- **`services/digest_engine.py`** — `compute_ar_health`,
+  `compute_customer_projection`, `send_project_digests`.
+- **`channels/teams/cards.py`** — `digest_card`.
+- **`main.py`** — `lifespan` context manager starts/stops the reminders,
+  followups+reply-mirroring, and digest loops based on config flags.
+- **Accept:** verified live that the app boots cleanly with the scheduler
+  wired in (lifespan runs, no pollers start with default-False flags);
+  the digest computation, card, and dedup/trend logic are covered by
+  tests against realistic UAT-shaped data. Live verification against the
+  real UAT backend end-to-end (a real digest card, sent for a real
+  project) is pending Docker being back up — same "built and tested, real
+  data verification pending" state as other work this session when the
+  local stack was down.
+
 ### Phase 5 — Proactive engine (remaining watchers)
 Phase 4 already covers stage-triggered reminders (the main "sent reminders"
 ask). What's left here: PM hasn't replied N days after outreach; snooze

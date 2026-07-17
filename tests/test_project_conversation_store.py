@@ -42,3 +42,20 @@ async def test_reverse_lookup_by_conversation_id(store: ProjectConversationStore
 @pytest.mark.asyncio
 async def test_reverse_lookup_unknown_returns_none(store: ProjectConversationStore) -> None:
     assert await store.get_project_number("conv-unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_list_all_returns_every_known_mapping(store: ProjectConversationStore) -> None:
+    await store.record("PN-1", "conv-1")
+    await store.record("PN-2", "conv-2")
+
+    all_mappings = await store.list_all()
+
+    assert {"project_number": "PN-1", "conversation_id": "conv-1"} in all_mappings
+    assert {"project_number": "PN-2", "conversation_id": "conv-2"} in all_mappings
+    assert len(all_mappings) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_all_empty_when_nothing_recorded(store: ProjectConversationStore) -> None:
+    assert await store.list_all() == []

@@ -78,6 +78,14 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = ""
     FOLLOWUP_POLL_INTERVAL_SECONDS: int = 300
 
+    # ---- Weekly AR-health digest (added 2026-07-17) ----
+    # One digest card per project per ISO week, sent to that project's
+    # Teams chat -- AR health (open exposure, overdue count/amount, stage
+    # mix) plus a payment-pattern projection per customer derived from
+    # their own closed-case history. See services/digest_engine.py.
+    DIGEST_POLL_ENABLED: bool = False
+    DIGEST_POLL_INTERVAL_SECONDS: int = 3600
+
     # ---- Document Intelligence (Phase 1B) ----
     # SharePoint (Graph API) — real dev creds, works today.
     SHAREPOINT_TENANT_ID: str = ""

@@ -11,7 +11,7 @@ a project chat, without the incoming activity needing to say so itself.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 import aiosqlite
 
@@ -67,3 +67,13 @@ class ProjectConversationStore:
             )
             row = await cursor.fetchone()
         return row[0] if row else None
+
+    async def list_all(self) -> List[Dict[str, str]]:
+        """Every known project-chat mapping -- added 2026-07-16 for
+        digest_engine.py's poller, which needs to iterate every project
+        that actually has a Teams chat rather than being told one."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute("SELECT project_number, conversation_id FROM project_conversation_refs")
+            rows = await cursor.fetchall()
+        return [{"project_number": r[0], "conversation_id": r[1]} for r in rows]

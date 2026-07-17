@@ -125,6 +125,70 @@ def error_card(message: str) -> Dict[str, Any]:
     return _card(body=[{"type": "TextBlock", "text": f"⚠ {message}", "wrap": True, "color": "attention"}])
 
 
+def _format_amount(amount: float) -> str:
+    return f"${amount:,.0f}"
+
+
+def _trend_line(trend: Dict[str, Any]) -> str:
+    amount_delta = trend["amount_delta"]
+    if amount_delta > 0:
+        arrow, verb = "▲", "up"
+    elif amount_delta < 0:
+        arrow, verb = "▼", "down"
+    else:
+        arrow, verb = "→", "unchanged"
+    return f"{arrow} Open amount {verb} {_format_amount(abs(amount_delta))} vs last week"
+
+
+def _projection_line(projection: Dict[str, Any]) -> str:
+    customer_id = projection["customer_id"]
+    if projection["sample_size"] == 0:
+        return f"{customer_id}: not enough closed-invoice history yet for a projection."
+    avg = projection["avg_days_relative_to_due"]
+    if avg > 0:
+        pattern = f"typically pays {avg:.0f} day{'s' if avg != 1 else ''} late"
+    elif avg < 0:
+        pattern = f"typically pays {abs(avg):.0f} day{'s' if avg != -1 else ''} early"
+    else:
+        pattern = "typically pays on time"
+    return f"{customer_id}: {pattern} ({projection['risk']} risk, based on {projection['sample_size']} past invoice{'s' if projection['sample_size'] != 1 else ''})"
+
+
+def digest_card(
+    project_name: str,
+    health: Dict[str, Any],
+    trend: Optional[Dict[str, Any]],
+    projections: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Weekly AR-health digest (added 2026-07-17, services/digest_engine.py
+    sends this): open exposure + overdue count/amount for the project, the
+    trend against last week's snapshot, and a payment-pattern projection
+    per customer derived from that customer's own closed-case history.
+    See digest_engine.py's module docstring for the projection methodology
+    and its stated limitations (estimate, not a guarantee)."""
+    body: List[Dict[str, Any]] = [
+        {"type": "TextBlock", "text": "Weekly AR Digest", "weight": "bolder", "size": "medium"},
+        {"type": "TextBlock", "text": project_name, "weight": "bolder", "wrap": True},
+        _fact_set(
+            {
+                "Open invoices": str(health["open_invoice_count"]),
+                "Total open": _format_amount(health["total_open_amount"]),
+                "Overdue": f"{health['overdue_count']} ({_format_amount(health['overdue_amount'])})",
+            }
+        ),
+    ]
+    if trend:
+        body.append({"type": "TextBlock", "text": _trend_line(trend), "isSubtle": True, "wrap": True, "spacing": "small"})
+
+    if projections:
+        body.append({"type": "TextBlock", "text": "Customer payment patterns", "weight": "bolder", "spacing": "medium"})
+        for p in projections:
+            body.append({"type": "TextBlock", "text": _projection_line(p), "wrap": True, "size": "small"})
+
+    body.append({"type": "TextBlock", "text": "Automated message · Lummus AR", "isSubtle": True, "size": "small", "spacing": "medium"})
+    return _card(body=body)
+
+
 def disambiguation_card(question: str, candidates: List[Dict[str, str]]) -> Dict[str, Any]:
     """Phase 1's invoice-ID-free resolution rule, in Teams form: one
     tappable option per match, human-readable label only. Each candidate is

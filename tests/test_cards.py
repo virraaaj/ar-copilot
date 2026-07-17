@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 from app.channels.teams.cards import (
+    digest_card,
     disambiguation_card,
     error_card,
     redirect_card,
@@ -114,6 +115,50 @@ def test_disambiguation_card_shows_labels_not_ids():
     assert "id-1" not in visible
     assert "id-2" not in visible
     assert "id-1" in _hidden_data(card) and "id-2" in _hidden_data(card)
+
+
+def test_digest_card_shows_project_and_health_facts():
+    health = {"open_invoice_count": 5, "total_open_amount": 125000.0, "overdue_count": 2, "overdue_amount": 40000.0}
+    card = digest_card("Meridian Bay", health, trend=None, projections=[])
+
+    visible = _visible_text(card)
+    assert "Meridian Bay" in visible
+    assert "5" in visible
+    assert "$125,000" in visible
+    assert "$40,000" in visible
+
+
+def test_digest_card_omits_trend_line_on_first_digest():
+    health = {"open_invoice_count": 1, "total_open_amount": 1000.0, "overdue_count": 0, "overdue_amount": 0.0}
+    card = digest_card("Project X", health, trend=None, projections=[])
+
+    assert "vs last week" not in _visible_text(card)
+
+
+def test_digest_card_shows_trend_direction():
+    health = {"open_invoice_count": 1, "total_open_amount": 1000.0, "overdue_count": 0, "overdue_amount": 0.0}
+    up = digest_card("Project X", health, trend={"amount_delta": 500.0, "count_delta": 1, "overdue_delta": 0}, projections=[])
+    down = digest_card("Project X", health, trend={"amount_delta": -500.0, "count_delta": -1, "overdue_delta": 0}, projections=[])
+
+    assert "up" in _visible_text(up).lower()
+    assert "down" in _visible_text(down).lower()
+
+
+def test_digest_card_shows_customer_projections():
+    health = {"open_invoice_count": 1, "total_open_amount": 1000.0, "overdue_count": 0, "overdue_amount": 0.0}
+    projections = [
+        {"customer_id": "CUST-1", "sample_size": 3, "avg_days_relative_to_due": 18.0, "risk": "high"},
+        {"customer_id": "CUST-2", "sample_size": 0, "avg_days_relative_to_due": None, "risk": "unknown"},
+    ]
+    card = digest_card("Project X", health, trend=None, projections=projections)
+
+    visible = _visible_text(card)
+    assert "CUST-1" in visible
+    assert "18" in visible
+    assert "late" in visible.lower()
+    assert "high" in visible.lower()
+    assert "CUST-2" in visible
+    assert "not enough" in visible.lower()
 
 
 def test_to_attachment_wraps_card_in_bot_framework_envelope():
