@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "168e31e5-5b68-4bbb-8de2-077651835083",
+  "developer": {
+    "name": "CoreHelix",
+    "websiteUrl": "https://corehelix.ai",
+    "privacyUrl": "https://corehelix.ai/privacy",
+    "termsOfUseUrl": "https://corehelix.ai/terms"
+  },
+  "name": {
+    "short": "AR Copilot (Dev)",
+    "full": "AR Copilot -- CoreHelix Dev"
+  },
+  "description": {
+    "short": "AR dunning reminders and invoice Q&A.",
+    "full": "Posts accounts-receivable reminders for your projects and answers questions about your invoices. Ask it to snooze an invoice, add a comment, or set up a follow-up, or just message it directly."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0369a1",
+  "bots": [
+    {
+      "botId": "168e31e5-5b68-4bbb-8de2-077651835083",
+      "scopes": ["personal", "groupChat", "team"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

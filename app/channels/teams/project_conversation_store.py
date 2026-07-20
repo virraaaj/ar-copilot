@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS project_conversation_refs (
 )
 """
 
+# serviceUrl (added 2026-07-17): the per-region Bot Connector base URL a
+# reply to a given conversation must be POSTed to. Only known once we've
+# received at least one real incoming activity for that conversation_id
+# (see channels/teams/http.py) -- there is no way to derive it in advance.
+_SERVICE_URL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS conversation_service_urls (
+    conversation_id TEXT PRIMARY KEY,
+    service_url TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
 
 class ProjectConversationStore:
     def __init__(self, db_path: Optional[str] = None) -> None:
@@ -37,6 +49,7 @@ class ProjectConversationStore:
             return
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(_SCHEMA)
+            await db.execute(_SERVICE_URL_SCHEMA)
             await db.commit()
         self._initialized = True
 
@@ -77,3 +90,44 @@ class ProjectConversationStore:
             cursor = await db.execute("SELECT project_number, conversation_id FROM project_conversation_refs")
             rows = await cursor.fetchall()
         return [{"project_number": r[0], "conversation_id": r[1]} for r in rows]
+
+    async def record_service_url(self, conversation_id: str, service_url: str) -> None:
+        """Called on every incoming activity (channels/teams/http.py) --
+        cheap to overwrite each time since Microsoft can, in principle,
+        route a conversation to a different regional endpoint later."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "INSERT INTO conversation_service_urls (conversation_id, service_url) VALUES (?, ?) "
+                "ON CONFLICT(conversation_id) DO UPDATE SET service_url=excluded.service_url, updated_at=datetime('now')",
+                (conversation_id, service_url),
+            )
+            await db.commit()
+
+    async def get_service_url(self, conversation_id: str) -> Optional[str]:
+        await self._ensure_schema()
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                "SELECT service_url FROM conversation_service_urls WHERE conversation_id = ?", (conversation_id,)
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def get_any_known_service_url(self) -> Optional[str]:
+        """Fallback for create_group_conversation: a *new* conversation has
+        no serviceUrl of its own yet (nothing has happened in it), but
+        serviceUrl is a per-region Bot Connector endpoint shared by every
+        conversation this bot has ever been part of in practice -- so
+        reusing the most recently seen one is the standard way Bot
+        Framework bots proactively start new conversations. Returns None
+        if the bot hasn't received a single activity yet anywhere."""
+        await self._ensure_schema()
+        async with aiosqlite.connect(self._db_path) as db:
+            # updated_at has only second resolution, so break ties on rowid
+            # (monotonically increasing on INSERT) -- otherwise two writes
+            # within the same second could return either row.
+            cursor = await db.execute(
+                "SELECT service_url FROM conversation_service_urls ORDER BY updated_at DESC, rowid DESC LIMIT 1"
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else None

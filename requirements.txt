@@ -21,6 +21,9 @@ aiosqlite>=0.20.0
 pypdf>=4.2.0                    # native PDF text extraction
 azure-search-documents>=11.5.0  # hybrid text+vector index (blocked on AZURE_SEARCH_KEY)
 
+# ---- Teams bot inbound HTTP edge (Phase 4, added 2026-07-17) ----
+pyjwt[crypto]>=2.8.0            # validates incoming Bot Framework JWTs against Azure AD JWKS
+
 # ---- dev / test ----
 pytest>=8.0.0
 pytest-asyncio>=0.24.0

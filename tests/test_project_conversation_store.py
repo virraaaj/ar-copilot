@@ -59,3 +59,36 @@ async def test_list_all_returns_every_known_mapping(store: ProjectConversationSt
 @pytest.mark.asyncio
 async def test_list_all_empty_when_nothing_recorded(store: ProjectConversationStore) -> None:
     assert await store.list_all() == []
+
+
+@pytest.mark.asyncio
+async def test_record_and_get_service_url(store: ProjectConversationStore) -> None:
+    await store.record_service_url("conv-1", "https://smba.trafficmanager.net/amer/")
+
+    assert await store.get_service_url("conv-1") == "https://smba.trafficmanager.net/amer/"
+
+
+@pytest.mark.asyncio
+async def test_get_service_url_unknown_returns_none(store: ProjectConversationStore) -> None:
+    assert await store.get_service_url("conv-unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_re_recording_service_url_updates_it(store: ProjectConversationStore) -> None:
+    await store.record_service_url("conv-1", "https://old.example/")
+    await store.record_service_url("conv-1", "https://new.example/")
+
+    assert await store.get_service_url("conv-1") == "https://new.example/"
+
+
+@pytest.mark.asyncio
+async def test_get_any_known_service_url_returns_none_when_empty(store: ProjectConversationStore) -> None:
+    assert await store.get_any_known_service_url() is None
+
+
+@pytest.mark.asyncio
+async def test_get_any_known_service_url_returns_most_recent(store: ProjectConversationStore) -> None:
+    await store.record_service_url("conv-1", "https://first.example/")
+    await store.record_service_url("conv-2", "https://second.example/")
+
+    assert await store.get_any_known_service_url() == "https://second.example/"
