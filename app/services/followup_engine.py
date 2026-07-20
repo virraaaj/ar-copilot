@@ -23,6 +23,7 @@ from typing import Optional
 from app.channels.teams.messenger import TeamsMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.backend_client import BackendClient
+from app.services.chase_store import ChaseStore
 from app.services.email_lineage import build_lineage_footer, build_lineage_headers
 from app.services.email_sender import EmailSender
 from app.services.followup_store import FollowUpStore
@@ -43,13 +44,24 @@ def _build_followup_email(case_key: str, project_name: Optional[str], amount: Op
     return subject, body
 
 
-async def send_due_followups(backend: BackendClient, email_sender: EmailSender, store: FollowUpStore) -> int:
-    """Returns how many follow-up emails were actually sent this pass."""
+async def send_due_followups(
+    backend: BackendClient, email_sender: EmailSender, store: FollowUpStore, chase_store: Optional[ChaseStore] = None
+) -> int:
+    """Returns how many follow-up emails were actually sent this pass.
+
+    chase_store is optional only for backward compatibility with existing
+    call sites/tests that predate the chase engine (PLAN_AGENTIC_CHASE.md
+    §8: "the chase engine supersedes this feature for chased invoices") --
+    when given, a case with an open chase is skipped here so a customer
+    doesn't get both a fixed-cadence email and an agentic chase message
+    for the same invoice."""
     due = await store.list_due()
     sent_count = 0
 
     for campaign in due:
         case_id = campaign["case_id"]
+        if chase_store is not None and await chase_store.get_open_for_case(case_id):
+            continue
         try:
             case = await backend.get_case(case_id)
         except Exception:

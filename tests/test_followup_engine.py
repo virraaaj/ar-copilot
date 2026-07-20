@@ -8,6 +8,7 @@ import respx
 from app.channels.teams.messenger import FakeMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.backend_client import BackendClient
+from app.services.chase_store import ChaseStore
 from app.services.email_sender import FakeEmailSender
 from app.services.followup_engine import send_due_followups, mirror_new_replies_to_teams
 from app.services.followup_store import FollowUpStore
@@ -100,6 +101,23 @@ async def test_send_due_followups_skips_not_yet_due_campaigns(backend, email_sen
 
     assert sent == 0
     assert not cases_route.called
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_due_followups_skips_case_with_an_open_chase(backend, email_sender, store, tmp_path):
+    _mock_login()
+    cases_route = respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    await store.create("case-1", "customer@example.com", "pm@corehelix.ai", cadence_days=3)
+    chase_store = ChaseStore(db_path=str(tmp_path / "state.db"))
+    await chase_store.create("case-1")
+
+    sent = await send_due_followups(backend, email_sender, store, chase_store)
+
+    assert sent == 0
+    assert not cases_route.called
+    assert email_sender.sent == []
     await backend.close()
 
 

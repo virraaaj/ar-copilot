@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.agent.loop import AgentLoop
 from app.channels.teams import cards
@@ -30,6 +30,10 @@ from app.channels.teams.project_conversation_store import ProjectConversationSto
 from app.config import get_settings
 from app.guardrails.identity import resolve_role
 from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
+from app.services.backend_client import BackendClient
+from app.services.chase_engine import advance_chase_with_reply
+from app.services.chase_store import ChaseStore
+from app.services.email_sender import EmailSender
 
 # Deliberately simple keyword detection, not NLU -- catches the common
 # phrasing ("I want to snooze this", "can you add a comment", "pause it a
@@ -61,10 +65,22 @@ class TeamsBot:
         agent_loop: AgentLoop,
         messenger: TeamsMessenger,
         project_conversation_store: Optional[ProjectConversationStore] = None,
+        chase_store: Optional[ChaseStore] = None,
+        backend_client: Optional[BackendClient] = None,
+        email_sender: Optional[EmailSender] = None,
+        llm: Optional[Any] = None,
     ) -> None:
         self._loop = agent_loop
         self._messenger = messenger
         self._project_store = project_conversation_store or ProjectConversationStore()
+        # All four chase-related deps are optional and default to None --
+        # every existing caller/test that predates the chase engine
+        # (PLAN_AGENTIC_CHASE.md Phase C3) keeps working unchanged, just
+        # with the chase-reply pre-check inert (see _maybe_handle_chase_reply).
+        self._chase_store = chase_store
+        self._backend = backend_client
+        self._email_sender = email_sender
+        self._llm = llm
 
     async def handle(self, activity: IncomingActivity) -> None:
         if activity.card_data is not None:
@@ -74,6 +90,10 @@ class TeamsBot:
 
     async def _handle_text(self, activity: IncomingActivity) -> None:
         text = activity.text or ""
+
+        if await self._maybe_handle_chase_reply(activity, text):
+            return
+
         write_action = self._detect_write_intent(text)
         if write_action:
             await self._redirect_to_web(activity, write_action)
@@ -82,6 +102,58 @@ class TeamsBot:
         role = resolve_role(activity.user_id)
         result = await self._loop.run(text, role=role)
         await self._messenger.send_text(activity.conversation_id, result.answer)
+
+    async def _maybe_handle_chase_reply(self, activity: IncomingActivity, text: str) -> bool:
+        """If this project chat has an open chase waiting on the PM, treat
+        the message as a reply to it instead of a normal chat turn --
+        PLAN_AGENTIC_CHASE.md §4.4. Returns True if handled (caller should
+        stop), False to fall through to normal write-intent/chat handling.
+
+        Deliberately simple, not NLU, for the "is this even about the
+        chase" gate: a message ending in "?" is treated as a genuine
+        question and left for the normal agent loop (same "simple keyword
+        detection, not NLU" spirit as _detect_write_intent above) --
+        chase_machine's own parser is what actually interprets anything
+        that *is* routed here, so this gate only needs to be cheap, not
+        exhaustive.
+        """
+        if self._chase_store is None or self._backend is None or self._email_sender is None or self._llm is None:
+            return False
+        if text.strip().endswith("?"):
+            return False
+
+        project_number = await self._project_store.get_project_number(activity.conversation_id)
+        if not project_number:
+            return False
+
+        candidates = await self._chase_store.list_open_for_project(project_number, target="pm")
+        if not candidates:
+            return False
+
+        chase = self._pick_chase_for_reply(candidates, text)
+        if chase is None:
+            refs = ", ".join(c.get("invoice_no") or c.get("case_key") or c["id"] for c in candidates)
+            await self._messenger.send_text(
+                activity.conversation_id,
+                f"I have a few open invoices waiting on a reply here: {refs}. "
+                f"Which one is this about? (Include the invoice number in your reply.)",
+            )
+            return True
+
+        settings = get_settings()
+        await advance_chase_with_reply(
+            chase, text, self._llm, self._backend, self._messenger, self._email_sender,
+            self._chase_store, self._project_store, settings,
+        )
+        return True
+
+    @staticmethod
+    def _pick_chase_for_reply(candidates: List[Dict[str, Any]], text: str) -> Optional[Dict[str, Any]]:
+        if len(candidates) == 1:
+            return candidates[0]
+        lowered = text.lower()
+        matches = [c for c in candidates if (c.get("invoice_no") or "").lower() in lowered and c.get("invoice_no")]
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _detect_write_intent(text: str) -> Optional[str]:

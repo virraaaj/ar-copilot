@@ -32,6 +32,9 @@ export default function NavBar() {
             <NavLink to="/ar-health" className={linkClass}>
               AR Health
             </NavLink>
+            <NavLink to="/chases" className={linkClass}>
+              Chases
+            </NavLink>
             <NavLink to="/escalation-policy" className={linkClass}>
               Escalation Policy
             </NavLink>

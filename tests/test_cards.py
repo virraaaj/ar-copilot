@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 from app.channels.teams.cards import (
+    chase_escalation_card,
     digest_card,
     disambiguation_card,
     error_card,
@@ -159,6 +160,29 @@ def test_digest_card_shows_customer_projections():
     assert "high" in visible.lower()
     assert "CUST-2" in visible
     assert "not enough" in visible.lower()
+
+
+def test_chase_escalation_card_shows_invoice_reason_and_review_link():
+    card = chase_escalation_card(
+        "INV-1", "No reply from pm after 3 nudges.", target="pm", missed_count=1,
+        review_url="https://example.com/chases?chase_id=chase-1",
+    )
+
+    visible = _visible_text(card)
+    assert "INV-1" in visible
+    assert "No reply from pm after 3 nudges." in visible
+    assert "the PM" in visible
+    assert "1" in visible
+    assert card["actions"][0]["type"] == "Action.OpenUrl"
+    assert card["actions"][0]["url"] == "https://example.com/chases?chase_id=chase-1"
+
+
+def test_chase_escalation_card_omits_optional_facts_when_absent():
+    card = chase_escalation_card("INV-1", "Disputed.", target=None, missed_count=0, review_url="https://example.com")
+
+    visible = _visible_text(card)
+    assert "INV-1" in visible
+    assert "Disputed." in visible
 
 
 def test_to_attachment_wraps_card_in_bot_framework_envelope():

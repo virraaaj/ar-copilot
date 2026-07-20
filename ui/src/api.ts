@@ -401,6 +401,79 @@ export async function uploadDocument(token: string, file: File, docType?: string
   return resp.json();
 }
 
+// Agentic chase engine (PLAN_AGENTIC_CHASE.md, added 2026-07-20) -- the
+// Chases tab. Chase state mirrors app/services/chase_store.py's schema.
+export interface Chase {
+  id: string;
+  case_id: string;
+  case_key: string | null;
+  invoice_no: string | null;
+  project_number: string | null;
+  subject_token: string;
+  state: string;
+  target: string | null;
+  pm_email: string | null;
+  customer_email: string | null;
+  promised_date: string | null;
+  promised_by: string | null;
+  missed_count: number;
+  nudge_count: number;
+  clarify_count: number;
+  last_outreach_at: string | null;
+  next_action_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChaseEvent {
+  id: string;
+  chase_id: string;
+  at: string;
+  kind: string;
+  detail: Record<string, unknown> | null;
+}
+
+export async function listChases(token: string, state?: string): Promise<Chase[]> {
+  const qs = state ? `?state=${encodeURIComponent(state)}` : "";
+  return request(`/chases${qs}`, token);
+}
+
+export async function getChase(token: string, chaseId: string): Promise<Chase> {
+  return request(`/chases/${encodeURIComponent(chaseId)}`, token);
+}
+
+export async function listChaseEvents(token: string, chaseId: string): Promise<ChaseEvent[]> {
+  return request(`/chases/${encodeURIComponent(chaseId)}/events`, token);
+}
+
+export async function pauseChase(token: string, chaseId: string): Promise<void> {
+  await request(`/chases/${encodeURIComponent(chaseId)}/pause`, token, { method: "POST" });
+}
+
+export async function resumeChase(token: string, chaseId: string): Promise<void> {
+  await request(`/chases/${encodeURIComponent(chaseId)}/resume`, token, { method: "POST" });
+}
+
+export async function closeChase(token: string, chaseId: string, reason: string): Promise<void> {
+  await request(`/chases/${encodeURIComponent(chaseId)}/close`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function restartChase(token: string, chaseId: string): Promise<void> {
+  await request(`/chases/${encodeURIComponent(chaseId)}/restart`, token, { method: "POST" });
+}
+
+export async function editChaseCommitment(token: string, chaseId: string, promisedDate: string): Promise<void> {
+  await request(`/chases/${encodeURIComponent(chaseId)}/commitment`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ promised_date: promisedDate }),
+  });
+}
+
 export interface ChatHistoryMessage {
   role: "user" | "assistant";
   content: string;

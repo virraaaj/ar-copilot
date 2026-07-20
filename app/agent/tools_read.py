@@ -18,6 +18,7 @@ import datetime
 from typing import Any, Dict, List, Optional
 
 from app.services.backend_client import BackendClient
+from app.services.chase_store import ChaseStore
 from app.services.digest_engine import MAX_CUSTOMERS_SHOWN, compute_ar_health, compute_customer_projection
 
 # ---------------------------------------------------------------------------
@@ -142,6 +143,31 @@ async def aging_summary(client: BackendClient, business_unit_id: Optional[str] =
         "total_open_amount": round(total_open, 2),
         "by_aging_bucket": by_bucket,
         "by_stage": by_stage,
+    }
+
+
+async def get_chase_status(client: BackendClient, invoice_id: str) -> Dict[str, Any]:
+    """Status of the agentic chase engine's pursuit of one invoice, if
+    any (PLAN_AGENTIC_CHASE.md) -- state, who's currently being chased,
+    any promised payment date, and how many nudges/missed commitments so
+    far. `client` is unused (chase state lives in ChaseStore, not the
+    Lummus backend) but kept for handler-signature consistency with
+    every other tool (AgentLoop always calls handler(backend, **args))."""
+    store = ChaseStore()
+    chase = await store.get_latest_for_case(invoice_id)
+    if not chase:
+        return {"invoice_id": invoice_id, "has_chase": False}
+
+    return {
+        "invoice_id": invoice_id,
+        "has_chase": True,
+        "state": chase["state"],
+        "target": chase.get("target"),
+        "promised_date": chase.get("promised_date"),
+        "promised_by": chase.get("promised_by"),
+        "missed_count": chase.get("missed_count"),
+        "nudge_count": chase.get("nudge_count"),
+        "last_outreach_at": chase.get("last_outreach_at"),
     }
 
 
@@ -299,6 +325,21 @@ SCHEMAS: List[Dict[str, Any]] = [
             "required": ["project_number"],
         },
     },
+    {
+        "name": "get_chase_status",
+        "description": (
+            "Status of the automated agentic chase for one invoice, if any: which state it's in "
+            "(e.g. waiting on the PM, waiting on the customer, a payment date is being tracked, "
+            "escalated to a human), who's currently being chased, any promised payment date, and how "
+            "many nudges/missed commitments so far. Use this when asked what's happening with the "
+            "automated follow-up on a specific invoice."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"invoice_id": {"type": "string"}},
+            "required": ["invoice_id"],
+        },
+    },
 ]
 
 HANDLERS = {
@@ -309,4 +350,5 @@ HANDLERS = {
     "list_review_tasks": list_review_tasks,
     "aging_summary": aging_summary,
     "get_project_digest": get_project_digest,
+    "get_chase_status": get_chase_status,
 }

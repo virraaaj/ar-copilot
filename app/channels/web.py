@@ -47,6 +47,7 @@ from app.guardrails.policy import (
 )
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
+from app.services.chase_store import ChaseStore
 from app.services.followup_store import FollowUpError, FollowUpStore
 
 router = APIRouter(prefix="/api")
@@ -618,6 +619,149 @@ async def search_documents_endpoint(
     _user: str = Depends(require_session),
 ) -> List[Dict[str, Any]]:
     return await tool_search_documents(None, query=query, doc_type=doc_type, top_k=top_k)
+
+
+# ---------------------------------------------------------------------------
+# Agentic chase engine (PLAN_AGENTIC_CHASE.md Phase C4) — the web Chases
+# tab: every chase's current state + full event history, plus the human
+# actions available once one escalates (pause/resume/close/restart/edit
+# the tracked commitment). This is a thin read/write window onto
+# ChaseStore -- all the actual chase-progression logic lives in
+# chase_engine.py/chase_machine.py, untouched here.
+# ---------------------------------------------------------------------------
+
+
+class EditCommitmentRequest(BaseModel):
+    promised_date: str  # ISO date
+
+
+@router.get("/chases")
+async def list_chases_endpoint(
+    state: Optional[str] = None,
+    _user: str = Depends(require_session),
+) -> List[Dict[str, Any]]:
+    store = ChaseStore()
+    return await store.list_all(state=state)
+
+
+@router.get("/chases/{chase_id}")
+async def get_chase_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    return chase
+
+
+@router.get("/chases/{chase_id}/events")
+async def list_chase_events_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> List[Dict[str, Any]]:
+    store = ChaseStore()
+    return await store.list_events(chase_id)
+
+
+@router.post("/chases/{chase_id}/pause")
+async def pause_chase_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    store = ChaseStore()
+    if not await store.get(chase_id):
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    await store.update(chase_id, state="paused", next_action_at=None)
+    await store.add_event(chase_id, "human_action", {"action": "pause", "by": _user})
+    return {"ok": True}
+
+
+@router.post("/chases/{chase_id}/resume")
+async def resume_chase_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """Resumes a paused (or escalated) chase back onto the nudge cadence
+    -- next_action_at set to now so the very next poll tick picks it back
+    up, same "acts immediately" convention as followup_store.create()."""
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    resume_state = chase.get("target") and f"awaiting_{chase['target']}" or "pending"
+    await store.update(chase_id, state=resume_state, next_action_at=_now_iso())
+    await store.add_event(chase_id, "human_action", {"action": "resume", "by": _user})
+    return {"ok": True}
+
+
+class CloseChaseRequest(BaseModel):
+    reason: str
+
+
+@router.post("/chases/{chase_id}/close")
+async def close_chase_endpoint(
+    chase_id: str,
+    body: CloseChaseRequest,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    store = ChaseStore()
+    if not await store.get(chase_id):
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    if not body.reason.strip():
+        raise HTTPException(status_code=422, detail="reason is required.")
+    await store.update(chase_id, state="closed_manual", next_action_at=None)
+    await store.add_event(chase_id, "human_action", {"action": "close", "reason": body.reason, "by": _user})
+    return {"ok": True}
+
+
+@router.post("/chases/{chase_id}/restart")
+async def restart_chase_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """Re-opens a closed/escalated chase from scratch (state=pending) --
+    for when a human resolves the underlying issue (e.g. got the customer
+    email manually) and wants the automated chase to pick back up."""
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    await store.update(
+        chase_id, state="pending", target=None, promised_date=None, promised_by=None,
+        missed_count=0, nudge_count=0, clarify_count=0, next_action_at=_now_iso(),
+    )
+    await store.add_event(chase_id, "human_action", {"action": "restart", "by": _user})
+    return {"ok": True}
+
+
+@router.patch("/chases/{chase_id}/commitment")
+async def edit_chase_commitment_endpoint(
+    chase_id: str,
+    body: EditCommitmentRequest,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    try:
+        check_future_or_today(body.promised_date, "promised_date")
+    except PolicyViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    await store.update(chase_id, state="commitment_tracked", promised_date=body.promised_date, promised_by="pm")
+    await store.add_event(
+        chase_id, "human_action", {"action": "edit_commitment", "promised_date": body.promised_date, "by": _user}
+    )
+    return {"ok": True}
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 # ---------------------------------------------------------------------------

@@ -78,6 +78,34 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = ""
     FOLLOWUP_POLL_INTERVAL_SECONDS: int = 300
 
+    # ---- Agentic invoice chase engine (PLAN_AGENTIC_CHASE.md, added 2026-07-20) ----
+    # Master kill switch -- the poller doesn't even start without this.
+    # Ships default-off and dry-run-first: see PLAN_AGENTIC_CHASE.md §4.6.
+    CHASE_ENABLED: bool = False
+    CHASE_POLL_INTERVAL_SECONDS: int = 900
+    CHASE_DRY_RUN: bool = True
+    CHASE_MAX_SENDS_PER_TICK: int = 10
+    CHASE_MAX_NUDGES: int = 3
+    CHASE_MAX_MISSED_COMMITMENTS: int = 3
+    CHASE_MAX_COMMITMENT_DAYS: int = 90
+    CHASE_GRACE_DAYS: int = 2
+    CHASE_PAYMENT_VERIFY_DAYS: int = 3
+    CHASE_NUDGE_INTERVAL_DAYS: int = 3
+    CHASE_MAX_CLARIFICATIONS: int = 1
+    CHASE_MIN_HOURS_BETWEEN_TOUCHES: int = 72
+    # Comma-separated. Non-empty -> outbound chase email only goes to these
+    # addresses (UAT safety net, so "the customer" is always a test mailbox).
+    CHASE_TO_ADDRESS_ALLOWLIST: str = ""
+    # Phase C3 inbound email polling -- separate flag from CHASE_ENABLED
+    # since it needs its own Mail.Read admin consent that Mail.Send didn't
+    # (see .env's GRAPH_MAIL_* comment). Teams-side chasing works without it.
+    CHASE_MAIL_POLL_ENABLED: bool = False
+    CHASE_MAIL_POLL_INTERVAL_SECONDS: int = 300
+
+    @property
+    def chase_to_address_allowlist(self) -> List[str]:
+        return [a.strip().lower() for a in self.CHASE_TO_ADDRESS_ALLOWLIST.split(",") if a.strip()]
+
     # ---- Weekly AR-health digest (added 2026-07-17) ----
     # One digest card per project per ISO week, sent to that project's
     # Teams chat -- AR health (open exposure, overdue count/amount, stage

@@ -13,6 +13,7 @@ import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 import ProjectContacts from "./pages/ProjectContacts";
 import DefaultProjectContacts from "./pages/DefaultProjectContacts";
 import ARHealth from "./pages/ARHealth";
+import Chases from "./pages/Chases";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -75,6 +76,14 @@ export default function App() {
         element={
           <RequireSession>
             <ARHealth />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/chases"
+        element={
+          <RequireSession>
+            <Chases />
           </RequireSession>
         }
       />

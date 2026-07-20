@@ -189,6 +189,40 @@ def digest_card(
     return _card(body=body)
 
 
+def chase_escalation_card(
+    invoice_ref: str,
+    reason: str,
+    target: Optional[str],
+    missed_count: int,
+    review_url: str,
+) -> Dict[str, Any]:
+    """The agentic chase engine (PLAN_AGENTIC_CHASE.md §4.5) ran out of
+    moves on an invoice and needs a human -- what was tried, why it
+    stopped, and a link to the full chase history/actions on the web."""
+    facts = {"Invoice": invoice_ref, "Reason": reason}
+    if target:
+        facts["Last chasing"] = "the PM" if target == "pm" else "the customer"
+    if missed_count:
+        facts["Missed commitments"] = str(missed_count)
+
+    return _card(
+        body=[
+            {
+                "type": "Container",
+                "style": "attention",
+                "bleed": True,
+                "items": [
+                    {"type": "TextBlock", "text": "⚠ Chase escalated", "weight": "bolder", "size": "medium", "color": "attention"},
+                ],
+            },
+            _fact_set(facts),
+            {"type": "TextBlock", "text": "This invoice needs a human -- the automated chase has stopped.", "wrap": True},
+            {"type": "TextBlock", "text": "Automated message · AR Copilot chase engine", "isSubtle": True, "size": "small"},
+        ],
+        actions=[{"type": "Action.OpenUrl", "title": "Review this chase", "url": review_url}],
+    )
+
+
 def disambiguation_card(question: str, candidates: List[Dict[str, str]]) -> Dict[str, Any]:
     """Phase 1's invoice-ID-free resolution rule, in Teams form: one
     tappable option per match, human-readable label only. Each candidate is

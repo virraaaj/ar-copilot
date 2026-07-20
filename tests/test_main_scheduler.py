@@ -26,7 +26,7 @@ def _reconfigure(monkeypatch) -> None:
 
 
 def _patch_all_pollers(monkeypatch):
-    calls = {"reminders": [], "followups": [], "mirror": [], "digests": []}
+    calls = {"reminders": [], "followups": [], "mirror": [], "digests": [], "chase": [], "chase_mail": []}
 
     async def fake_reminders(*a, **k):
         calls["reminders"].append(1)
@@ -44,10 +44,20 @@ def _patch_all_pollers(monkeypatch):
         calls["digests"].append(1)
         return 0
 
+    async def fake_chase(*a, **k):
+        calls["chase"].append(1)
+        return 0
+
+    async def fake_chase_mail(*a, **k):
+        calls["chase_mail"].append(1)
+        return 0
+
     monkeypatch.setattr(main_module, "send_due_reminders", fake_reminders)
     monkeypatch.setattr(main_module, "send_due_followups", fake_followups)
     monkeypatch.setattr(main_module, "mirror_new_replies_to_teams", fake_mirror)
     monkeypatch.setattr(main_module, "send_project_digests", fake_digests)
+    monkeypatch.setattr(main_module, "run_chase_tick", fake_chase)
+    monkeypatch.setattr(main_module, "poll_chase_mailbox", fake_chase_mail)
     return calls
 
 
@@ -62,7 +72,7 @@ async def test_nothing_runs_when_all_pollers_disabled(monkeypatch):
     async with main_module.lifespan(main_module.app):
         await asyncio.sleep(0.05)
 
-    assert calls == {"reminders": [], "followups": [], "mirror": [], "digests": []}
+    assert calls == {"reminders": [], "followups": [], "mirror": [], "digests": [], "chase": [], "chase_mail": []}
 
 
 @pytest.mark.asyncio
@@ -82,6 +92,7 @@ async def test_proactive_enabled_runs_reminders_and_followups_not_digests(monkey
     assert len(calls["followups"]) >= 1
     assert len(calls["mirror"]) >= 1
     assert calls["digests"] == []
+    assert calls["chase"] == []
 
 
 @pytest.mark.asyncio
@@ -99,6 +110,47 @@ async def test_digest_enabled_runs_digests_not_reminders(monkeypatch):
     assert len(calls["digests"]) >= 1
     assert calls["reminders"] == []
     assert calls["followups"] == []
+    assert calls["chase"] == []
+
+
+@pytest.mark.asyncio
+async def test_chase_enabled_runs_chase_not_others(monkeypatch):
+    monkeypatch.setenv("PROACTIVE_POLL_ENABLED", "false")
+    monkeypatch.setenv("DIGEST_POLL_ENABLED", "false")
+    monkeypatch.setenv("CHASE_ENABLED", "true")
+    monkeypatch.setenv("CHASE_POLL_INTERVAL_SECONDS", "0")
+    _set_common_env(monkeypatch)
+    _reconfigure(monkeypatch)
+    calls = _patch_all_pollers(monkeypatch)
+
+    async with main_module.lifespan(main_module.app):
+        await asyncio.sleep(0.05)
+
+    assert len(calls["chase"]) >= 1
+    assert calls["reminders"] == []
+    assert calls["followups"] == []
+    assert calls["digests"] == []
+
+
+@pytest.mark.asyncio
+async def test_chase_mail_poll_enabled_independent_of_chase_enabled(monkeypatch):
+    """CHASE_MAIL_POLL_ENABLED is a separate flag from CHASE_ENABLED
+    (PLAN_AGENTIC_CHASE.md Phase C3: email inbound needs its own admin
+    consent) -- it must be able to run on its own."""
+    monkeypatch.setenv("PROACTIVE_POLL_ENABLED", "false")
+    monkeypatch.setenv("DIGEST_POLL_ENABLED", "false")
+    monkeypatch.setenv("CHASE_ENABLED", "false")
+    monkeypatch.setenv("CHASE_MAIL_POLL_ENABLED", "true")
+    monkeypatch.setenv("CHASE_MAIL_POLL_INTERVAL_SECONDS", "0")
+    _set_common_env(monkeypatch)
+    _reconfigure(monkeypatch)
+    calls = _patch_all_pollers(monkeypatch)
+
+    async with main_module.lifespan(main_module.app):
+        await asyncio.sleep(0.05)
+
+    assert len(calls["chase_mail"]) >= 1
+    assert calls["chase"] == []
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,9 @@ import httpx
 import pytest
 import respx
 
-from app.agent.tools_read import get_project_digest, get_timeline, list_invoices
+from app.agent.tools_read import get_chase_status, get_project_digest, get_timeline, list_invoices
 from app.services.backend_client import BackendClient
+from app.services.chase_store import ChaseStore
 
 BASE = "http://test-backend"
 
@@ -18,6 +19,20 @@ def _mock_login():
 @pytest.fixture
 def client() -> BackendClient:
     return BackendClient(BASE, "svc@example.com", "password")
+
+
+@pytest.fixture
+def chase_state_db(tmp_path, monkeypatch):
+    """get_chase_status builds its own ChaseStore() internally (same
+    pattern as start_follow_up's FollowUpStore()), reading STATE_DB_PATH
+    from settings -- point that at a temp file so tests are isolated."""
+    monkeypatch.setenv("STATE_DB_PATH", str(tmp_path / "state.db"))
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://placeholder/")
+    monkeypatch.setenv("AZURE_OPENAI_KEY", "placeholder")
+    import app.config as config_module
+
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+    return str(tmp_path / "state.db")
 
 
 @pytest.mark.asyncio
@@ -140,3 +155,27 @@ async def test_get_project_digest_not_found_when_no_cases(client: BackendClient)
 
     assert digest == {"project_number": "PN-unknown", "found": False}
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_get_chase_status_no_chase_yet(client: BackendClient, chase_state_db) -> None:
+    result = await get_chase_status(client, invoice_id="case-unknown")
+
+    assert result == {"invoice_id": "case-unknown", "has_chase": False}
+
+
+@pytest.mark.asyncio
+async def test_get_chase_status_returns_current_state(client: BackendClient, chase_state_db) -> None:
+    store = ChaseStore(db_path=chase_state_db)
+    chase_id = await store.create("case-1", invoice_no="INV-1")
+    await store.update(chase_id, state="commitment_tracked", target="pm", promised_date="2026-08-01",
+                        promised_by="pm", missed_count=1, nudge_count=2)
+
+    result = await get_chase_status(client, invoice_id="case-1")
+
+    assert result["has_chase"] is True
+    assert result["state"] == "commitment_tracked"
+    assert result["promised_date"] == "2026-08-01"
+    assert result["promised_by"] == "pm"
+    assert result["missed_count"] == 1
+    assert result["nudge_count"] == 2

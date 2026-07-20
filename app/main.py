@@ -22,17 +22,22 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.channels.teams.http import router as teams_http_router
 from app.channels.teams.messenger import get_messenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.channels.teams.proactive import ReminderDedup, send_due_reminders
 from app.channels.web import router as web_router
 from app.config import get_settings
 from app.services.backend_client import BackendError, get_backend_client
+from app.services.azure_openai import get_llm
+from app.services.chase_engine import poll_chase_mailbox, run_chase_tick
+from app.services.chase_store import ChaseStore
 from app.services.digest_engine import send_project_digests
 from app.services.digest_store import DigestStore
 from app.services.email_sender import get_email_sender
 from app.services.followup_engine import mirror_new_replies_to_teams, send_due_followups
 from app.services.followup_store import FollowUpStore
+from app.services.graph_mailbox import get_mailbox_reader
 
 logging.basicConfig(level=get_settings().LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -72,6 +77,10 @@ async def lifespan(app: FastAPI):
     backend = get_backend_client()
     messenger = get_messenger()
     project_store = ProjectConversationStore()
+    # Always constructed (cheap, lazy schema) so send_due_followups can skip
+    # cases the chase engine already owns even when CHASE_ENABLED is False --
+    # harmless no-op in that case, since no chase rows exist to skip.
+    chase_store = ChaseStore()
 
     if s.PROACTIVE_POLL_ENABLED:
         dedup = ReminderDedup()
@@ -85,7 +94,7 @@ async def lifespan(app: FastAPI):
         email_sender = get_email_sender()
 
         async def run_followups() -> int:
-            sent = await send_due_followups(backend, email_sender, followup_store)
+            sent = await send_due_followups(backend, email_sender, followup_store, chase_store)
             mirrored = await mirror_new_replies_to_teams(backend, followup_store, project_store, messenger)
             return sent + mirrored
 
@@ -98,6 +107,24 @@ async def lifespan(app: FastAPI):
             return await send_project_digests(backend, messenger, project_store, digest_store)
 
         tasks.append(asyncio.create_task(_poll_loop("digests", s.DIGEST_POLL_INTERVAL_SECONDS, run_digests)))
+
+    if s.CHASE_ENABLED:
+        email_sender_for_chases = get_email_sender()
+
+        async def run_chase() -> int:
+            return await run_chase_tick(backend, messenger, email_sender_for_chases, chase_store, project_store, s)
+
+        tasks.append(asyncio.create_task(_poll_loop("chase", s.CHASE_POLL_INTERVAL_SECONDS, run_chase)))
+
+    if s.CHASE_MAIL_POLL_ENABLED:
+        llm = get_llm()
+
+        async def run_chase_mail() -> int:
+            return await poll_chase_mailbox(
+                get_mailbox_reader(), llm, backend, messenger, get_email_sender(), chase_store, project_store, s
+            )
+
+        tasks.append(asyncio.create_task(_poll_loop("chase_mail", s.CHASE_MAIL_POLL_INTERVAL_SECONDS, run_chase_mail)))
 
     yield
 
@@ -114,6 +141,7 @@ app = FastAPI(title="AR Copilot", lifespan=lifespan)
 
 # API + health first -- must win over the SPA catch-all registered below.
 app.include_router(web_router)
+app.include_router(teams_http_router)
 
 
 @app.exception_handler(httpx.RequestError)

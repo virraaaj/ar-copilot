@@ -467,6 +467,39 @@ the next one rather than killing the loop.
   data verification pending" state as other work this session when the
   local stack was down.
 
+### Phase 4.7 — Agentic invoice chase engine (added 2026-07-20)
+
+⚠️ Second "intelligent AI features" round, requested directly by the
+boss: "something more agentic ... chases an invoice until it gets a
+payment date, and if it hasn't been paid by that date, it chases the
+invoice again." Full design brief, phase breakdown, and acceptance
+criteria live in **`PLAN_AGENTIC_CHASE.md`** (kept as its own document
+rather than folded in here since it's a substantial standalone design) —
+implemented there as Phases C0-C5, all complete and live-verified.
+
+Summary: a per-invoice "chase" state machine (`services/chase_store.py`,
+`chase_machine.py`) that starts with the PM once an invoice is overdue,
+uses a forced-tool-call LLM parser (`chase_parser.py`) to turn free-text
+replies into structured commitments (a promised date, a handoff to the
+customer, a payment claim, a dispute), tracks the promised date and
+re-chases (with a hard nudge/miss budget, escalating to a human once
+exhausted) if it's missed. `chase_engine.py` is the I/O layer wiring all
+of that to the real backend/Teams/email; inbound replies are routed
+through both the existing `/api/messages` Teams edge (`bot.py`'s
+pre-AgentLoop chase check) and a new Graph-mailbox poller (blocked on the
+same `Mail.Read` admin consent gap as inbound email generally — see
+`.env`'s `GRAPH_MAIL_*` comment). A `Chases` web tab
+(`ui/src/pages/Chases.tsx`) gives full visibility + human override
+(pause/resume/close/restart/edit-commitment) once something escalates.
+
+Ships default-off (`CHASE_ENABLED=false`) and dry-run-first
+(`CHASE_DRY_RUN=true`) with a hard per-tick send cap — see
+`PLAN_AGENTIC_CHASE.md` §4.6 for the full guardrail list. Live-verified
+end-to-end against the real UAT backend (a real overdue invoice, created
+via aging-table sync + trigger-tick) and real gpt-5-mini (a real reply --
+"the customer told our AR team they will pay this by August 15th 2026" --
+correctly parsed to an absolute date and tracked as a commitment).
+
 ### Phase 5 — Proactive engine (remaining watchers)
 Phase 4 already covers stage-triggered reminders (the main "sent reminders"
 ask). What's left here: PM hasn't replied N days after outreach; snooze
