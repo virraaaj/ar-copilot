@@ -132,6 +132,31 @@ async def test_add_project_contact_rejects_bad_type(client: BackendClient) -> No
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_contacts_for_project_extracts_the_real_response_shape(client: BackendClient) -> None:
+    """Regression test (found live 2026-07-20): this endpoint's real shape
+    is {"project_number": ..., "contacts": [...]} -- NOT {"items": [...]}
+    like list_all_project_contacts. Every caller (get_project_contacts
+    chat tool, proactive.py's reminder lookup, chase_engine's PM-email
+    resolution) was silently getting [] back from this call in production
+    because it used the wrong unwrap helper, and every existing test had
+    (wrongly) mocked the {"items": ...} shape too, so nothing caught it
+    until a real live run against the actual UAT backend."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json={"project_number": "PN-1", "contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]},
+        )
+    )
+
+    contacts = await client.list_contacts_for_project("PN-1")
+
+    assert contacts == [{"contact_type": "pm", "email": "pm@corehelix.ai"}]
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_default_project_contacts_returns_scopes(client: BackendClient) -> None:
     _mock_login = respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     respx.get(f"{BASE}/api/v1/dunning/default-project-contacts").mock(

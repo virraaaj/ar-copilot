@@ -17,6 +17,13 @@ import app.main as main_module
 def _set_common_env(monkeypatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://placeholder/")
     monkeypatch.setenv("AZURE_OPENAI_KEY", "placeholder")
+    # Explicit safe baseline -- Settings() falls back to the real .env file
+    # for anything not set here, and that file's CHASE_* flags are live
+    # (2026-07-20) rather than the repo's checked-in defaults. Tests that
+    # want a flag on set it themselves after calling this.
+    monkeypatch.setenv("CHASE_ENABLED", "false")
+    monkeypatch.setenv("CHASE_DRY_RUN", "true")
+    monkeypatch.setenv("CHASE_MAIL_POLL_ENABLED", "false")
 
 
 def _reconfigure(monkeypatch) -> None:
@@ -115,11 +122,11 @@ async def test_digest_enabled_runs_digests_not_reminders(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_chase_enabled_runs_chase_not_others(monkeypatch):
+    _set_common_env(monkeypatch)
     monkeypatch.setenv("PROACTIVE_POLL_ENABLED", "false")
     monkeypatch.setenv("DIGEST_POLL_ENABLED", "false")
     monkeypatch.setenv("CHASE_ENABLED", "true")
     monkeypatch.setenv("CHASE_POLL_INTERVAL_SECONDS", "0")
-    _set_common_env(monkeypatch)
     _reconfigure(monkeypatch)
     calls = _patch_all_pollers(monkeypatch)
 
@@ -137,12 +144,12 @@ async def test_chase_mail_poll_enabled_independent_of_chase_enabled(monkeypatch)
     """CHASE_MAIL_POLL_ENABLED is a separate flag from CHASE_ENABLED
     (PLAN_AGENTIC_CHASE.md Phase C3: email inbound needs its own admin
     consent) -- it must be able to run on its own."""
+    _set_common_env(monkeypatch)
     monkeypatch.setenv("PROACTIVE_POLL_ENABLED", "false")
     monkeypatch.setenv("DIGEST_POLL_ENABLED", "false")
     monkeypatch.setenv("CHASE_ENABLED", "false")
     monkeypatch.setenv("CHASE_MAIL_POLL_ENABLED", "true")
     monkeypatch.setenv("CHASE_MAIL_POLL_INTERVAL_SECONDS", "0")
-    _set_common_env(monkeypatch)
     _reconfigure(monkeypatch)
     calls = _patch_all_pollers(monkeypatch)
 

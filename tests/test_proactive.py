@@ -63,7 +63,7 @@ async def test_sends_reminder_and_creates_project_conversation_on_first_use(back
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
@@ -85,7 +85,7 @@ async def test_reminder_card_buttons_are_openurl_magic_links(backend, messenger,
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
 
     await send_due_reminders(backend, messenger, store, dedup)
@@ -107,7 +107,7 @@ async def test_second_pass_does_not_resend_same_case_and_stage(backend, messenge
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
 
     first_pass = await send_due_reminders(backend, messenger, store, dedup)
@@ -140,7 +140,7 @@ async def test_project_with_no_contacts_is_skipped_not_error(backend, messenger,
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": []})  # no contacts at all
+        return_value=httpx.Response(200, json={"contacts": []})  # no contacts at all
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)  # must not raise
@@ -156,7 +156,7 @@ async def test_contacts_with_no_email_are_skipped_not_error(backend, messenger, 
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": None}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": None}]})
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
@@ -174,7 +174,7 @@ async def test_multiple_cases_same_project_pool_into_one_conversation(backend, m
     case_b = _case(case_id="case-b", project_number="PN-1", stage="escalation")
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [case_a, case_b]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
@@ -194,10 +194,10 @@ async def test_multiple_projects_send_independently(backend, messenger, store, d
     case_b = _case(case_id="case-b", project_number="PN-B", stage="escalation")
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [case_a, case_b]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-A/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm-a@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm-a@corehelix.ai"}]})
     )
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-B/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm-b@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm-b@corehelix.ai"}]})
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)
@@ -215,7 +215,7 @@ async def test_reuses_existing_project_conversation_instead_of_creating_a_new_on
     await store.record("PN-1", "conv-existing")
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case()]}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
 
     sent = await send_due_reminders(backend, messenger, store, dedup)

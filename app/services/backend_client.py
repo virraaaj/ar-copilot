@@ -221,10 +221,20 @@ class BackendClient:
         return self._unwrap_list(self._ok_or_raise(resp, "List project contacts"))
 
     async def list_contacts_for_project(self, project_number: str) -> List[Dict[str, Any]]:
+        # This endpoint's real response shape is {"project_number": ...,
+        # "contacts": [...]} -- distinct from list_all_project_contacts'
+        # {"items": [...]} shape, so _unwrap_list (which only recognizes
+        # "items"/"data") silently returned [] here always. Found live
+        # 2026-07-20: the chase engine's PM-email resolution, the
+        # get_project_contacts chat tool, and proactive.py's reminder
+        # contact lookup were all silently getting no contacts back from
+        # this call since it was added -- every test had mocked the wrong
+        # ("items") shape, which is why this went unnoticed until a live run.
         resp = await self._request(
             "GET", f"/api/v1/dunning/projects/{project_number}/contacts"
         )
-        return self._unwrap_list(self._ok_or_raise(resp, "List project contacts"))
+        payload = self._ok_or_raise(resp, "List project contacts")
+        return payload.get("contacts", []) if isinstance(payload, dict) else []
 
     async def add_project_contact(
         self,

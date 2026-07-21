@@ -171,7 +171,7 @@ async def test_pending_chase_sends_pm_outreach_and_resolves_pm_email(backend, ch
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
     respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
     chase_id = await chase_store.create("case-1", project_number="PN-1", invoice_no="INV-1", next_action_at=past_iso())
@@ -196,7 +196,7 @@ async def test_pending_chase_prefers_teams_when_project_chat_known(backend, chas
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
     respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
     await project_store.record("PN-1", "conv-1")
@@ -217,7 +217,7 @@ async def test_dry_run_does_not_actually_send_anything(backend, chase_store, pro
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
     await chase_store.create("case-1", project_number="PN-1", next_action_at=past_iso())
 
@@ -345,7 +345,7 @@ async def test_send_budget_defers_extra_sends_to_next_tick(backend, chase_store,
     respx.get(f"{BASE}/api/v2/dunning/cases/case-2").mock(return_value=httpx.Response(200, json=_case_json(case_id="case-2")))
     respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
     await chase_store.create("case-1", project_number="PN-1", next_action_at=past_iso())
     await chase_store.create("case-2", project_number="PN-1", next_action_at=past_iso())
@@ -529,7 +529,7 @@ async def test_run_chase_tick_creates_and_processes_in_one_call(backend, chase_s
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": [_case_json()]}))
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
     respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
-        return_value=httpx.Response(200, json={"items": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
     )
     respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
 
