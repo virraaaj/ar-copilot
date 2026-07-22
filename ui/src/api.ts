@@ -421,6 +421,7 @@ export interface Chase {
   clarify_count: number;
   last_outreach_at: string | null;
   next_action_at: string | null;
+  total_tokens_used: number;
   created_at: string;
   updated_at: string;
 }

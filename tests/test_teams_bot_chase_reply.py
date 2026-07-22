@@ -37,9 +37,13 @@ class ScriptedLLM:
         self._response = response
         self.calls = 0
 
-    async def chat(self, messages, tools=None, tool_choice="auto"):
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
         self.calls += 1
-        return self._response
+        # Mirrors AzureOpenAIService's real contract: return_usage=True
+        # (used by chase_parser.py) gets a (message, tokens) tuple;
+        # everything else (AgentLoop's normal chat path) gets the bare
+        # message it already expects.
+        return (self._response, 0) if return_usage else self._response
 
 
 @pytest.fixture

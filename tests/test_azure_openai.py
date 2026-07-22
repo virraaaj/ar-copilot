@@ -70,3 +70,48 @@ async def test_chat_omits_tools_when_none_given(real_settings):
     sent_kwargs = mock_create.call_args.kwargs
     assert "tools" not in sent_kwargs
     assert "tool_choice" not in sent_kwargs
+
+
+@pytest.mark.asyncio
+async def test_chat_default_return_shape_is_unchanged(real_settings):
+    """return_usage defaults to False -- every existing caller (AgentLoop,
+    etc.) must keep getting back just the message, not a tuple."""
+    service = AzureOpenAIService()
+
+    fake_response = SimpleNamespace(
+        choices=[SimpleNamespace(message="the message")],
+        usage=SimpleNamespace(total_tokens=123),
+    )
+    service._client.chat.completions.create = AsyncMock(return_value=fake_response)
+
+    result = await service.chat([{"role": "user", "content": "hi"}])
+
+    assert result == "the message"
+
+
+@pytest.mark.asyncio
+async def test_chat_return_usage_true_returns_message_and_token_count(real_settings):
+    service = AzureOpenAIService()
+
+    fake_response = SimpleNamespace(
+        choices=[SimpleNamespace(message="the message")],
+        usage=SimpleNamespace(total_tokens=456),
+    )
+    service._client.chat.completions.create = AsyncMock(return_value=fake_response)
+
+    message, tokens = await service.chat([{"role": "user", "content": "hi"}], return_usage=True)
+
+    assert message == "the message"
+    assert tokens == 456
+
+
+@pytest.mark.asyncio
+async def test_chat_return_usage_handles_missing_usage_gracefully(real_settings):
+    service = AzureOpenAIService()
+
+    fake_response = SimpleNamespace(choices=[SimpleNamespace(message="the message")], usage=None)
+    service._client.chat.completions.create = AsyncMock(return_value=fake_response)
+
+    message, tokens = await service.chat([{"role": "user", "content": "hi"}], return_usage=True)
+
+    assert tokens == 0

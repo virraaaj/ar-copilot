@@ -48,6 +48,8 @@ def make_settings(**overrides) -> SimpleNamespace:
         CHASE_NUDGE_INTERVAL_DAYS=3,
         CHASE_MAX_CLARIFICATIONS=1,
         chase_to_address_allowlist=[],
+        CHASE_COMPOSER_ENABLED=False,
+        CHASE_SMART_ESCALATION_ENABLED=False,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -387,11 +389,12 @@ def make_tool_call(name: str, arguments: dict):
 
 
 class ScriptedLLM:
-    def __init__(self, response):
+    def __init__(self, response, tokens=0):
         self._response = response
+        self._tokens = tokens
 
-    async def chat(self, messages, tools=None, tool_choice="auto"):
-        return self._response
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
+        return self._response, self._tokens
 
 
 @pytest.mark.asyncio
@@ -539,4 +542,194 @@ async def test_run_chase_tick_creates_and_processes_in_one_call(backend, chase_s
     assert result >= 1
     chase = await chase_store.get_open_for_case("case-1")
     assert chase["state"] == "awaiting_pm"
+    await backend.close()
+
+
+# ---- AI features: composer + smart escalation + token tracking (added 2026-07-22) ---
+
+
+class QueueLLM:
+    """Returns pre-scripted (message, tokens) responses in call order --
+    both compose_message and assess_chase_trajectory always call with
+    return_usage=True, so every response here is the tuple shape."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
+        self.calls.append({"messages": messages, "tools": tools})
+        return self._responses.pop(0)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_composer_rewrites_outreach_and_charges_tokens_when_enabled(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", project_number="PN-1", invoice_no="INV-1", next_action_at=past_iso())
+
+    llm = QueueLLM([(SimpleNamespace(content="Hey! Just checking in on this one -- any update?"), 73)])
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_COMPOSER_ENABLED=True)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    assert email_sender.sent[0].html_body == "<p>Hey! Just checking in on this one -- any update?</p>"
+    chase = await chase_store.get(chase_id)
+    assert chase["total_tokens_used"] == 73
+    events = await chase_store.list_events(chase_id)
+    outreach = [e for e in events if e["kind"] == "outreach_sent"][0]
+    assert outreach["detail"]["composed"] is True
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_composer_disabled_by_default_sends_the_template_unchanged(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    await chase_store.create("case-1", project_number="PN-1", invoice_no="INV-1", next_action_at=past_iso())
+
+    # No llm passed at all -- proves the composer path is fully inert by default.
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_COMPOSER_ENABLED=False)
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+
+    assert "now overdue" in email_sender.sent[0].html_body
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_smart_escalation_escalates_early_on_concerning_verdict(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    # nudge_count=0 -- nowhere near the deterministic cap (3) -- proves
+    # this is the AI signal escalating early, not the ordinary budget.
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    llm = QueueLLM([(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_trajectory_assessment", {"verdict": "concerning", "reason": "Hostile, disputing the invoice"})
+    ]), 61)])
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_SMART_ESCALATION_ENABLED=True)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "escalated"
+    assert chase["total_tokens_used"] == 61
+    events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "trajectory_assessed" and e["detail"]["verdict"] == "concerning" for e in events)
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_smart_escalation_progressing_verdict_defers_to_normal_nudge(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    llm = QueueLLM([(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_trajectory_assessment", {"verdict": "progressing", "reason": "PM is actively engaging"})
+    ]), 40)])
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_SMART_ESCALATION_ENABLED=True)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "awaiting_pm"  # not escalated -- normal nudge happened instead
+    assert chase["nudge_count"] == 1
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_smart_escalation_stalling_below_soft_threshold_does_not_escalate_early(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    # nudge_count=0, cap=3 -- well below the (cap - 1) soft threshold, so
+    # "stalling" alone should NOT trigger early escalation here.
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    llm = QueueLLM([(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_trajectory_assessment", {"verdict": "stalling", "reason": "Vague non-answer"})
+    ]), 30)])
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_SMART_ESCALATION_ENABLED=True, CHASE_MAX_NUDGES=3)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "awaiting_pm"
+    assert chase["nudge_count"] == 1
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_smart_escalation_stalling_at_soft_threshold_escalates_early(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    # nudge_count=2, cap=3 -- exactly at (cap - 1), the soft threshold.
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=2)
+
+    llm = QueueLLM([(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_trajectory_assessment", {"verdict": "stalling", "reason": "Still vague after repeated asks"})
+    ]), 30)])
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_SMART_ESCALATION_ENABLED=True, CHASE_MAX_NUDGES=3)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "escalated"
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_smart_escalation_disabled_by_default_never_calls_the_llm(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    llm = QueueLLM([])  # would raise IndexError if ever called
+    settings = make_settings(CHASE_DRY_RUN=False, CHASE_SMART_ESCALATION_ENABLED=False)
+
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "awaiting_pm"
+    assert chase["nudge_count"] == 1
+    assert llm.calls == []
     await backend.close()

@@ -65,6 +65,22 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+def escalate_now(chase: Dict[str, Any], reason: str) -> Decision:
+    """Immediate escalation, bypassing the nudge/miss counters entirely --
+    added 2026-07-22 for smart escalation judgment (chase_trajectory.py).
+    chase_engine.py calls this instead of on_nudge_check/on_commitment_due
+    when the AI trajectory assessment says the conversation is genuinely
+    concerning (hostile, evasive, disputing) or has stalled well before
+    the deterministic budget would have caught it -- this only ever fires
+    *earlier* than the hard caps would, never grants more patience than
+    them, so a chase's worst case is unchanged even if this is wrong."""
+    return Decision(
+        updates={"state": "escalated", "next_action_at": None},
+        actions=[Escalate(reason=reason)],
+        events=[("escalated", {"reason": reason})],
+    )
+
+
 def start_pm_outreach(chase: Dict[str, Any], pm_email: Optional[str], config: ChaseConfig = ChaseConfig()) -> Decision:
     """A brand-new chase (state='pending') always starts by asking the PM
     -- per the boss's own sample flow, the PM is always the first touch."""

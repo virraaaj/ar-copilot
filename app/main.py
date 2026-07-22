@@ -110,9 +110,10 @@ async def lifespan(app: FastAPI):
 
     if s.CHASE_ENABLED:
         email_sender_for_chases = get_email_sender()
+        chase_llm = get_llm()  # powers the composer/smart-escalation AI features when their flags are on
 
         async def run_chase() -> int:
-            return await run_chase_tick(backend, messenger, email_sender_for_chases, chase_store, project_store, s)
+            return await run_chase_tick(backend, messenger, email_sender_for_chases, chase_store, project_store, s, chase_llm)
 
         tasks.append(asyncio.create_task(_poll_loop("chase", s.CHASE_POLL_INTERVAL_SECONDS, run_chase)))
 

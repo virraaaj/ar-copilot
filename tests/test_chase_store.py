@@ -151,3 +151,81 @@ async def test_mail_dedupe(store: ChaseStore) -> None:
     assert await store.is_mail_processed("msg-1") is True
     # idempotent -- marking twice doesn't raise
     await store.mark_mail_processed("msg-1", chase_id)
+
+
+# ---- token tracking (added 2026-07-22) -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_new_chase_starts_with_zero_tokens(store: ChaseStore) -> None:
+    chase_id = await store.create("case-1")
+
+    chase = await store.get(chase_id)
+
+    assert chase["total_tokens_used"] == 0
+
+
+@pytest.mark.asyncio
+async def test_increment_tokens_accumulates(store: ChaseStore) -> None:
+    chase_id = await store.create("case-1")
+
+    await store.increment_tokens(chase_id, 100)
+    await store.increment_tokens(chase_id, 50)
+
+    chase = await store.get(chase_id)
+    assert chase["total_tokens_used"] == 150
+
+
+@pytest.mark.asyncio
+async def test_increment_tokens_zero_or_negative_is_a_noop(store: ChaseStore) -> None:
+    chase_id = await store.create("case-1")
+
+    await store.increment_tokens(chase_id, 0)
+    await store.increment_tokens(chase_id, -5)
+
+    chase = await store.get(chase_id)
+    assert chase["total_tokens_used"] == 0
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_column_to_a_pre_existing_db_without_it(tmp_path) -> None:
+    """Regression test for the total_tokens_used migration: a DB whose
+    chases table was created before this column existed must not break
+    when a newer ChaseStore opens it."""
+    import aiosqlite
+
+    db_path = str(tmp_path / "old.db")
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE chases (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                case_key TEXT,
+                invoice_no TEXT,
+                project_number TEXT,
+                subject_token TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL,
+                target TEXT,
+                pm_email TEXT,
+                customer_email TEXT,
+                promised_date TEXT,
+                promised_by TEXT,
+                missed_count INTEGER NOT NULL DEFAULT 0,
+                nudge_count INTEGER NOT NULL DEFAULT 0,
+                clarify_count INTEGER NOT NULL DEFAULT 0,
+                last_outreach_at TEXT,
+                next_action_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        await db.commit()
+
+    store = ChaseStore(db_path=db_path)
+    chase_id = await store.create("case-1")
+    await store.increment_tokens(chase_id, 42)
+
+    chase = await store.get(chase_id)
+    assert chase["total_tokens_used"] == 42

@@ -96,10 +96,11 @@ class ParsedReply:
     promised_date: Optional[str] = None
     customer_contact_email: Optional[str] = None
     raw_text: str = ""
+    tokens_used: int = 0  # added 2026-07-22, for the Chases UI's per-invoice token total
 
 
-def _fallback(reply_text: str) -> ParsedReply:
-    return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text)
+def _fallback(reply_text: str, tokens: int = 0) -> ParsedReply:
+    return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text, tokens_used=tokens)
 
 
 def _build_messages(reply_text: str, chase_context: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -129,29 +130,37 @@ async def parse_chase_reply(llm: Any, reply_text: str, chase_context: Optional[D
     messages = _build_messages(reply_text, context)
 
     try:
-        message = await llm.chat(
+        result = await llm.chat(
             messages,
             tools=[_TOOL_SCHEMA],
             tool_choice={"type": "function", "function": {"name": _TOOL_NAME}},
+            return_usage=True,
         )
     except Exception:
         logger.exception("chase_parser: LLM call failed, falling back to unclear")
         return _fallback(reply_text)
 
+    try:
+        message, tokens = result
+    except (TypeError, ValueError):
+        # A test double or misbehaving client that ignored return_usage
+        # and returned a bare message -- degrade gracefully rather than crash.
+        message, tokens = result, 0
+
     tool_calls = getattr(message, "tool_calls", None)
     if not tool_calls:
         logger.warning("chase_parser: model did not call %s despite forced tool_choice", _TOOL_NAME)
-        return _fallback(reply_text)
+        return _fallback(reply_text, tokens)
 
     try:
         args = json.loads(tool_calls[0].function.arguments or "{}")
     except (json.JSONDecodeError, AttributeError):
         logger.warning("chase_parser: could not parse tool call arguments")
-        return _fallback(reply_text)
+        return _fallback(reply_text, tokens)
 
     intent = args.get("intent")
     if intent not in VALID_INTENTS:
-        return _fallback(reply_text)
+        return _fallback(reply_text, tokens)
 
     confidence = args.get("confidence") if args.get("confidence") in ("high", "low") else "low"
 
@@ -162,11 +171,11 @@ async def parse_chase_reply(llm: Any, reply_text: str, chase_context: Optional[D
         except (ValueError, TypeError):
             # Model returned something that isn't a real ISO date -- don't
             # let a malformed date string masquerade as a commitment.
-            return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text)
+            return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text, tokens_used=tokens)
     elif intent == "commitment_date" and not promised_date:
         # Claimed a date commitment but didn't actually give one -- treat
         # as unclear rather than tracking a commitment with no date.
-        return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text)
+        return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text, tokens_used=tokens)
 
     customer_email = args.get("customer_contact_email")
     if customer_email:
@@ -183,4 +192,5 @@ async def parse_chase_reply(llm: Any, reply_text: str, chase_context: Optional[D
         promised_date=promised_date if intent == "commitment_date" else None,
         customer_contact_email=customer_email,
         raw_text=reply_text,
+        tokens_used=tokens,
     )

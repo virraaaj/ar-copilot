@@ -31,9 +31,11 @@ from app.channels.teams.messenger import TeamsMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services import chase_machine
 from app.services.backend_client import BackendClient
+from app.services.chase_composer import compose_message
 from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMessage
 from app.services.chase_parser import ParsedReply, parse_chase_reply
 from app.services.chase_store import ChaseStore
+from app.services.chase_trajectory import assess_chase_trajectory
 from app.services.email_sender import EmailSender
 
 logger = logging.getLogger(__name__)
@@ -144,6 +146,7 @@ async def _execute_actions(
     chase_store: ChaseStore,
     settings: Any,
     budget: _SendBudget,
+    llm: Any = None,
 ) -> None:
     for action in decision.actions:
         if isinstance(action, Escalate):
@@ -157,7 +160,7 @@ async def _execute_actions(
             logger.info("Chase %s: per-tick send budget exhausted, deferring '%s' to next tick", chase["id"], action.kind)
             continue
 
-        await _send_message(action, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings)
+        await _send_message(action, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings, llm)
         budget.consume()
 
 
@@ -170,7 +173,20 @@ async def _send_message(
     project_conversation_store: ProjectConversationStore,
     chase_store: ChaseStore,
     settings: Any,
+    llm: Any = None,
 ) -> None:
+    # Compose first (dry-run included -- the whole point of dry-run is
+    # previewing what would actually go out, so it should reflect the
+    # AI-composed text too, not just the deterministic template).
+    text = action.text
+    composed = False
+    if getattr(settings, "CHASE_COMPOSER_ENABLED", False) and llm is not None:
+        composed_text, tokens = await compose_message(llm, action.kind, chase, action.text)
+        await chase_store.increment_tokens(chase["id"], tokens)
+        if composed_text != action.text:
+            composed = True
+        text = composed_text
+
     channel = "none"
     error: Optional[str] = None
 
@@ -184,12 +200,16 @@ async def _send_message(
 
     if settings.CHASE_DRY_RUN:
         channel = "dry_run"
-        await chase_store.add_event(chase["id"], "dry_run_send", {"target": action.target, "kind": action.kind, "text": action.text, "would_use_channel": "teams" if conversation_id else "email"})
+        await chase_store.add_event(
+            chase["id"], "dry_run_send",
+            {"target": action.target, "kind": action.kind, "text": text, "composed": composed,
+             "would_use_channel": "teams" if conversation_id else "email"},
+        )
         return
 
     if conversation_id:
         try:
-            await messenger.send_text(conversation_id, action.text)
+            await messenger.send_text(conversation_id, text)
             channel = "teams"
         except Exception as exc:
             logger.warning("Chase %s: Teams send failed, falling back to email: %s", chase["id"], exc)
@@ -204,7 +224,7 @@ async def _send_message(
             error = f"{to_email} is not on CHASE_TO_ADDRESS_ALLOWLIST"
         else:
             subject = f"[{chase['subject_token']}] Re: invoice {chase.get('invoice_no') or chase.get('case_key')}"
-            body = f"<p>{action.text}</p>"
+            body = f"<p>{text}</p>"
             try:
                 result = await email_sender.send(to_email, subject, body, [])
                 channel = "email" if result.get("success") else "email_failed"
@@ -217,7 +237,7 @@ async def _send_message(
 
     await chase_store.add_event(
         chase["id"], "outreach_sent",
-        {"target": action.target, "kind": action.kind, "text": action.text, "channel": channel, "error": error},
+        {"target": action.target, "kind": action.kind, "text": text, "channel": channel, "error": error, "composed": composed},
     )
 
     # Mirror onto the real backend timeline (PLAN_AGENTIC_CHASE.md §4.1's
@@ -225,7 +245,7 @@ async def _send_message(
     try:
         await backend.log_response_event(
             chase["case_id"],
-            raw_excerpt=f"[ar-copilot chase] -> {action.target}: {action.text}",
+            raw_excerpt=f"[ar-copilot chase] -> {action.target}: {text}",
             source_channel="manual_only",
         )
     except Exception:
@@ -272,6 +292,41 @@ async def _apply_decision(chase_store: ChaseStore, chase: Dict[str, Any], decisi
         await chase_store.add_event(chase["id"], kind, detail)
 
 
+async def _maybe_smart_escalate(
+    chase: Dict[str, Any],
+    llm: Any,
+    chase_store: ChaseStore,
+    settings: Any,
+    current_count: int,
+    max_count: int,
+) -> Optional[Decision]:
+    """Smart escalation judgment (added 2026-07-22, chase_trajectory.py):
+    returns an escalate_now Decision if the AI reads this conversation as
+    concerning (regardless of budget) or stalling at/past one nudge/miss
+    short of the hard cap -- otherwise None, deferring to the normal
+    deterministic chase_machine path. Disabled or llm-less runs always
+    return None, so this is purely additive over today's behavior."""
+    if not getattr(settings, "CHASE_SMART_ESCALATION_ENABLED", False) or llm is None:
+        return None
+
+    events = await chase_store.list_events(chase["id"])
+    assessment, tokens = await assess_chase_trajectory(llm, chase, events)
+    await chase_store.increment_tokens(chase["id"], tokens)
+    await chase_store.add_event(
+        chase["id"], "trajectory_assessed", {"verdict": assessment.verdict, "reason": assessment.reason}
+    )
+
+    escalate_early = assessment.verdict == "concerning" or (
+        assessment.verdict == "stalling" and current_count >= max(0, max_count - 1)
+    )
+    if not escalate_early:
+        return None
+
+    return chase_machine.escalate_now(
+        chase, reason=f"AI judged the conversation as {assessment.verdict}: {assessment.reason}"
+    )
+
+
 async def _process_one_due_chase(
     chase: Dict[str, Any],
     backend: BackendClient,
@@ -282,8 +337,10 @@ async def _process_one_due_chase(
     config: ChaseConfig,
     settings: Any,
     budget: _SendBudget,
+    llm: Any = None,
 ) -> None:
     state = chase["state"]
+    decision: Optional[Decision] = None
 
     if state == "pending":
         pm_email = await _find_pm_email(backend, chase.get("project_number"))
@@ -292,7 +349,11 @@ async def _process_one_due_chase(
     elif state in ("awaiting_pm", "awaiting_customer"):
         # next_action_at arrived with no reply yet (a reply would already
         # have moved the chase out of this state via advance_chase_with_reply).
-        decision = chase_machine.on_nudge_check(chase, config=config)
+        decision = await _maybe_smart_escalate(
+            chase, llm, chase_store, settings, chase.get("nudge_count") or 0, config.max_nudges
+        )
+        if decision is None:
+            decision = chase_machine.on_nudge_check(chase, config=config)
 
     elif state == "commitment_tracked":
         try:
@@ -301,7 +362,12 @@ async def _process_one_due_chase(
         except Exception:
             logger.warning("Chase %s: could not check payment status -- skipping this tick", chase["id"])
             return
-        decision = chase_machine.on_commitment_due(chase, paid=paid, config=config)
+        if not paid:
+            decision = await _maybe_smart_escalate(
+                chase, llm, chase_store, settings, chase.get("missed_count") or 0, config.max_missed_commitments
+            )
+        if decision is None:
+            decision = chase_machine.on_commitment_due(chase, paid=paid, config=config)
 
     elif state == "verifying_payment":
         try:
@@ -310,7 +376,12 @@ async def _process_one_due_chase(
         except Exception:
             logger.warning("Chase %s: could not check payment status -- skipping this tick", chase["id"])
             return
-        decision = chase_machine.on_verify_payment_timeout(chase, paid=paid, config=config)
+        if not paid:
+            decision = await _maybe_smart_escalate(
+                chase, llm, chase_store, settings, chase.get("missed_count") or 0, config.max_missed_commitments
+            )
+        if decision is None:
+            decision = chase_machine.on_verify_payment_timeout(chase, paid=paid, config=config)
 
     else:
         return
@@ -320,7 +391,7 @@ async def _process_one_due_chase(
     # handoff) depend on fields the decision just set -- execute against the
     # merged view, not the pre-decision snapshot.
     chase = {**chase, **decision.updates}
-    await _execute_actions(decision, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings, budget)
+    await _execute_actions(decision, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings, budget, llm)
 
 
 async def process_due_chases(
@@ -330,8 +401,13 @@ async def process_due_chases(
     chase_store: ChaseStore,
     project_conversation_store: ProjectConversationStore,
     settings: Any,
+    llm: Any = None,
 ) -> int:
-    """Returns how many due chases were actually processed this pass."""
+    """Returns how many due chases were actually processed this pass.
+    `llm` (added 2026-07-22) powers the composer/smart-escalation
+    features when their flags are on; omitting it (the default) just
+    means those features silently stay inert -- every existing caller
+    that predates them keeps working unchanged."""
     config = _config_from_settings(settings)
     budget = _SendBudget(settings.CHASE_MAX_SENDS_PER_TICK)
 
@@ -350,7 +426,7 @@ async def process_due_chases(
             continue
 
         await _process_one_due_chase(
-            chase, backend, messenger, email_sender, chase_store, project_conversation_store, config, settings, budget
+            chase, backend, messenger, email_sender, chase_store, project_conversation_store, config, settings, budget, llm
         )
 
     return len(due)
@@ -381,13 +457,14 @@ async def advance_chase_with_reply(
         {"today": date.today().isoformat(), "invoice_no": chase.get("invoice_no"), "case_key": chase.get("case_key"),
          "target": chase.get("target")},
     )
+    await chase_store.increment_tokens(chase["id"], parsed.tokens_used)
 
     await chase_store.add_event(chase["id"], "reply_received", {"target": chase.get("target"), "text": reply_text})
     decision = chase_machine.on_reply(chase, parsed, config=config)
 
     await _apply_decision(chase_store, chase, decision)
     chase = {**chase, **decision.updates}
-    await _execute_actions(decision, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings, budget)
+    await _execute_actions(decision, chase, backend, messenger, email_sender, project_conversation_store, chase_store, settings, budget, llm)
 
     return parsed
 
@@ -399,11 +476,14 @@ async def run_chase_tick(
     chase_store: ChaseStore,
     project_conversation_store: ProjectConversationStore,
     settings: Any,
+    llm: Any = None,
 ) -> int:
     """The single function main.py's poller calls. Returns a count purely
     for the poller's own logging (created + processed)."""
     created = await find_and_create_new_chases(backend, chase_store)
-    processed = await process_due_chases(backend, messenger, email_sender, chase_store, project_conversation_store, settings)
+    processed = await process_due_chases(
+        backend, messenger, email_sender, chase_store, project_conversation_store, settings, llm
+    )
     return created + processed
 
 

@@ -20,17 +20,18 @@ def make_message(tool_calls=None) -> SimpleNamespace:
 
 
 class ScriptedLLM:
-    def __init__(self, response):
+    def __init__(self, response, tokens=99):
         self._response = response
+        self._tokens = tokens
         self.calls = []
 
-    async def chat(self, messages, tools=None, tool_choice="auto"):
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
         self.calls.append({"messages": messages, "tools": tools, "tool_choice": tool_choice})
-        return self._response
+        return self._response, self._tokens
 
 
 class RaisingLLM:
-    async def chat(self, messages, tools=None, tool_choice="auto"):
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
         raise RuntimeError("boom")
 
 
@@ -46,7 +47,7 @@ async def test_commitment_date_high_confidence():
 
     assert result == ParsedReply(intent="commitment_date", confidence="high",
                                   promised_date="2026-08-01", customer_contact_email=None,
-                                  raw_text="We'll pay by August 1st.")
+                                  raw_text="We'll pay by August 1st.", tokens_used=99)
 
 
 @pytest.mark.asyncio
@@ -154,7 +155,7 @@ async def test_no_tool_call_falls_back_to_unclear():
 
     result = await parse_chase_reply(llm, "anything", {})
 
-    assert result == ParsedReply(intent="unclear", confidence="low", raw_text="anything")
+    assert result == ParsedReply(intent="unclear", confidence="low", raw_text="anything", tokens_used=99)
 
 
 @pytest.mark.asyncio

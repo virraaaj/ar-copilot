@@ -11,6 +11,7 @@ from app.services.chase_machine import (
     ChaseConfig,
     Escalate,
     SendMessage,
+    escalate_now,
     on_commitment_due,
     on_nudge_check,
     on_reply,
@@ -317,3 +318,27 @@ def test_nudge_budget_is_never_exceeded_across_repeated_calls():
 
     final_decision = on_nudge_check(chase, config=CONFIG)
     assert final_decision.updates["state"] == "escalated"
+
+
+# ---- escalate_now (smart escalation judgment, added 2026-07-22) -----------
+
+
+def test_escalate_now_sets_state_and_clears_next_action():
+    chase = base_chase(state="awaiting_pm", target="pm", nudge_count=0)
+
+    decision = escalate_now(chase, reason="AI judged the conversation as concerning")
+
+    assert decision.updates["state"] == "escalated"
+    assert decision.updates["next_action_at"] is None
+    assert isinstance(decision.actions[0], Escalate)
+    assert decision.actions[0].reason == "AI judged the conversation as concerning"
+
+
+def test_escalate_now_works_regardless_of_current_budget_state():
+    # Even a chase with zero nudges/misses used -- proves this bypasses
+    # the counters entirely rather than checking them.
+    chase = base_chase(state="awaiting_customer", target="customer", nudge_count=0, missed_count=0)
+
+    decision = escalate_now(chase, reason="hostile reply")
+
+    assert decision.updates["state"] == "escalated"

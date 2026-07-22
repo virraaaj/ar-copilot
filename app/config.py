@@ -101,6 +101,18 @@ class Settings(BaseSettings):
     # (see .env's GRAPH_MAIL_* comment). Teams-side chasing works without it.
     CHASE_MAIL_POLL_ENABLED: bool = False
     CHASE_MAIL_POLL_INTERVAL_SECONDS: int = 300
+    # AI features (added 2026-07-22), both default off -- when off, chase
+    # engine behavior is byte-for-byte what it was before either existed
+    # (deterministic templates, pure nudge/miss-count escalation).
+    # CHASE_COMPOSER_ENABLED: chase_composer.py rewrites the deterministic
+    # template into a more natural, context-aware message before sending
+    # (guardrailed against inventing dates -- falls back to the template
+    # on any failure or validation reject).
+    # CHASE_SMART_ESCALATION_ENABLED: chase_trajectory.py assesses the
+    # whole conversation and can escalate earlier than the nudge/miss
+    # caps would -- never later, the caps remain a hard backstop either way.
+    CHASE_COMPOSER_ENABLED: bool = False
+    CHASE_SMART_ESCALATION_ENABLED: bool = False
 
     @property
     def chase_to_address_allowlist(self) -> List[str]:

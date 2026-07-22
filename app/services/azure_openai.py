@@ -36,9 +36,16 @@ class AzureOpenAIService:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: str = "auto",
+        return_usage: bool = False,
     ):
         """One round-trip to the model. Returns the raw message object so the
-        caller can inspect tool_calls vs content."""
+        caller can inspect tool_calls vs content.
+
+        return_usage=True (added 2026-07-22, for the chase engine's
+        per-invoice token tracking) additionally returns the call's total
+        token count as (message, tokens). Defaults to False and every
+        existing caller (AgentLoop, etc.) never passes it, so this is
+        purely additive -- no existing call site's return shape changes."""
         # No `temperature` override -- confirmed live against the real
         # deployment (gpt-5-mini): reasoning-family GPT-5 models reject any
         # non-default temperature ("Only the default (1) value is
@@ -53,7 +60,11 @@ class AzureOpenAIService:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
         response = await self._client.chat.completions.create(**kwargs)
-        return response.choices[0].message
+        message = response.choices[0].message
+        if return_usage:
+            tokens = response.usage.total_tokens if response.usage else 0
+            return message, tokens
+        return message
 
 
 _service: Optional[AzureOpenAIService] = None

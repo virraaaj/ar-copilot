@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS chases (
     clarify_count INTEGER NOT NULL DEFAULT 0,
     last_outreach_at TEXT,
     next_action_at TEXT,
+    total_tokens_used INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -104,6 +105,17 @@ class ChaseStore:
             return
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
+            # Migration for chases tables created before total_tokens_used
+            # existed (added 2026-07-22) -- CREATE TABLE IF NOT EXISTS
+            # doesn't add columns to an already-existing table. SQLite has
+            # no "ADD COLUMN IF NOT EXISTS", so just swallow the
+            # "duplicate column" error on a table that's already migrated.
+            try:
+                await db.execute("ALTER TABLE chases ADD COLUMN total_tokens_used INTEGER NOT NULL DEFAULT 0")
+                await db.commit()
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
             await db.commit()
         self._initialized = True
 
@@ -235,6 +247,22 @@ class ChaseStore:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(f"UPDATE chases SET {set_clause} WHERE id = ?", (*fields.values(), chase_id))
+            await db.commit()
+
+    async def increment_tokens(self, chase_id: str, tokens: int) -> None:
+        """Adds to the chase's running token total -- called after every
+        LLM call made in service of this chase (reply parsing, message
+        composition, trajectory assessment), added 2026-07-22 for the
+        Chases UI's per-invoice token display. A no-op for tokens<=0 so a
+        fallback path (0 tokens charged) never issues a pointless write."""
+        if tokens <= 0:
+            return
+        await self._ensure_schema()
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                "UPDATE chases SET total_tokens_used = total_tokens_used + ?, updated_at = ? WHERE id = ?",
+                (tokens, _now_iso(), chase_id),
+            )
             await db.commit()
 
     async def add_event(self, chase_id: str, kind: str, detail: Optional[Dict[str, Any]] = None) -> None:

@@ -56,6 +56,22 @@ function formatWhen(iso: string | null): string {
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
+// Tokens consumed per invoice (added 2026-07-22) -- the AI-composed
+// messages and smart-escalation trajectory assessments both spend real
+// tokens; ChaseStore.total_tokens_used is the running total charged
+// against this specific chase. 0 means neither AI feature has fired for
+// it yet (either they're off, or nothing's happened that needed them).
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+const TRAJECTORY_VERDICT_STYLES: Record<string, string> = {
+  progressing: "bg-emerald-50 text-emerald-700",
+  stalling: "bg-amber-50 text-amber-700",
+  concerning: "bg-rose-50 text-rose-700",
+};
+
 function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void }) {
   const { token } = useSession();
   const [events, setEvents] = useState<ChaseEvent[] | null>(null);
@@ -124,6 +140,12 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
         <div>
           <dt className="text-zinc-400">Next action</dt>
           <dd className="text-zinc-700">{formatWhen(chase.next_action_at)}</dd>
+        </div>
+        <div>
+          <dt className="text-zinc-400">Tokens used</dt>
+          <dd className="text-zinc-700 tabular-nums" title={`${chase.total_tokens_used.toLocaleString()} tokens`}>
+            {formatTokens(chase.total_tokens_used)}
+          </dd>
         </div>
       </dl>
 
@@ -219,16 +241,42 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
         {!events && <p className="text-[13px] text-zinc-400">Loading...</p>}
         {events && events.length === 0 && <p className="text-[13px] text-zinc-400">No events yet.</p>}
         <div className="space-y-2">
-          {events?.map((e) => (
-            <div key={e.id} className="border-l-2 border-zinc-100 pl-3 text-[12.5px]">
-              <p className="text-zinc-700">
-                <span className="font-medium">{e.kind.replace(/_/g, " ")}</span>
-                {e.detail?.text ? `: ${String(e.detail.text)}` : ""}
-                {e.detail?.reason ? `: ${String(e.detail.reason)}` : ""}
-              </p>
-              <p className="text-zinc-400">{formatWhen(e.at)}</p>
-            </div>
-          ))}
+          {events?.map((e) => {
+            if (e.kind === "trajectory_assessed") {
+              const verdict = String(e.detail?.verdict ?? "");
+              return (
+                <div key={e.id} className="border-l-2 border-zinc-100 pl-3 text-[12.5px]">
+                  <p className="flex flex-wrap items-center gap-1.5 text-zinc-700">
+                    <span className="text-zinc-400">🧭 AI trajectory check:</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${TRAJECTORY_VERDICT_STYLES[verdict] ?? "bg-zinc-100 text-zinc-600"}`}>
+                      {verdict || "unknown"}
+                    </span>
+                    {e.detail?.reason ? <span className="text-zinc-500">-- {String(e.detail.reason)}</span> : null}
+                  </p>
+                  <p className="text-zinc-400">{formatWhen(e.at)}</p>
+                </div>
+              );
+            }
+
+            const isOutreach = e.kind === "outreach_sent" || e.kind === "dry_run_send";
+            const composed = isOutreach && e.detail?.composed === true;
+
+            return (
+              <div key={e.id} className="border-l-2 border-zinc-100 pl-3 text-[12.5px]">
+                <p className="text-zinc-700">
+                  <span className="font-medium">{e.kind.replace(/_/g, " ")}</span>
+                  {composed && (
+                    <span className="ml-1.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                      ✨ AI-composed
+                    </span>
+                  )}
+                  {e.detail?.text ? `: ${String(e.detail.text)}` : ""}
+                  {e.detail?.reason ? `: ${String(e.detail.reason)}` : ""}
+                </p>
+                <p className="text-zinc-400">{formatWhen(e.at)}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -307,7 +355,12 @@ export default function Chases() {
                   {stateLabel(c.state)}
                 </span>
               </div>
-              <p className="mt-0.5 truncate text-[12px] text-zinc-400">{c.project_number ?? "No project"}</p>
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <p className="truncate text-[12px] text-zinc-400">{c.project_number ?? "No project"}</p>
+                {c.total_tokens_used > 0 && (
+                  <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">{formatTokens(c.total_tokens_used)} tok</span>
+                )}
+              </div>
             </button>
           ))}
         </div>
