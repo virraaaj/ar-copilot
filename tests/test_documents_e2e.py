@@ -101,8 +101,8 @@ async def test_registry_has_all_phase_1_and_1b_tools():
     tool_names = {t.name for t in registry.for_role("viewer")}
 
     assert tool_names == {
-        "list_invoices", "get_invoice", "get_timeline", "get_project_contacts",
-        "list_review_tasks", "aging_summary", "get_project_digest", "get_chase_status",
+        "list_invoices", "list_projects", "get_invoice", "get_timeline", "get_project_contacts",
+        "list_review_tasks", "aging_summary", "get_chase_status",
         "search_documents", "get_document", "list_recent_documents",
     }
     assert all(t.kind is ToolKind.READ for t in registry.for_role("viewer"))

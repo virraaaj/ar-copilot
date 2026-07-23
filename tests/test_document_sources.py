@@ -20,12 +20,13 @@ from app.documents.sources.sharepoint import SharePointError, SharePointSource
 async def test_manual_upload_save_then_list(tmp_path):
     source = ManualUploadSource(base_dir=str(tmp_path))
 
-    ref = await source.save("cert.pdf", b"pdf bytes here", doc_type="vendor_certification")
+    ref = await source.save("cert.pdf", b"pdf bytes here", doc_type="vendor_certification", project_number="PN-1")
 
     assert ref.source == "manual_upload"
     assert ref.filename == "cert.pdf"
     assert ref.doc_type == "vendor_certification"
     assert ref.size_bytes == len(b"pdf bytes here")
+    assert ref.project_number == "PN-1"
 
     listed = await source.list_documents()
     assert len(listed) == 1
@@ -35,8 +36,8 @@ async def test_manual_upload_save_then_list(tmp_path):
 @pytest.mark.asyncio
 async def test_manual_upload_list_filters_by_doc_type(tmp_path):
     source = ManualUploadSource(base_dir=str(tmp_path))
-    await source.save("cert.pdf", b"a", doc_type="vendor_certification")
-    await source.save("manual.pdf", b"b", doc_type="equipment_manual")
+    await source.save("cert.pdf", b"a", doc_type="vendor_certification", project_number="PN-1")
+    await source.save("manual.pdf", b"b", doc_type="equipment_manual", project_number="PN-1")
 
     certs = await source.list_documents(doc_type="vendor_certification")
 
@@ -45,11 +46,39 @@ async def test_manual_upload_list_filters_by_doc_type(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_manual_upload_list_filters_by_project(tmp_path):
+    """Two different projects can each have a file named the same thing --
+    no collision on disk or in the metadata sidecar -- and listing one
+    project's folder never leaks the other's documents."""
+    source = ManualUploadSource(base_dir=str(tmp_path))
+    await source.save("report.pdf", b"project one's report", project_number="PN-1")
+    await source.save("report.pdf", b"project two's report", project_number="PN-2")
+
+    pn1_docs = await source.list_documents(project_number="PN-1")
+    pn2_docs = await source.list_documents(project_number="PN-2")
+
+    assert len(pn1_docs) == 1 and len(pn2_docs) == 1
+    assert await source.fetch(pn1_docs[0].source_id) == b"project one's report"
+    assert await source.fetch(pn2_docs[0].source_id) == b"project two's report"
+
+
+@pytest.mark.asyncio
+async def test_manual_upload_no_project_lands_in_unfiled_folder(tmp_path):
+    source = ManualUploadSource(base_dir=str(tmp_path))
+    ref = await source.save("legacy.pdf", b"data")
+
+    assert ref.project_number is None
+    unfiled = await source.list_documents(project_number="_unfiled")
+    assert len(unfiled) == 1
+    assert unfiled[0].filename == "legacy.pdf"
+
+
+@pytest.mark.asyncio
 async def test_manual_upload_fetch_roundtrips_bytes(tmp_path):
     source = ManualUploadSource(base_dir=str(tmp_path))
-    await source.save("doc.pdf", b"exact bytes", doc_type=None)
+    ref = await source.save("doc.pdf", b"exact bytes", doc_type=None, project_number="PN-1")
 
-    fetched = await source.fetch("doc.pdf")
+    fetched = await source.fetch(ref.source_id)
 
     assert fetched == b"exact bytes"
 
@@ -66,7 +95,7 @@ async def test_manual_upload_fetch_missing_raises(tmp_path):
 async def test_manual_upload_survives_reopen(tmp_path):
     """Metadata persists across process restarts (it's a file, not memory)."""
     source1 = ManualUploadSource(base_dir=str(tmp_path))
-    await source1.save("doc.pdf", b"data", doc_type="quote")
+    await source1.save("doc.pdf", b"data", doc_type="quote", project_number="PN-1")
 
     source2 = ManualUploadSource(base_dir=str(tmp_path))
     listed = await source2.list_documents()

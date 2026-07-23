@@ -29,20 +29,11 @@ export default function NavBar() {
             <NavLink to="/documents" className={linkClass}>
               Documents
             </NavLink>
-            <NavLink to="/ar-health" className={linkClass}>
-              AR Health
-            </NavLink>
             <NavLink to="/chases" className={linkClass}>
               Chases
             </NavLink>
-            <NavLink to="/escalation-policy" className={linkClass}>
-              Escalation Policy
-            </NavLink>
-            <NavLink to="/project-contacts" className={linkClass}>
-              Project Contacts
-            </NavLink>
-            <NavLink to="/default-project-contacts" className={linkClass}>
-              Default Contacts
+            <NavLink to="/settings" className={linkClass}>
+              Settings
             </NavLink>
           </div>
         </div>

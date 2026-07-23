@@ -306,37 +306,6 @@ class BackendClient:
         resp = await self._request("DELETE", f"/api/v1/dunning/default-project-contacts/{contact_id}")
         return self._ok_or_raise(resp, "Delete default project contact")
 
-    # --------------------------------------------------------- policy (v2)
-    # Escalation policy editor (PLAN.md §5, added 2026-07-16). All confirmed
-    # live endpoints under /api/v2/dunning -- backend/app/dunning_v2/api/
-    # policies.py -- not invented. Auth is just an active JWT user; role
-    # gating isn't wired up backend-side yet (per that module's own
-    # docstring), so the shared service account can call all of these.
-    async def list_policies(self, scope_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        params = {"scope_type": scope_type} if scope_type else None
-        resp = await self._request("GET", "/api/v2/dunning/policies", params=params)
-        return self._unwrap_list(self._ok_or_raise(resp, "List policies"))
-
-    async def list_policy_versions(self, policy_id: str) -> List[Dict[str, Any]]:
-        resp = await self._request("GET", f"/api/v2/dunning/policies/{policy_id}/versions")
-        return self._unwrap_list(self._ok_or_raise(resp, "List policy versions"))
-
-    async def list_policy_stages(self, version_id: str) -> List[Dict[str, Any]]:
-        resp = await self._request("GET", f"/api/v2/dunning/policy-versions/{version_id}/stages")
-        return self._unwrap_list(self._ok_or_raise(resp, "List policy stages"))
-
-    async def list_stage_rules(self, version_id: str) -> List[Dict[str, Any]]:
-        resp = await self._request("GET", f"/api/v2/dunning/policy-versions/{version_id}/stage-rules")
-        return self._unwrap_list(self._ok_or_raise(resp, "List stage rules"))
-
-    async def update_stage_rule(self, stage_rule_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
-        """PATCH replaces whatever *_rule_json field is supplied wholesale --
-        callers must merge with the existing value themselves first (see
-        app/channels/web.py's escalation-policy endpoint) or they'll silently
-        clobber sibling fields like require_at_least_one_action_sent."""
-        resp = await self._request("PATCH", f"/api/v2/dunning/stage-rules/{stage_rule_id}", json=fields)
-        return self._ok_or_raise(resp, "Update stage rule")
-
     # ------------------------------------------------------------ reference
     async def list_business_units(self) -> List[Dict[str, Any]]:
         resp = await self._request("GET", "/api/v1/dunning/business-units")

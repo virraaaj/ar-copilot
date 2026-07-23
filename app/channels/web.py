@@ -13,6 +13,7 @@ not the logged-in user's own credentials — this session token is purely a
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -27,9 +28,9 @@ from app.agent.tools_documents import list_recent_documents as tool_list_recent_
 from app.agent.tools_documents import search_documents as tool_search_documents
 from app.agent.tools_read import aging_summary as tool_aging_summary
 from app.agent.tools_read import get_invoice as tool_get_invoice
-from app.agent.tools_read import get_project_digest as tool_get_project_digest
 from app.agent.tools_read import get_timeline as tool_get_timeline
 from app.agent.tools_read import list_invoices as tool_list_invoices
+from app.agent.tools_read import list_projects as tool_list_projects
 from app.agent.tools_write import add_comment as tool_add_comment
 from app.agent.tools_write import resume_invoice as tool_resume_invoice
 from app.agent.tools_write import snooze_invoice as tool_snooze_invoice
@@ -49,6 +50,7 @@ from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
 from app.services.chase_store import ChaseStore
 from app.services.followup_store import FollowUpError, FollowUpStore
+from app.services.uat_reset import wipe_uat_data
 
 router = APIRouter(prefix="/api")
 
@@ -184,20 +186,6 @@ async def list_project_invoices_endpoint(
     return await tool_list_invoices(backend, project_id=project_number, limit=200)
 
 
-@router.get("/projects/{project_number}/digest")
-async def get_project_digest_endpoint(
-    project_number: str,
-    _user: str = Depends(require_session),
-    backend: BackendClient = Depends(get_backend_client),
-) -> Dict[str, Any]:
-    """Backs the AR Health dashboard tab (added 2026-07-17): on-demand AR
-    health + customer payment-pattern projections for one project -- the
-    same computation the weekly Teams digest card uses (services/
-    digest_engine.py), available whenever someone opens the tab rather
-    than only once a week."""
-    return await tool_get_project_digest(backend, project_number=project_number)
-
-
 @router.get("/business-units")
 async def list_business_units_endpoint(
     _user: str = Depends(require_session),
@@ -213,6 +201,40 @@ async def aging_summary_endpoint(
     backend: BackendClient = Depends(get_backend_client),
 ) -> Dict[str, Any]:
     return await tool_aging_summary(backend, business_unit_id=business_unit_id)
+
+
+# ---------------------------------------------------------------------------
+# Aging-table upload (added 2026-07-22): lets a PM upload a real Hubble-
+# shaped "AR As-of 3rd Party with Location" Excel export directly from the
+# Dashboard instead of needing a script -- same two real backend calls
+# used manually all session (sync_aging_excel + trigger_tick), just now
+# reachable from the UI. trigger_tick is documented as test-mode only
+# (backend_client.py); this app only ever points at the UAT stack, where
+# that's exactly the intended usage -- production Lummus ticks on its own
+# schedule and wouldn't need this second call at all.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/aging-upload")
+async def upload_aging_excel(
+    file: UploadFile = File(...),
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    content = await file.read()
+    sync_result = await backend.sync_aging_excel(file.filename, content)
+
+    tick_result: Optional[Dict[str, Any]] = None
+    tick_error: Optional[str] = None
+    try:
+        tick_result = await backend.trigger_tick()
+    except BackendError as exc:
+        # Non-UAT backends won't have the test-mode tick endpoint enabled --
+        # the aging sync itself still succeeded, so surface that partial
+        # success rather than failing the whole upload.
+        tick_error = str(exc)
+
+    return {"sync": sync_result, "tick": tick_result, "tick_error": tick_error}
 
 
 # ---------------------------------------------------------------------------
@@ -479,98 +501,6 @@ async def add_comment_endpoint(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
-# ---------------------------------------------------------------------------
-# Escalation policy (added 2026-07-16) — a real client to the Lummus backend's
-# existing dunning_v2 policy API (backend/app/dunning_v2/api/policies.py),
-# not a new capability invented here. Edits apply directly to the current
-# published version (confirmed against that module's own comment: "Edits are
-# accepted on draft and published versions") — no separate draft/validate/
-# publish workflow surfaced here, since this page is meant as a simple global
-# settings screen, not the full policy-authoring tool the Lummus admin pages
-# already are.
-# ---------------------------------------------------------------------------
-
-
-class StageThresholdUpdate(BaseModel):
-    max_days_in_stage: Optional[int] = None
-    min_days_in_stage: Optional[int] = None
-
-
-async def _find_global_policy(backend: BackendClient) -> Dict[str, Any]:
-    policies = await backend.list_policies(scope_type="global")
-    if not policies:
-        raise HTTPException(status_code=404, detail="No global escalation policy found.")
-    return policies[0]
-
-
-async def _find_published_version(backend: BackendClient, policy_id: str) -> Dict[str, Any]:
-    versions = await backend.list_policy_versions(policy_id)
-    published = [v for v in versions if v.get("is_current_published")]
-    if not published:
-        raise HTTPException(status_code=404, detail="This policy has no published version.")
-    return published[0]
-
-
-@router.get("/escalation-policy")
-async def get_escalation_policy(
-    _user: str = Depends(require_session),
-    backend: BackendClient = Depends(get_backend_client),
-) -> Dict[str, Any]:
-    policy = await _find_global_policy(backend)
-    version = await _find_published_version(backend, policy["id"])
-    stages = await backend.list_policy_stages(version["id"])
-    rules = await backend.list_stage_rules(version["id"])
-    rules_by_stage = {r["stage_id"]: r for r in rules}
-
-    stage_list = []
-    for s in sorted(stages, key=lambda x: x["sequence_order"]):
-        rule = rules_by_stage.get(s["id"])
-        transition = (rule or {}).get("transition_rule_json") or {}
-        stage_list.append(
-            {
-                "stage_id": s["id"],
-                "stage_rule_id": rule["id"] if rule else None,
-                "stage_code": s["stage_code"],
-                "stage_name": s["stage_name"],
-                "sequence_order": s["sequence_order"],
-                "is_terminal_stage": s["is_terminal_stage"],
-                "min_days_in_stage": transition.get("min_days_in_stage"),
-                "max_days_in_stage": transition.get("max_days_in_stage"),
-            }
-        )
-
-    return {
-        "policy_id": policy["id"],
-        "version_id": version["id"],
-        "version_label": version.get("display_label"),
-        "stages": stage_list,
-    }
-
-
-@router.patch("/escalation-policy/versions/{version_id}/stage-rules/{stage_rule_id}")
-async def update_escalation_stage(
-    version_id: str,
-    stage_rule_id: str,
-    body: StageThresholdUpdate,
-    _user: str = Depends(require_session),
-    backend: BackendClient = Depends(get_backend_client),
-) -> Dict[str, Any]:
-    # The backend's PATCH replaces transition_rule_json wholesale, so fetch
-    # the current value fresh and merge in just what changed -- never trust
-    # client-side state as the merge base, it may be stale.
-    rules = await backend.list_stage_rules(version_id)
-    current = next((r for r in rules if r["id"] == stage_rule_id), None)
-    if current is None:
-        raise HTTPException(status_code=404, detail="Stage rule not found in that policy version.")
-
-    transition = dict(current.get("transition_rule_json") or {})
-    if body.max_days_in_stage is not None:
-        transition["max_days_in_stage"] = body.max_days_in_stage
-    if body.min_days_in_stage is not None:
-        transition["min_days_in_stage"] = body.min_days_in_stage
-
-    result = await backend.update_stage_rule(stage_rule_id, {"transition_rule_json": transition})
-    return {"stage_rule_id": stage_rule_id, "transition_rule_json": result.get("transition_rule_json")}
 
 
 # ---------------------------------------------------------------------------
@@ -581,22 +511,31 @@ async def update_escalation_stage(
 @router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    project_number: str = "",
     doc_type: Optional[str] = None,
     _user: str = Depends(require_session),
 ) -> Dict[str, Any]:
+    # Project folders (added 2026-07-23): every upload belongs to exactly one
+    # project going forward -- FastAPI can't express "required query param"
+    # cleanly alongside a multipart file body without Form(), so this is
+    # enforced with an explicit check instead of Query(...).
+    if not project_number:
+        raise HTTPException(status_code=400, detail="project_number is required.")
+
     content = await file.read()
     source = ManualUploadSource()
-    ref = await source.save(file.filename, content, doc_type=doc_type)
+    ref = await source.save(file.filename, content, doc_type=doc_type, project_number=project_number)
 
     pages = extract_native_text(content)
     chunks = chunk_pages(pages)
     index = get_index()
-    await index.add_document(ref.source_id, ref.filename, ref.doc_type, chunks)
+    await index.add_document(ref.source_id, ref.filename, ref.doc_type, chunks, project_number=project_number)
 
     empty_pages = sum(1 for p in pages if not p.text)
     return {
         "filename": ref.filename,
         "doc_type": ref.doc_type,
+        "project_number": ref.project_number,
         "page_count": len(pages),
         "chunks_indexed": len(chunks),
         "pages_needing_ocr": empty_pages,  # non-zero -> AZURE_DOCUMENT_INTELLIGENCE_KEY needed for full coverage
@@ -606,19 +545,31 @@ async def upload_document(
 @router.get("/documents")
 async def list_documents_endpoint(
     doc_type: Optional[str] = None,
+    project_number: Optional[str] = None,
     _user: str = Depends(require_session),
 ) -> List[Dict[str, Any]]:
-    return await tool_list_recent_documents(None, doc_type=doc_type)
+    return await tool_list_recent_documents(None, doc_type=doc_type, project_number=project_number)
 
 
 @router.get("/documents/search")
 async def search_documents_endpoint(
     query: str,
     doc_type: Optional[str] = None,
+    project_number: Optional[str] = None,
     top_k: int = 5,
     _user: str = Depends(require_session),
 ) -> List[Dict[str, Any]]:
-    return await tool_search_documents(None, query=query, doc_type=doc_type, top_k=top_k)
+    return await tool_search_documents(None, query=query, doc_type=doc_type, top_k=top_k, project_number=project_number)
+
+
+@router.get("/projects")
+async def list_projects_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> List[Dict[str, Any]]:
+    """Distinct projects derived from invoice data -- backs the Documents
+    folder view and Chat's project picker (added 2026-07-23)."""
+    return await tool_list_projects(backend)
 
 
 # ---------------------------------------------------------------------------
@@ -638,10 +589,11 @@ class EditCommitmentRequest(BaseModel):
 @router.get("/chases")
 async def list_chases_endpoint(
     state: Optional[str] = None,
+    case_id: Optional[str] = None,
     _user: str = Depends(require_session),
 ) -> List[Dict[str, Any]]:
     store = ChaseStore()
-    return await store.list_all(state=state)
+    return await store.list_all(state=state, case_id=case_id)
 
 
 @router.get("/chases/{chase_id}")
@@ -774,8 +726,17 @@ class PinnedInvoice(BaseModel):
     label: str  # human-readable, e.g. "Meridian Bay -- $1.25M, 21 days overdue"
 
 
+class ProjectRef(BaseModel):
+    project_number: str
+    project_name: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
+    # Required (project-scoped chat, added 2026-07-23): every conversation
+    # is about exactly one project now, enforced here as well as by the UI
+    # (Chat.tsx's project picker) -- defense in depth, not just a client rule.
+    project: ProjectRef
     pinned_invoice: Optional[PinnedInvoice] = None
     history: Optional[List[Dict[str, Any]]] = None
 
@@ -795,6 +756,20 @@ async def chat(
     loop = AgentLoop(llm=llm, registry=registry, backend_client=backend)
 
     history = list(body.history or [])
+    # Project scope (added 2026-07-23) -- same history-injection mechanism
+    # as the pinned-invoice message below, added first so it reads as the
+    # broader context the pinned invoice (if any) narrows further within.
+    history.append(
+        {
+            "role": "system",
+            "content": (
+                f"This conversation is scoped to project_number={body.project.project_number} "
+                f"({body.project.project_name or body.project.project_number}). When listing invoices "
+                "or searching/listing documents, always filter to this project unless the user clearly "
+                "asks about something else."
+            ),
+        }
+    )
     if body.pinned_invoice:
         # The ID rides along in the actual API call; the UI only ever showed
         # the human-readable label to the user (PLAN.md's invoice-ID-free
@@ -823,3 +798,44 @@ async def chat(
         yield _sse_event("answer", {"content": result.answer, "truncated": result.truncated})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# UAT data reset (dev-only, added 2026-07-23). Truncates every table in the
+# Lummus UAT Postgres database except users and default_project_contacts
+# (see uat_reset.py's KEEP_TABLES), then clears ar-copilot's own local
+# state.db too -- otherwise the chase-engine poller's next tick would just
+# repopulate chases from whatever it had already cached, and the Chases tab
+# would look untouched even though the source data is gone.
+# ---------------------------------------------------------------------------
+
+
+class WipeUatDataRequest(BaseModel):
+    # Requires the literal confirm string rather than just a boolean --
+    # makes it much harder to trigger by an automated retry, a copy-pasted
+    # curl command with a stale body, or a fat-fingered request.
+    confirm: str
+
+
+@router.post("/admin/wipe-uat-data")
+async def wipe_uat_data_endpoint(
+    body: WipeUatDataRequest,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    if resolve_role(_user) != "admin":
+        raise HTTPException(status_code=403, detail="Admin only.")
+    if body.confirm != "WIPE_UAT_DATA":
+        raise HTTPException(status_code=400, detail='Send {"confirm": "WIPE_UAT_DATA"} to proceed.')
+
+    s = get_settings()
+    if not s.UAT_DATABASE_URL:
+        raise HTTPException(status_code=400, detail="UAT_DATABASE_URL is not configured.")
+
+    result = await wipe_uat_data(s.UAT_DATABASE_URL)
+
+    local_state_cleared = False
+    if os.path.exists(s.STATE_DB_PATH):
+        os.remove(s.STATE_DB_PATH)
+        local_state_cleared = True
+
+    return {**result, "local_state_cleared": local_state_cleared}

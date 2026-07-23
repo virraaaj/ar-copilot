@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     # Embeddings model deployment (Azure OpenAI) — blocked on the same key as chat.
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME: str = "text-embedding-3-small"
 
+    # ---- UAT data reset (dev-only, added 2026-07-23) ----
+    # Direct Postgres connection to the Lummus UAT database (bypasses the
+    # HTTP API entirely -- this is the one place ar-copilot talks to that
+    # DB directly, since a full-table wipe has no corresponding endpoint on
+    # the Lummus side). Empty by default: the wipe endpoint refuses to run
+    # without this explicitly set, so it can never accidentally point at a
+    # database nobody meant to be wipeable.
+    UAT_DATABASE_URL: str = ""
+
     # ---- Server ----
     PORT: int = 8090
     LOG_LEVEL: str = "INFO"

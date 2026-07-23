@@ -25,6 +25,7 @@ class IndexedChunk:
     page_number: int
     chunk_index: int
     text: str
+    project_number: Optional[str] = None
 
 
 @dataclass
@@ -35,10 +36,15 @@ class SearchResult:
 
 class DocumentIndex(ABC):
     @abstractmethod
-    async def add_document(self, doc_id: str, filename: str, doc_type: Optional[str], chunks: List[Chunk]) -> None: ...
+    async def add_document(
+        self, doc_id: str, filename: str, doc_type: Optional[str], chunks: List[Chunk],
+        project_number: Optional[str] = None,
+    ) -> None: ...
 
     @abstractmethod
-    async def search(self, query: str, doc_type: Optional[str] = None, top_k: int = 5) -> List[SearchResult]: ...
+    async def search(
+        self, query: str, doc_type: Optional[str] = None, top_k: int = 5, project_number: Optional[str] = None,
+    ) -> List[SearchResult]: ...
 
     @abstractmethod
     async def delete_document(self, doc_id: str) -> None: ...
@@ -72,6 +78,24 @@ class LocalKeywordIndex(DocumentIndex):
         if self._initialized:
             return
         async with aiosqlite.connect(self._db_path) as db:
+            # Unlike regular tables, FTS5 virtual tables reject ALTER TABLE
+            # entirely ("virtual tables may not be altered") -- there's no
+            # ADD COLUMN migration path like ChaseStore uses for its regular
+            # tables. Detect a pre-existing table from before project_number
+            # existed and drop+recreate it instead. This is a search index
+            # rebuilt from the documents already on disk, not a source of
+            # truth -- safe to lose and it'll be empty until the next
+            # add_document call re-indexes (fine for this dev tool).
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='document_chunks_fts'"
+            )
+            exists = await cursor.fetchone()
+            if exists:
+                cursor = await db.execute("PRAGMA table_info(document_chunks_fts)")
+                columns = {row[1] for row in await cursor.fetchall()}
+                if "project_number" not in columns:
+                    await db.execute("DROP TABLE document_chunks_fts")
+
             await db.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts USING fts5(
@@ -80,36 +104,45 @@ class LocalKeywordIndex(DocumentIndex):
                     doc_type UNINDEXED,
                     page_number UNINDEXED,
                     chunk_index UNINDEXED,
-                    text
+                    text,
+                    project_number UNINDEXED
                 )
                 """
             )
             await db.commit()
         self._initialized = True
 
-    async def add_document(self, doc_id: str, filename: str, doc_type: Optional[str], chunks: List[Chunk]) -> None:
+    async def add_document(
+        self, doc_id: str, filename: str, doc_type: Optional[str], chunks: List[Chunk],
+        project_number: Optional[str] = None,
+    ) -> None:
         await self._ensure_schema()
         await self.delete_document(doc_id)  # re-indexing replaces, never duplicates
         if not chunks:
             return
         async with aiosqlite.connect(self._db_path) as db:
             await db.executemany(
-                "INSERT INTO document_chunks_fts (doc_id, filename, doc_type, page_number, chunk_index, text) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [(doc_id, filename, doc_type, c.page_number, c.chunk_index, c.text) for c in chunks],
+                "INSERT INTO document_chunks_fts (doc_id, filename, doc_type, page_number, chunk_index, text, project_number) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(doc_id, filename, doc_type, c.page_number, c.chunk_index, c.text, project_number) for c in chunks],
             )
             await db.commit()
 
-    async def search(self, query: str, doc_type: Optional[str] = None, top_k: int = 5) -> List[SearchResult]:
+    async def search(
+        self, query: str, doc_type: Optional[str] = None, top_k: int = 5, project_number: Optional[str] = None,
+    ) -> List[SearchResult]:
         await self._ensure_schema()
         sql = (
-            "SELECT doc_id, filename, doc_type, page_number, chunk_index, text, "
+            "SELECT doc_id, filename, doc_type, page_number, chunk_index, text, project_number, "
             "bm25(document_chunks_fts) AS rank FROM document_chunks_fts WHERE document_chunks_fts MATCH ?"
         )
         params: List[Any] = [_fts_query(query)]
         if doc_type:
             sql += " AND doc_type = ?"
             params.append(doc_type)
+        if project_number:
+            sql += " AND project_number = ?"
+            params.append(project_number)
         sql += " ORDER BY rank LIMIT ?"
         params.append(top_k)
 
@@ -127,6 +160,7 @@ class LocalKeywordIndex(DocumentIndex):
                 page_number=row["page_number"],
                 chunk_index=row["chunk_index"],
                 text=row["text"],
+                project_number=row["project_number"],
             )
             # SQLite's bm25() is lower-is-better; negate so higher = more
             # relevant everywhere, matching Azure AI Search's score semantics.
@@ -144,7 +178,7 @@ class LocalKeywordIndex(DocumentIndex):
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT doc_id, filename, doc_type, page_number, chunk_index, text FROM document_chunks_fts "
+                "SELECT doc_id, filename, doc_type, page_number, chunk_index, text, project_number FROM document_chunks_fts "
                 "WHERE doc_id = ? ORDER BY page_number, chunk_index",
                 (doc_id,),
             )
@@ -153,6 +187,7 @@ class LocalKeywordIndex(DocumentIndex):
             IndexedChunk(
                 doc_id=row["doc_id"], filename=row["filename"], doc_type=row["doc_type"],
                 page_number=row["page_number"], chunk_index=row["chunk_index"], text=row["text"],
+                project_number=row["project_number"],
             )
             for row in rows
         ]
@@ -178,10 +213,10 @@ class AzureSearchIndex(DocumentIndex):
     # __init__ runs at all -- these stubs exist purely so the class is
     # concrete enough to reach the __init__ guard above. Unreachable in
     # practice: __init__ always raises first.
-    async def add_document(self, doc_id, filename, doc_type, chunks) -> None:
+    async def add_document(self, doc_id, filename, doc_type, chunks, project_number=None) -> None:
         raise NotImplementedError
 
-    async def search(self, query, doc_type=None, top_k=5):
+    async def search(self, query, doc_type=None, top_k=5, project_number=None):
         raise NotImplementedError
 
     async def delete_document(self, doc_id: str) -> None:

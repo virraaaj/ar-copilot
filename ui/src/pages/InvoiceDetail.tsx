@@ -6,16 +6,20 @@ import {
   addComment,
   snoozeInvoice,
   resumeInvoice,
-  getEscalationPolicy,
   getFollowUpStatus,
   createFollowUp,
   cancelFollowUp,
+  listChases,
+  listChaseEvents,
   type Invoice,
   type TimelineEvent,
-  type EscalationStage,
   type FollowUpStatus,
+  type Chase,
+  type ChaseEvent,
 } from "../api";
 import { useSession } from "../context/SessionContext";
+import { AgentPhaseRail } from "../components/AgentPhaseRail";
+import { ChaseEventRow } from "../components/ChaseEventRow";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -55,50 +59,6 @@ function parseCommentAuthor(text: string | null): { author: string | null; body:
   const match = text.match(COMMENT_AUTHOR_PATTERN);
   if (!match) return { author: null, body: text };
   return { author: match[1], body: match[2] };
-}
-
-function StageRail({ stages, currentStageCode }: { stages: EscalationStage[]; currentStageCode: string | null }) {
-  const ordered = [...stages].sort((a, b) => a.sequence_order - b.sequence_order);
-  const currentIndex = ordered.findIndex((s) => s.stage_code === currentStageCode);
-
-  return (
-    <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Escalation status</h2>
-      {currentIndex === -1 && currentStageCode && (
-        <p className="mt-1 text-[12px] text-zinc-400">Current stage: {currentStageCode}</p>
-      )}
-      <div className="mt-6 flex items-start">
-        {ordered.map((stage, i) => {
-          const isDone = currentIndex !== -1 && i < currentIndex;
-          const isCurrent = i === currentIndex;
-          return (
-            <div key={stage.stage_id} className="flex flex-1 flex-col items-center last:flex-none last:items-end">
-              <div className="flex w-full items-center">
-                <div
-                  className={
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold " +
-                    (isCurrent
-                      ? "bg-zinc-900 text-white ring-4 ring-zinc-900/10"
-                      : isDone
-                        ? "bg-emerald-500 text-white"
-                        : "bg-zinc-100 text-zinc-400")
-                  }
-                >
-                  {isDone ? "✓" : stage.sequence_order}
-                </div>
-                {i < ordered.length - 1 && (
-                  <div className={"h-0.5 flex-1 " + (isDone ? "bg-emerald-500" : "bg-zinc-100")} />
-                )}
-              </div>
-              <div className="mt-2 max-w-[84px] text-center text-[11px] leading-tight">
-                <span className={isCurrent ? "font-semibold text-zinc-900" : "text-zinc-400"}>{stage.stage_name}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function SnoozeModal({
@@ -243,7 +203,7 @@ export default function InvoiceDetail() {
   // project chat's invoice picker) -- opens the matching form directly
   // instead of making the user hunt for it. Added 2026-07-16.
   const requestedAction = searchParams.get("action");
-  const { token, setPinnedInvoice } = useSession();
+  const { token, setPinnedInvoice, setCurrentProject } = useSession();
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -257,23 +217,14 @@ export default function InvoiceDetail() {
   const [snoozeError, setSnoozeError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [stages, setStages] = useState<EscalationStage[] | null>(null);
   const [followUp, setFollowUp] = useState<FollowUpStatus | null>(null);
   const [showFollowUpModal, setShowFollowUpModal] = useState(requestedAction === "follow_up");
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
   const [followUpError, setFollowUpError] = useState<string | null>(null);
   const [cancellingFollowUp, setCancellingFollowUp] = useState(false);
+  const [chase, setChase] = useState<Chase | null>(null);
+  const [chaseEvents, setChaseEvents] = useState<ChaseEvent[] | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!token) return;
-    // Reuses the same global escalation policy the Escalation Policy page
-    // edits -- the rail always reflects the real configured stage order,
-    // not a hardcoded guess that could drift from it.
-    getEscalationPolicy(token)
-      .then((p) => setStages(p.stages))
-      .catch(() => setStages(null));
-  }, [token]);
 
   useEffect(() => {
     if (invoice && requestedAction === "comment") commentInputRef.current?.focus();
@@ -305,6 +256,25 @@ export default function InvoiceDetail() {
   }
 
   useEffect(loadFollowUp, [token, invoiceId]);
+
+  // The agentic chase engine's own event log (separate from the Lummus
+  // case timeline above) -- only ever shown on the standalone Chases tab
+  // before this (added 2026-07-23). At most one open chase per case_id, so
+  // this is a lookup, not a list.
+  useEffect(() => {
+    if (!token || !invoiceId) return;
+    listChases(token, undefined, invoiceId)
+      .then((cs) => setChase(cs[0] ?? null))
+      .catch(() => setChase(null));
+  }, [token, invoiceId]);
+
+  useEffect(() => {
+    if (!token || !chase) {
+      setChaseEvents(null);
+      return;
+    }
+    listChaseEvents(token, chase.id).then(setChaseEvents).catch(() => setChaseEvents([]));
+  }, [token, chase]);
 
   async function submitFollowUp(email: string, cadenceDays: number, endDate: string) {
     if (!token || !invoiceId) return;
@@ -384,6 +354,11 @@ export default function InvoiceDetail() {
       invoice.open_amount
     )}, ${invoice.aging_status ?? "unknown aging"}`;
     setPinnedInvoice({ invoice_id: invoice.invoice_id, label });
+    // Project-scoped chat (added 2026-07-23): set the project too, so this
+    // handoff skips Chat's project picker entirely.
+    if (invoice.project_number) {
+      setCurrentProject({ project_number: invoice.project_number, project_name: invoice.project_name });
+    }
     navigate("/chat");
   }
 
@@ -525,7 +500,15 @@ export default function InvoiceDetail() {
         />
       )}
 
-      {stages && stages.length > 0 && <StageRail stages={stages} currentStageCode={invoice.stage} />}
+      {chase && (
+        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Chase agent</h2>
+          <p className="mt-1 text-[12px] text-zinc-400">What the agentic chase engine is doing on this invoice.</p>
+          <div className="mt-6">
+            <AgentPhaseRail state={chase.state} />
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments</h2>
@@ -598,6 +581,22 @@ export default function InvoiceDetail() {
             ))}
         </ul>
       </div>
+
+      {chase && (
+        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Agent communication</h2>
+          <p className="mt-1 text-[12px] text-zinc-400">
+            Outreach, replies, and commitments tracked by the chase agent -- who sent what to whom, and what it decided.
+          </p>
+          <div className="mt-6 space-y-2">
+            {chaseEvents === null && <p className="text-[13px] text-zinc-400">Loading...</p>}
+            {chaseEvents && chaseEvents.length === 0 && <p className="text-[13px] text-zinc-400">No agent activity yet.</p>}
+            {chaseEvents?.map((e) => (
+              <ChaseEventRow key={e.id} chase={chase} event={e} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

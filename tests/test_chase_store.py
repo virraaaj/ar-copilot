@@ -130,6 +130,20 @@ async def test_list_all_filters_by_state(store: ChaseStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_all_filters_by_case_id(store: ChaseStore) -> None:
+    """InvoiceDetail's per-invoice chase lookup (added 2026-07-23) -- finds
+    just the one chase for a given invoice/case without fetching every
+    chase in the system."""
+    a = await store.create("case-a")
+    await store.create("case-b")
+
+    found = await store.list_all(case_id="case-a")
+    assert [c["id"] for c in found] == [a]
+
+    assert await store.list_all(case_id="no-such-case") == []
+
+
+@pytest.mark.asyncio
 async def test_add_event_and_list_events_preserves_detail(store: ChaseStore) -> None:
     chase_id = await store.create("case-1")
 

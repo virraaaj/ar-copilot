@@ -217,36 +217,6 @@ async def test_delete_default_project_contact(client: BackendClient) -> None:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_list_policies_with_scope_filter(client: BackendClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    route = respx.get(f"{BASE}/api/v2/dunning/policies").mock(
-        return_value=httpx.Response(200, json={"items": [{"id": "pol-1", "scope_type": "global"}]})
-    )
-
-    result = await client.list_policies(scope_type="global")
-
-    assert result == [{"id": "pol-1", "scope_type": "global"}]
-    assert route.calls.last.request.url.params["scope_type"] == "global"
-    await client.close()
-
-
-@pytest.mark.asyncio
-@respx.mock
-async def test_update_stage_rule_patches_by_id(client: BackendClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    route = respx.patch(f"{BASE}/api/v2/dunning/stage-rules/rule-1").mock(
-        return_value=httpx.Response(200, json={"id": "rule-1", "transition_rule_json": {"max_days_in_stage": 10}})
-    )
-
-    result = await client.update_stage_rule("rule-1", {"transition_rule_json": {"max_days_in_stage": 10}})
-
-    assert result["transition_rule_json"]["max_days_in_stage"] == 10
-    assert route.called
-    await client.close()
-
-
-@pytest.mark.asyncio
-@respx.mock
 async def test_log_response_event_uses_real_schema_field_names(client: BackendClient) -> None:
     """Regression test: ResponseEventCreate (backend/app/dunning_v2/api/
     schemas.py) has no response_category or raw_text field -- an earlier

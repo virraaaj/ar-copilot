@@ -89,10 +89,10 @@ export default function ProjectContacts() {
         <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">Project Contacts</h1>
         <p className="mt-1 text-[14px] text-zinc-400">
           Who to reach for each project -- one contact per role. New projects start from the{" "}
-          <a href="/default-project-contacts" className="font-medium text-zinc-600 underline underline-offset-2">
+          <a href="/settings" className="font-medium text-zinc-600 underline underline-offset-2">
             default contacts
           </a>{" "}
-          template.
+          template (Settings tab).
         </p>
       </div>
 

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { streamChat, ApiError, type ChatHistoryMessage } from "../api";
+import { streamChat, listProjects, ApiError, type ChatHistoryMessage, type Project } from "../api";
 import { useSession } from "../context/SessionContext";
 
 interface DisplayMessage {
@@ -36,7 +36,7 @@ const PINNED_INVOICE_SUGGESTIONS = [
 ];
 
 export default function Chat() {
-  const { token, pinnedInvoice, setPinnedInvoice } = useSession();
+  const { token, pinnedInvoice, setPinnedInvoice, currentProject, setCurrentProject } = useSession();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -52,7 +52,7 @@ export default function Chat() {
   }
 
   async function sendQuestion(question: string) {
-    if (!token || sending) return;
+    if (!token || sending || !currentProject) return;
     // Prior turns only (this question isn't in `messages` yet) -- lets the
     // agent understand a reply like "paying next week" in the context of
     // its own preceding question ("what would you like the comment to
@@ -66,7 +66,7 @@ export default function Chat() {
     setSending(true);
 
     try {
-      for await (const event of streamChat(token, question, pinnedInvoice ?? undefined, priorHistory)) {
+      for await (const event of streamChat(token, question, currentProject, pinnedInvoice ?? undefined, priorHistory)) {
         if (event.type === "tool_call") {
           // Replace the standing "Thinking" bubble with what it's actually
           // doing, rather than stacking a new bubble on top of it.
@@ -93,22 +93,43 @@ export default function Chat() {
   }
 
   useEffect(() => {
-    // Set by ARHealth.tsx's "Ask about this" handoff (and reusable by any
-    // future page that wants to hand a pre-formed question to Chat) --
-    // consumed once, then cleared from history state so navigating back
-    // here later doesn't resend it.
+    // Set by a page handing off a pre-formed question (e.g. a "Chat about
+    // this project" action) -- consumed once, then cleared from history
+    // state so navigating back here later doesn't resend it. Needs
+    // currentProject too now, since sendQuestion requires it.
     const initialQuestion = (location.state as { initialQuestion?: string } | null)?.initialQuestion;
-    if (initialQuestion && !initialQuestionSent.current && token) {
+    if (initialQuestion && !initialQuestionSent.current && token && currentProject) {
       initialQuestionSent.current = true;
       sendQuestion(initialQuestion);
       navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, currentProject]);
+
+  function changeProject() {
+    setCurrentProject(null);
+    setPinnedInvoice(null);
+    setMessages([]);
+  }
+
+  if (!currentProject) {
+    return <ProjectPicker onPick={setCurrentProject} />;
+  }
 
   return (
     <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8">
-      <h1 className="mb-4 font-display text-[22px] font-semibold tracking-tight text-zinc-900">Chat</h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900">Chat</h1>
+        <button
+          onClick={changeProject}
+          className="rounded-full border border-zinc-200 px-3 py-1 text-[12px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+        >
+          Change project
+        </button>
+      </div>
+      <p className="-mt-2 mb-4 text-[13px] text-zinc-400">
+        Chatting about <span className="font-medium text-zinc-700">{currentProject.project_name ?? currentProject.project_number}</span>
+      </p>
 
       {pinnedInvoice && (
         <div className="mb-4 flex items-center justify-between rounded-xl border border-zinc-200/70 bg-white px-4 py-2.5 text-[13px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
@@ -187,6 +208,49 @@ export default function Chat() {
           Send
         </button>
       </form>
+    </div>
+  );
+}
+
+// Gate shown before a project is picked -- chat can't proceed without one
+// (project-scoped chat, added 2026-07-23). Same project list Documents'
+// folder view uses.
+function ProjectPicker({ onPick }: { onPick: (project: Project) => void }) {
+  const { token } = useSession();
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    listProjects(token).then(setProjects).catch((e) => setError(String(e)));
+  }, [token]);
+
+  return (
+    <div className="mx-auto max-w-2xl px-6 py-10">
+      <h1 className="mb-1 font-display text-[22px] font-semibold tracking-tight text-zinc-900">Chat</h1>
+      <p className="mb-6 text-[14px] text-zinc-400">Pick a project to chat about — invoices and documents both come from it.</p>
+
+      {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+      {!projects && !error && <p className="text-[13px] text-zinc-400">Loading projects...</p>}
+
+      <div className="space-y-2">
+        {projects?.map((p) => (
+          <button
+            key={p.project_number}
+            onClick={() => onPick(p)}
+            className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200/70 bg-white p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-[13px] font-semibold text-white">
+              {(p.project_name ?? p.project_number).slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[14px] font-medium text-zinc-900">{p.project_name ?? p.project_number}</p>
+              <p className="text-[12px] text-zinc-400">{p.project_number}</p>
+            </div>
+          </button>
+        ))}
+        {projects && projects.length === 0 && <p className="text-[13px] text-zinc-400">No projects found.</p>}
+      </div>
     </div>
   );
 }

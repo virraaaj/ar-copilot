@@ -44,24 +44,19 @@ export interface DocumentRef {
   filename: string;
   doc_type: string | null;
   size_bytes: number | null;
+  project_number: string | null;
 }
 
-export interface EscalationStage {
-  stage_id: string;
-  stage_rule_id: string | null;
-  stage_code: string;
-  stage_name: string;
-  sequence_order: number;
-  is_terminal_stage: boolean;
-  min_days_in_stage: number | null;
-  max_days_in_stage: number | null;
+// Projects have no dedicated entity in this app's own storage -- derived
+// live from invoice data, same grouping Dashboard already does client-side.
+// Added 2026-07-23 for the Documents folder view and Chat's project picker.
+export interface Project {
+  project_number: string;
+  project_name: string | null;
 }
 
-export interface EscalationPolicy {
-  policy_id: string;
-  version_id: string;
-  version_label: string | null;
-  stages: EscalationStage[];
+export async function listProjects(token: string): Promise<Project[]> {
+  return request("/projects", token);
 }
 
 export interface PinnedInvoice {
@@ -133,6 +128,17 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const resp = await fetch(`/api${path}`, { ...init, headers });
   if (!resp.ok) {
+    // A stored session (see SessionContext.tsx) can go stale across a
+    // server restart, since the server's own session store is in-memory
+    // and process-local. Rather than leave the UI stuck showing
+    // authenticated pages that 401 on every fetch, drop the dead session
+    // and bounce to login -- but only for an actually-authenticated
+    // request (token present), so a bad-password login attempt doesn't
+    // trigger a redirect loop on the login page itself.
+    if (resp.status === 401 && token) {
+      localStorage.removeItem("ar_copilot_session");
+      if (window.location.pathname !== "/login") window.location.href = "/login";
+    }
     const body = await resp.json().catch(() => ({}));
     throw new ApiError(resp.status, body.detail || `Request failed (${resp.status})`);
   }
@@ -179,38 +185,29 @@ export async function getAgingSummary(token: string): Promise<AgingSummary> {
   return request("/aging-summary", token);
 }
 
+export interface AgingUploadResult {
+  sync: Record<string, unknown>;
+  tick: Record<string, unknown> | null;
+  tick_error: string | null;
+}
+
+export async function uploadAgingExcel(token: string, file: File): Promise<AgingUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch("/api/aging-upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new ApiError(resp.status, body.detail || `Upload failed (${resp.status})`);
+  }
+  return resp.json();
+}
+
 export async function listProjectInvoices(token: string, projectNumber: string): Promise<Invoice[]> {
   return request(`/projects/${encodeURIComponent(projectNumber)}/invoices`, token);
-}
-
-// AR-health digest (added 2026-07-17) -- on-demand version of the weekly
-// Teams digest card, see app/services/digest_engine.py for the AR-health
-// and customer-projection computation this mirrors.
-export interface ProjectHealth {
-  open_invoice_count: number;
-  total_open_amount: number;
-  overdue_count: number;
-  overdue_amount: number;
-  by_stage: Record<string, number>;
-}
-
-export interface CustomerProjection {
-  customer_id: string;
-  sample_size: number;
-  avg_days_relative_to_due: number | null;
-  risk: "low" | "medium" | "high" | "unknown";
-}
-
-export interface ProjectDigest {
-  project_number: string;
-  found: boolean;
-  project_name?: string;
-  health?: ProjectHealth;
-  customer_projections?: CustomerProjection[];
-}
-
-export async function getProjectDigest(token: string, projectNumber: string): Promise<ProjectDigest> {
-  return request(`/projects/${encodeURIComponent(projectNumber)}/digest`, token);
 }
 
 export async function snoozeInvoice(
@@ -348,23 +345,6 @@ export async function deleteProjectContact(token: string, contactId: string): Pr
   await request(`/project-contacts/${encodeURIComponent(contactId)}`, token, { method: "DELETE" });
 }
 
-export async function getEscalationPolicy(token: string): Promise<EscalationPolicy> {
-  return request("/escalation-policy", token);
-}
-
-export async function updateEscalationStage(
-  token: string,
-  versionId: string,
-  stageRuleId: string,
-  update: { max_days_in_stage?: number; min_days_in_stage?: number }
-): Promise<void> {
-  await request(`/escalation-policy/versions/${versionId}/stage-rules/${stageRuleId}`, token, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(update),
-  });
-}
-
 export async function getInvoiceTimeline(token: string, invoiceId: string): Promise<TimelineEvent[]> {
   return request(`/invoices/${encodeURIComponent(invoiceId)}/timeline`, token);
 }
@@ -377,22 +357,39 @@ export async function addComment(token: string, invoiceId: string, comment: stri
   });
 }
 
-export async function listDocuments(token: string, docType?: string): Promise<DocumentRef[]> {
-  const qs = docType ? `?doc_type=${encodeURIComponent(docType)}` : "";
-  return request(`/documents${qs}`, token);
+export async function listDocuments(token: string, docType?: string, projectNumber?: string): Promise<DocumentRef[]> {
+  const params = new URLSearchParams();
+  if (docType) params.set("doc_type", docType);
+  if (projectNumber) params.set("project_number", projectNumber);
+  const qs = params.toString();
+  return request(`/documents${qs ? `?${qs}` : ""}`, token);
 }
 
-export async function searchDocuments(token: string, query: string, docType?: string): Promise<DocumentSearchResult[]> {
+export async function searchDocuments(
+  token: string,
+  query: string,
+  docType?: string,
+  projectNumber?: string
+): Promise<DocumentSearchResult[]> {
   const params = new URLSearchParams({ query });
   if (docType) params.set("doc_type", docType);
+  if (projectNumber) params.set("project_number", projectNumber);
   return request(`/documents/search?${params.toString()}`, token);
 }
 
-export async function uploadDocument(token: string, file: File, docType?: string): Promise<Record<string, unknown>> {
+// project_number is required (project folders, added 2026-07-23) -- every
+// upload belongs to exactly one project.
+export async function uploadDocument(
+  token: string,
+  file: File,
+  projectNumber: string,
+  docType?: string
+): Promise<Record<string, unknown>> {
   const form = new FormData();
   form.append("file", file);
-  const qs = docType ? `?doc_type=${encodeURIComponent(docType)}` : "";
-  const resp = await fetch(`/api/documents/upload${qs}`, {
+  const params = new URLSearchParams({ project_number: projectNumber });
+  if (docType) params.set("doc_type", docType);
+  const resp = await fetch(`/api/documents/upload?${params.toString()}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -434,9 +431,12 @@ export interface ChaseEvent {
   detail: Record<string, unknown> | null;
 }
 
-export async function listChases(token: string, state?: string): Promise<Chase[]> {
-  const qs = state ? `?state=${encodeURIComponent(state)}` : "";
-  return request(`/chases${qs}`, token);
+export async function listChases(token: string, state?: string, caseId?: string): Promise<Chase[]> {
+  const params = new URLSearchParams();
+  if (state) params.set("state", state);
+  if (caseId) params.set("case_id", caseId);
+  const qs = params.toString();
+  return request(`/chases${qs ? `?${qs}` : ""}`, token);
 }
 
 export async function getChase(token: string, chaseId: string): Promise<Chase> {
@@ -484,16 +484,19 @@ export interface ChatHistoryMessage {
 // way with auth headers (EventSource doesn't support custom headers at all),
 // so this reads the streamed body directly and parses `data: ` lines as they
 // arrive -- same wire format, just consumed by hand instead of EventSource.
+// `project` is required (project-scoped chat, added 2026-07-23) -- every
+// conversation is now about exactly one project.
 export async function* streamChat(
   token: string,
   message: string,
+  project: Project,
   pinnedInvoice?: PinnedInvoice,
   history?: ChatHistoryMessage[]
 ): AsyncGenerator<ChatEvent> {
   const resp = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ message, pinned_invoice: pinnedInvoice, history }),
+    body: JSON.stringify({ message, project, pinned_invoice: pinnedInvoice, history }),
   });
   if (!resp.ok || !resp.body) {
     const body = await resp.json().catch(() => ({}));

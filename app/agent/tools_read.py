@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Optional
 
 from app.services.backend_client import BackendClient
 from app.services.chase_store import ChaseStore
-from app.services.digest_engine import MAX_CUSTOMERS_SHOWN, compute_ar_health, compute_customer_projection
 
 # ---------------------------------------------------------------------------
 # Handlers — each takes the shared BackendClient plus its own kwargs.
@@ -57,6 +56,24 @@ async def list_invoices(
                 filtered.append(c)
         cases = filtered
     return [_summarize_case(c) for c in cases]
+
+
+async def list_projects(client: BackendClient) -> List[Dict[str, Any]]:
+    """Distinct projects (project_number/project_name pairs), derived live
+    from invoice data -- there's no separate "Project" entity in this app's
+    own storage, matching the grouping Dashboard already does client-side.
+    Backs the Documents folder view and Chat's project picker (added
+    2026-07-23, project-folder restructuring)."""
+    cases = await client.list_cases(limit=500)
+    seen: Dict[str, Optional[str]] = {}
+    for c in cases:
+        pn = c.get("project_number")
+        if pn and pn not in seen:
+            seen[pn] = c.get("project_name")
+    return [
+        {"project_number": pn, "project_name": name}
+        for pn, name in sorted(seen.items(), key=lambda kv: (kv[1] or kv[0]))
+    ]
 
 
 async def get_invoice(client: BackendClient, invoice_id: str) -> Dict[str, Any]:
@@ -171,40 +188,6 @@ async def get_chase_status(client: BackendClient, invoice_id: str) -> Dict[str, 
     }
 
 
-async def get_project_digest(client: BackendClient, project_number: str) -> Dict[str, Any]:
-    """AR health (open exposure, overdue count/amount, stage mix) and a
-    payment-pattern projection per customer, for one project -- the same
-    computation the weekly Teams digest card uses (services/
-    digest_engine.py), available on demand here so both the chat agent and
-    the web dashboard tab can ask "how healthy is this project" without
-    waiting for the next scheduled digest. See digest_engine's module
-    docstring for the projection methodology and its stated limitations."""
-    cases = await client.list_cases(project_id=project_number, limit=500)
-    if not cases:
-        return {"project_number": project_number, "found": False}
-
-    project_name = next((c.get("project_name") for c in cases if c.get("project_name")), project_number)
-    health = compute_ar_health(cases)
-
-    active_customer_ids = sorted(
-        {c.get("customer_id") for c in cases if c.get("case_status") == "active" and c.get("customer_id")}
-    )
-    projections = []
-    for customer_id in active_customer_ids[:MAX_CUSTOMERS_SHOWN]:
-        closed = await client.list_cases(customer_id=customer_id, case_status="closed_paid", limit=50)
-        proj = compute_customer_projection(closed)
-        proj["customer_id"] = customer_id
-        projections.append(proj)
-
-    return {
-        "project_number": project_number,
-        "project_name": project_name,
-        "found": True,
-        "health": health,
-        "customer_projections": projections,
-    }
-
-
 def _summarize_case(c: Dict[str, Any], full: bool = False) -> Dict[str, Any]:
     """Project the backend's CaseSummaryResponse down to what the model
     needs — human-readable fields first, the internal id kept but never
@@ -265,6 +248,11 @@ SCHEMAS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "list_projects",
+        "description": "List every distinct project (project_number/project_name pairs) with at least one invoice.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
         "name": "get_invoice",
         "description": "Full detail for one specific invoice, once resolved via list_invoices.",
         "parameters": {
@@ -311,21 +299,6 @@ SCHEMAS: List[Dict[str, Any]] = [
         },
     },
     {
-        "name": "get_project_digest",
-        "description": (
-            "AR health for one project (open invoice count/amount, overdue count/amount, stage mix) plus a "
-            "payment-pattern projection per customer (how many days late/early they typically pay, based on "
-            "their own closed-invoice history, with a risk level and how many past invoices the estimate is "
-            "based on). Use this when asked about a project's overall AR health, risk, or payment outlook -- "
-            "not for a single invoice (use get_invoice/list_invoices for that)."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {"project_number": {"type": "string"}},
-            "required": ["project_number"],
-        },
-    },
-    {
         "name": "get_chase_status",
         "description": (
             "Status of the automated agentic chase for one invoice, if any: which state it's in "
@@ -344,11 +317,11 @@ SCHEMAS: List[Dict[str, Any]] = [
 
 HANDLERS = {
     "list_invoices": list_invoices,
+    "list_projects": list_projects,
     "get_invoice": get_invoice,
     "get_timeline": get_timeline,
     "get_project_contacts": get_project_contacts,
     "list_review_tasks": list_review_tasks,
     "aging_summary": aging_summary,
-    "get_project_digest": get_project_digest,
     "get_chase_status": get_chase_status,
 }

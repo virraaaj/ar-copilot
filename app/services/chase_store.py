@@ -225,15 +225,24 @@ class ChaseStore:
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
-    async def list_all(self, state: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Backs the web Chases tab. state=None returns every chase."""
+    async def list_all(self, state: Optional[str] = None, case_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Backs the web Chases tab (state=None, case_id=None returns every
+        chase) and InvoiceDetail's per-invoice chase lookup (case_id set --
+        added 2026-07-23 so that page doesn't have to fetch every chase in
+        the system just to find the one for the invoice it's showing)."""
         await self._ensure_schema()
+        clauses = []
+        params: List[Any] = []
+        if state:
+            clauses.append("state = ?")
+            params.append(state)
+        if case_id:
+            clauses.append("case_id = ?")
+            params.append(case_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            if state:
-                cursor = await db.execute("SELECT * FROM chases WHERE state = ? ORDER BY updated_at DESC", (state,))
-            else:
-                cursor = await db.execute("SELECT * FROM chases ORDER BY updated_at DESC")
+            cursor = await db.execute(f"SELECT * FROM chases{where} ORDER BY updated_at DESC", params)
             rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 

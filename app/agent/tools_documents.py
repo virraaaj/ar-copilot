@@ -19,11 +19,13 @@ from app.documents.index import get_index
 from app.documents.sources.manual_upload import ManualUploadSource
 
 
-async def search_documents(_backend: Any, query: str, doc_type: Optional[str] = None, top_k: int = 5) -> List[Dict[str, Any]]:
+async def search_documents(
+    _backend: Any, query: str, doc_type: Optional[str] = None, top_k: int = 5, project_number: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Search across ingested documents by keyword/description. Returns
     ranked excerpts with page numbers for citation."""
     index = get_index()
-    results = await index.search(query, doc_type=doc_type, top_k=top_k)
+    results = await index.search(query, doc_type=doc_type, top_k=top_k, project_number=project_number)
     return [
         {
             "doc_id": r.chunk.doc_id,
@@ -53,13 +55,18 @@ async def get_document(_backend: Any, doc_id: str) -> Dict[str, Any]:
     }
 
 
-async def list_recent_documents(_backend: Any, doc_type: Optional[str] = None) -> List[Dict[str, Any]]:
-    """What's been uploaded, optionally filtered by document type. Sources
-    other than manual upload (e.g. SharePoint) are synced in explicitly,
-    not queried live on every call."""
+async def list_recent_documents(
+    _backend: Any, doc_type: Optional[str] = None, project_number: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """What's been uploaded, optionally filtered by document type and/or
+    project. Sources other than manual upload (e.g. SharePoint) are synced
+    in explicitly, not queried live on every call."""
     source = ManualUploadSource()
-    refs = await source.list_documents(doc_type=doc_type)
-    return [{"filename": r.filename, "doc_type": r.doc_type, "size_bytes": r.size_bytes} for r in refs]
+    refs = await source.list_documents(doc_type=doc_type, project_number=project_number)
+    return [
+        {"filename": r.filename, "doc_type": r.doc_type, "size_bytes": r.size_bytes, "project_number": r.project_number}
+        for r in refs
+    ]
 
 
 SCHEMAS: List[Dict[str, Any]] = [
@@ -79,6 +86,10 @@ SCHEMAS: List[Dict[str, Any]] = [
                     "enum": ["vendor_certification", "customer_manual", "quote", "terms_and_conditions", "equipment_manual"],
                 },
                 "top_k": {"type": "integer", "default": 5},
+                "project_number": {
+                    "type": "string",
+                    "description": "Restrict the search to one project's documents. Always pass this when the conversation is scoped to a project.",
+                },
             },
             "required": ["query"],
         },
@@ -94,13 +105,17 @@ SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "list_recent_documents",
-        "description": "List uploaded/ingested documents, optionally filtered by type.",
+        "description": "List uploaded/ingested documents, optionally filtered by type and/or project.",
         "parameters": {
             "type": "object",
             "properties": {
                 "doc_type": {
                     "type": "string",
                     "enum": ["vendor_certification", "customer_manual", "quote", "terms_and_conditions", "equipment_manual"],
+                },
+                "project_number": {
+                    "type": "string",
+                    "description": "Restrict the list to one project's documents. Always pass this when the conversation is scoped to a project.",
                 },
             },
         },

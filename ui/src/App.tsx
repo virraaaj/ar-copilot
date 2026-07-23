@@ -7,12 +7,9 @@ import Dashboard from "./pages/Dashboard";
 import InvoiceDetail from "./pages/InvoiceDetail";
 import Chat from "./pages/Chat";
 import Documents from "./pages/Documents";
-import EscalationPolicy from "./pages/EscalationPolicy";
 import MagicLink from "./pages/MagicLink";
 import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
-import ProjectContacts from "./pages/ProjectContacts";
-import DefaultProjectContacts from "./pages/DefaultProjectContacts";
-import ARHealth from "./pages/ARHealth";
+import Settings from "./pages/Settings";
 import Chases from "./pages/Chases";
 
 function RequireSession({ children }: { children: ReactNode }) {
@@ -72,14 +69,6 @@ export default function App() {
         }
       />
       <Route
-        path="/ar-health"
-        element={
-          <RequireSession>
-            <ARHealth />
-          </RequireSession>
-        }
-      />
-      <Route
         path="/chases"
         element={
           <RequireSession>
@@ -88,26 +77,10 @@ export default function App() {
         }
       />
       <Route
-        path="/escalation-policy"
+        path="/settings"
         element={
           <RequireSession>
-            <EscalationPolicy />
-          </RequireSession>
-        }
-      />
-      <Route
-        path="/project-contacts"
-        element={
-          <RequireSession>
-            <ProjectContacts />
-          </RequireSession>
-        }
-      />
-      <Route
-        path="/default-project-contacts"
-        element={
-          <RequireSession>
-            <DefaultProjectContacts />
+            <Settings />
           </RequireSession>
         }
       />

@@ -520,10 +520,23 @@ async def poll_chase_mailbox(
 
     messages = await mailbox_reader.list_recent_messages(top=25)
     processed = 0
+    own_address = (getattr(settings, "EMAIL_FROM_ADDRESS", "") or "").lower()
 
     for message in messages:
         message_id = message.get("id")
         if not message_id or await chase_store.is_mail_processed(message_id):
+            continue
+
+        # Self-addressed outreach (this UAT setup's PM/customer contacts
+        # are frequently the same mailbox the chase engine sends from)
+        # lands right back in this same inbox -- without this check the
+        # poller would re-ingest its own outreach/nudge text as if it were
+        # a genuine reply, running the chase in circles and burning the
+        # clarify/nudge budget on nothing. Discovered 2026-07-23 when a
+        # chase escalated after "replying to itself" twice.
+        sender = ((message.get("from") or {}).get("emailAddress") or {}).get("address", "")
+        if own_address and sender.lower() == own_address:
+            await chase_store.mark_mail_processed(message_id)
             continue
 
         token = extract_subject_token(message.get("subject") or "")

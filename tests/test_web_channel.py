@@ -497,44 +497,6 @@ def test_list_project_invoices_endpoint(client: TestClient) -> None:
 
 
 @respx.mock
-def test_get_project_digest_endpoint(client: TestClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
-    token = login_resp.json()["session_token"]
-
-    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "items": [
-                    {
-                        "id": "case-1",
-                        "case_status": "active",
-                        "current_stage_code": "reminder",
-                        "project_name": "Meridian Bay",
-                        "customer_id": "cust-1",
-                        "primary_invoice_open_amount": 1000,
-                    }
-                ]
-            },
-        )
-    )
-
-    resp = client.get("/api/projects/PN-1/digest", headers={"Authorization": f"Bearer {token}"})
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["found"] is True
-    assert body["project_name"] == "Meridian Bay"
-    assert body["health"]["open_invoice_count"] == 1
-
-
-def test_get_project_digest_endpoint_requires_session(client: TestClient) -> None:
-    resp = client.get("/api/projects/PN-1/digest")
-    assert resp.status_code == 401
-
-
-@respx.mock
 def test_list_business_units_endpoint(client: TestClient) -> None:
     respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
@@ -757,111 +719,6 @@ def test_magic_link_exchange_rejects_expired_token(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-@respx.mock
-def test_get_escalation_policy_composes_stages_and_rules(client: TestClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
-    token = login_resp.json()["session_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    respx.get(f"{BASE}/api/v2/dunning/policies").mock(
-        return_value=httpx.Response(200, json={"items": [{"id": "pol-1", "scope_type": "global"}]})
-    )
-    respx.get(f"{BASE}/api/v2/dunning/policies/pol-1/versions").mock(
-        return_value=httpx.Response(
-            200, json={"items": [{"id": "ver-1", "is_current_published": True, "display_label": "v1"}]}
-        )
-    )
-    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stages").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
-                {"id": "stage-2", "stage_code": "first_notice", "stage_name": "First Notice", "sequence_order": 2, "is_terminal_stage": False},
-                {"id": "stage-1", "stage_code": "reminder", "stage_name": "Reminder", "sequence_order": 1, "is_terminal_stage": False},
-            ],
-        )
-    )
-    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
-                {"id": "rule-1", "stage_id": "stage-1", "transition_rule_json": {"max_days_in_stage": 7}},
-                {"id": "rule-2", "stage_id": "stage-2", "transition_rule_json": {"max_days_in_stage": 14}},
-            ],
-        )
-    )
-
-    resp = client.get("/api/escalation-policy", headers=headers)
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["version_id"] == "ver-1"
-    # Sorted by sequence_order even though the stages endpoint returned them out of order.
-    assert [s["stage_code"] for s in body["stages"]] == ["reminder", "first_notice"]
-    assert body["stages"][0]["max_days_in_stage"] == 7
-    assert body["stages"][0]["stage_rule_id"] == "rule-1"
-
-
-@respx.mock
-def test_update_escalation_stage_merges_not_clobbers_transition_json(client: TestClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
-    token = login_resp.json()["session_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "rule-1",
-                    "stage_id": "stage-1",
-                    "transition_rule_json": {"max_days_in_stage": 7, "require_at_least_one_action_sent": True},
-                }
-            ],
-        )
-    )
-    patch_route = respx.patch(f"{BASE}/api/v2/dunning/stage-rules/rule-1").mock(
-        return_value=httpx.Response(
-            200,
-            json={"id": "rule-1", "transition_rule_json": {"max_days_in_stage": 10, "require_at_least_one_action_sent": True}},
-        )
-    )
-
-    resp = client.patch(
-        "/api/escalation-policy/versions/ver-1/stage-rules/rule-1",
-        json={"max_days_in_stage": 10},
-        headers=headers,
-    )
-
-    assert resp.status_code == 200
-    # The sibling field must have been preserved in the outgoing PATCH body,
-    # not dropped -- this is the whole point of fetch-then-merge.
-    sent_body = json.loads(patch_route.calls.last.request.content)
-    assert sent_body["transition_rule_json"]["require_at_least_one_action_sent"] is True
-    assert sent_body["transition_rule_json"]["max_days_in_stage"] == 10
-
-
-@respx.mock
-def test_update_escalation_stage_404s_on_unknown_rule_id(client: TestClient) -> None:
-    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
-    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
-    token = login_resp.json()["session_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    respx.get(f"{BASE}/api/v2/dunning/policy-versions/ver-1/stage-rules").mock(
-        return_value=httpx.Response(200, json=[])
-    )
-
-    resp = client.patch(
-        "/api/escalation-policy/versions/ver-1/stage-rules/nonexistent",
-        json={"max_days_in_stage": 10},
-        headers=headers,
-    )
-
-    assert resp.status_code == 404
-
-
 def test_upload_ingest_and_search_document(client: TestClient) -> None:
     respx_router = respx.mock
     with respx_router:
@@ -874,18 +731,107 @@ def test_upload_ingest_and_search_document(client: TestClient) -> None:
     upload_resp = client.post(
         "/api/documents/upload",
         files={"file": ("spec.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
-        params={"doc_type": "equipment_manual"},
+        params={"doc_type": "equipment_manual", "project_number": "PN-1"},
         headers=headers,
     )
     assert upload_resp.status_code == 200
     assert upload_resp.json()["chunks_indexed"] >= 1
     assert upload_resp.json()["pages_needing_ocr"] == 0
+    assert upload_resp.json()["project_number"] == "PN-1"
 
     search_resp = client.get("/api/documents/search", params={"query": "torque bolt A-42"}, headers=headers)
     assert search_resp.status_code == 200
     results = search_resp.json()
     assert len(results) >= 1
-    assert "45 Nm" in results[0]["excerpt"]
+
+    # Scoped to a different project -- must not find it.
+    scoped_resp = client.get(
+        "/api/documents/search", params={"query": "torque bolt A-42", "project_number": "PN-2"}, headers=headers
+    )
+    assert scoped_resp.json() == []
+
+    # Scoped to the right project -- finds it.
+    same_project_resp = client.get(
+        "/api/documents/search", params={"query": "torque bolt A-42", "project_number": "PN-1"}, headers=headers
+    )
+    assert len(same_project_resp.json()) >= 1
+
+
+def test_upload_document_requires_project_number(client: TestClient) -> None:
+    respx_router = respx.mock
+    with respx_router:
+        respx_router.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+        login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    pdf_bytes = make_pdf_bytes("Some content.")
+    resp = client.post(
+        "/api/documents/upload",
+        files={"file": ("spec.pdf", io.BytesIO(pdf_bytes), "application/pdf")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+
+
+@respx.mock
+def test_aging_upload_syncs_and_ticks(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    respx.post(f"{BASE}/api/v1/dunning/aging-table/sync").mock(
+        return_value=httpx.Response(
+            200,
+            json={"summary": {"inserted": 2, "updated": 1, "marked_as_paid": 0}, "dryRun": False},
+        )
+    )
+    respx.post(f"{BASE}/api/v1/test/trigger-tick").mock(return_value=httpx.Response(200, json={"ticked": True}))
+
+    resp = client.post(
+        "/api/aging-upload",
+        files={"file": ("aging.xlsx", io.BytesIO(b"fake-excel-bytes"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sync"]["summary"]["inserted"] == 2
+    assert body["tick"] == {"ticked": True}
+    assert body["tick_error"] is None
+
+
+@respx.mock
+def test_aging_upload_reports_partial_success_when_tick_fails(client: TestClient) -> None:
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    respx.post(f"{BASE}/api/v1/dunning/aging-table/sync").mock(
+        return_value=httpx.Response(200, json={"summary": {"inserted": 1, "updated": 0, "marked_as_paid": 0}})
+    )
+    respx.post(f"{BASE}/api/v1/test/trigger-tick").mock(return_value=httpx.Response(403, json={"detail": "test mode disabled"}))
+
+    resp = client.post(
+        "/api/aging-upload",
+        files={"file": ("aging.xlsx", io.BytesIO(b"fake-excel-bytes"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sync"]["summary"]["inserted"] == 1
+    assert body["tick"] is None
+    assert body["tick_error"] is not None
+
+
+def test_aging_upload_requires_session(client: TestClient) -> None:
+    resp = client.post(
+        "/api/aging-upload",
+        files={"file": ("aging.xlsx", io.BytesIO(b"fake"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp.status_code == 401
 
 
 @respx.mock
@@ -922,7 +868,7 @@ def test_chat_streams_tool_call_then_answer(client: TestClient) -> None:
     try:
         resp = client.post(
             "/api/chat",
-            json={"message": "any overdue invoices?"},
+            json={"message": "any overdue invoices?", "project": {"project_number": "PN-1", "project_name": "Meridian Bay"}},
             headers={"Authorization": f"Bearer {token}"},
         )
     finally:
@@ -978,7 +924,10 @@ def test_chat_can_execute_a_write_tool(client: TestClient) -> None:
     try:
         resp = client.post(
             "/api/chat",
-            json={"message": "add a comment saying they're paying next week"},
+            json={
+                "message": "add a comment saying they're paying next week",
+                "project": {"project_number": "PN-1", "project_name": "Meridian Bay"},
+            },
             headers={"Authorization": f"Bearer {token}"},
         )
     finally:
@@ -1019,6 +968,7 @@ def test_chat_threads_conversation_history_to_the_model(client: TestClient) -> N
             "/api/chat",
             json={
                 "message": "paying next week",
+                "project": {"project_number": "PN-1", "project_name": "Meridian Bay"},
                 "history": [
                     {"role": "user", "content": "I want to add a comment"},
                     {"role": "assistant", "content": "Sure -- what would you like the comment to say?"},
@@ -1063,6 +1013,7 @@ def test_chat_with_pinned_invoice_includes_id_in_history_not_response(client: Te
             "/api/chat",
             json={
                 "message": "what's the status?",
+                "project": {"project_number": "PN-1", "project_name": "Meridian Bay"},
                 "pinned_invoice": {"invoice_id": "case-42", "label": "Meridian Bay -- $1.25M, 21 days overdue"},
             },
             headers={"Authorization": f"Bearer {token}"},
@@ -1072,3 +1023,152 @@ def test_chat_with_pinned_invoice_includes_id_in_history_not_response(client: Te
 
     joined = json.dumps(captured_messages["messages"])
     assert "case-42" in joined
+
+
+@respx.mock
+def test_chat_scopes_the_conversation_to_the_given_project(client: TestClient) -> None:
+    """Project-scoped chat (added 2026-07-23): the project rides along in
+    history, same mechanism as the pinned-invoice message above."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    captured_messages = {}
+
+    def make_message(content=None, tool_calls=None):
+        return SimpleNamespace(content=content, tool_calls=tool_calls)
+
+    class CapturingLLM:
+        async def chat(self, messages, tools=None, tool_choice="auto"):
+            captured_messages["messages"] = messages
+            return make_message(content="ok")
+
+    import app.channels.web as web_module
+
+    original_get_llm = web_module.get_llm
+    web_module.get_llm = lambda: CapturingLLM()
+    try:
+        client.post(
+            "/api/chat",
+            json={
+                "message": "what's outstanding here?",
+                "project": {"project_number": "PN-7", "project_name": "Falcon Ridge"},
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        web_module.get_llm = original_get_llm
+
+    joined = json.dumps(captured_messages["messages"])
+    assert "PN-7" in joined
+    assert "Falcon Ridge" in joined
+
+
+def test_chat_requires_project(client: TestClient) -> None:
+    with respx.mock:
+        respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+        login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
+    token = login_resp.json()["session_token"]
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "any overdue invoices?"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# UAT data reset (added 2026-07-23)
+
+
+def _login_as(client: TestClient, email: str) -> str:
+    with respx.mock:
+        respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+        resp = client.post("/api/auth/login", json={"email": email, "password": "pw"})
+    return resp.json()["session_token"]
+
+
+def test_wipe_uat_data_requires_session(client: TestClient) -> None:
+    resp = client.post("/api/admin/wipe-uat-data", json={"confirm": "WIPE_UAT_DATA"})
+    assert resp.status_code == 401
+
+
+def test_wipe_uat_data_requires_admin(client: TestClient) -> None:
+    token = _login_as(client, "not-admin@example.com")
+
+    resp = client.post(
+        "/api/admin/wipe-uat-data",
+        json={"confirm": "WIPE_UAT_DATA"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_wipe_uat_data_requires_exact_confirm_string(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_UPNS", "admin@example.com")
+    monkeypatch.setenv("UAT_DATABASE_URL", "postgresql://user:pw@localhost:5433/db")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    token = _login_as(client, "admin@example.com")
+
+    resp = client.post(
+        "/api/admin/wipe-uat-data",
+        json={"confirm": "yes please"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_wipe_uat_data_requires_configured_database_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_UPNS", "admin@example.com")
+    monkeypatch.setenv("UAT_DATABASE_URL", "")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    token = _login_as(client, "admin@example.com")
+
+    resp = client.post(
+        "/api/admin/wipe-uat-data",
+        json={"confirm": "WIPE_UAT_DATA"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 400
+
+
+def test_wipe_uat_data_success_clears_local_state_too(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("ADMIN_UPNS", "admin@example.com")
+    monkeypatch.setenv("UAT_DATABASE_URL", "postgresql://user:pw@localhost:5433/db")
+    state_path = tmp_path / "state.db"
+    state_path.write_text("not really sqlite, just needs to exist")
+    monkeypatch.setenv("STATE_DB_PATH", str(state_path))
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    async def fake_wipe(database_url: str):
+        assert database_url == "postgresql://user:pw@localhost:5433/db"
+        return {"wiped_tables": ["invoices", "projects"], "kept_tables": ["users", "default_project_contacts"]}
+
+    monkeypatch.setattr(web_module, "wipe_uat_data", fake_wipe)
+
+    token = _login_as(client, "admin@example.com")
+
+    resp = client.post(
+        "/api/admin/wipe-uat-data",
+        json={"confirm": "WIPE_UAT_DATA"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["wiped_tables"] == ["invoices", "projects"]
+    assert body["kept_tables"] == ["users", "default_project_contacts"]
+    assert body["local_state_cleared"] is True
+    assert not state_path.exists()

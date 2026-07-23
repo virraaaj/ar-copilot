@@ -83,6 +83,21 @@ def test_list_chases_filters_by_state(client: TestClient) -> None:
     assert resp.json()[0]["case_id"] == "case-1"
 
 
+def test_list_chases_filters_by_case_id(client: TestClient) -> None:
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    import asyncio
+
+    asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.create("case-2", invoice_no="INV-2"))
+
+    resp = client.get("/api/chases?case_id=case-1", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["case_id"] == "case-1"
+
+
 def test_get_chase_by_id(client: TestClient) -> None:
     token = _login(client)
     store = ChaseStore(db_path=client.chase_db_path)

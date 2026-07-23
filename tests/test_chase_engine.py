@@ -488,6 +488,62 @@ async def test_poll_chase_mailbox_matches_by_subject_token_and_advances_chase(ba
 
 
 @pytest.mark.asyncio
+async def test_poll_chase_mailbox_ignores_self_addressed_mail(backend, chase_store, project_store, messenger, email_sender):
+    """Regression test (added 2026-07-23): a chase escalated after the
+    poller re-ingested its own outreach as a "reply" -- self-addressed
+    mail (PM/customer contact happens to be the same mailbox the engine
+    sends from, common in this UAT setup) lands right back in the same
+    inbox. A message From the engine's own EMAIL_FROM_ADDRESS must never
+    be treated as an inbound reply, no matter its subject token."""
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@x.com")
+    chase = await chase_store.get(chase_id)
+
+    reader = FakeMailboxReader([
+        {
+            "id": "msg-1",
+            "subject": f"Re: [{chase['subject_token']}] invoice",
+            "bodyPreview": "Following up -- still hoping to hear back.",
+            "from": {"emailAddress": {"address": "info@corehelix.ai"}},
+        },
+    ])
+    settings = make_settings(CHASE_DRY_RUN=False, EMAIL_FROM_ADDRESS="info@corehelix.ai")
+
+    processed = await poll_chase_mailbox(reader, None, backend, messenger, email_sender, chase_store, project_store, settings)
+
+    assert processed == 0
+    assert await chase_store.is_mail_processed("msg-1") is True
+    events = await chase_store.list_events(chase_id)
+    assert not any(e["kind"] == "reply_received" for e in events)
+    # State/clarify budget must be untouched -- the message was ignored
+    # outright, not processed as an ambiguous reply.
+    unchanged = await chase_store.get(chase_id)
+    assert unchanged["state"] == "awaiting_pm"
+    assert unchanged["clarify_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_poll_chase_mailbox_case_insensitive_self_address_match(backend, chase_store, project_store, messenger, email_sender):
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@x.com")
+    chase = await chase_store.get(chase_id)
+
+    reader = FakeMailboxReader([
+        {
+            "id": "msg-1",
+            "subject": f"[{chase['subject_token']}] invoice",
+            "bodyPreview": "hi",
+            "from": {"emailAddress": {"address": "INFO@COREHELIX.AI"}},
+        },
+    ])
+    settings = make_settings(CHASE_DRY_RUN=False, EMAIL_FROM_ADDRESS="info@corehelix.ai")
+
+    processed = await poll_chase_mailbox(reader, None, backend, messenger, email_sender, chase_store, project_store, settings)
+
+    assert processed == 0
+
+
+@pytest.mark.asyncio
 async def test_poll_chase_mailbox_skips_messages_with_no_recognizable_token(backend, chase_store, project_store, messenger, email_sender):
     reader = FakeMailboxReader([{"id": "msg-1", "subject": "Unrelated email", "bodyPreview": "hi"}])
     settings = make_settings(CHASE_DRY_RUN=False)

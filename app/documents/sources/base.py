@@ -20,6 +20,10 @@ class DocumentRef:
     doc_type: Optional[str] = None  # vendor_certification | customer_manual | quote | terms_and_conditions | equipment_manual
     size_bytes: Optional[int] = None
     modified_at: Optional[str] = None  # ISO timestamp, if the source has one
+    # Which project this document belongs to (added 2026-07-23, project-folder
+    # restructuring). None means "unfiled" -- pre-migration uploads, or a
+    # source (SharePoint) that doesn't carry project info at all.
+    project_number: Optional[str] = None
 
 
 class DocumentSource(ABC):
