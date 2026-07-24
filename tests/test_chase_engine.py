@@ -557,6 +557,45 @@ async def test_advance_chase_with_reply_resolves_a_back_reference_using_history(
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_advance_chase_with_reply_out_of_scope_redirects_to_last_question_asked(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """Regression test (added 2026-07-24): the customer had just been asked
+    'when's a good time to follow up' (a checkback ack) and instead asked
+    about other customers -- the redirect must repeat that actual last
+    question, not a hardcoded payment-date line that was never asked."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(
+        chase_id, state="awaiting_customer", target="customer", customer_email="cust@x.com", clarify_count=0
+    )
+    await chase_store.add_event(
+        chase_id, "outreach_sent",
+        {"target": "customer", "text": "No worries -- when would be a good time for me to follow up on this?"},
+    )
+    chase = await chase_store.get(chase_id)
+
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {"intent": "out_of_scope_request", "confidence": "high"})
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=True)
+
+    await advance_chase_with_reply(
+        chase, "Are you seeing other customers who are not paying on time?",
+        llm, backend, messenger, email_sender, chase_store, project_store, settings,
+    )
+
+    events = await chase_store.list_events(chase_id)
+    sent = [e for e in events if e["kind"] == "dry_run_send"][0]
+    text = sent["detail"]["text"].lower()
+    assert "other customers" in text
+    assert "when would be a good time" in text
+    assert "payment by" not in text
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_advance_chase_with_reply_resolves_handoff_to_contact_role(
     backend, chase_store, project_store, messenger, email_sender
 ):

@@ -342,6 +342,50 @@ def test_reply_checkback_escalates_after_repeated_postponing_with_no_progress():
     assert "postpon" in decision.actions[0].reason.lower()
 
 
+# ---- on_reply: out_of_scope_request ---------------------------------------
+
+
+def test_reply_out_of_scope_declines_and_redirects_to_the_last_question():
+    """Regression test (added 2026-07-24): a customer who'd just been asked
+    'when would be a good time to follow up on this?' (a checkback ack, not
+    a payment-date question) instead asked about other customers -- and got
+    sent the generic 'is there a specific date I should expect payment by?'
+    even though that question had never been asked and wasn't the open
+    one. The redirect must repeat the actual last question asked."""
+    chase = base_chase(state="awaiting_customer", target="customer", clarify_count=0)
+    parsed = ParsedReply(intent="out_of_scope_request", confidence="high")
+
+    decision = on_reply(
+        chase, parsed, config=CONFIG, last_question="No worries -- when would be a good time for me to follow up on this?"
+    )
+
+    assert decision.updates.get("state") != "escalated"
+    text = decision.actions[0].text.lower()
+    assert "other customers" in text or "other invoices" in text
+    assert "when would be a good time" in text
+    assert "payment by" not in text
+
+
+def test_reply_out_of_scope_falls_back_to_payment_question_with_no_history():
+    chase = base_chase(state="awaiting_customer", target="customer", clarify_count=0)
+    parsed = ParsedReply(intent="out_of_scope_request", confidence="high")
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert "payment by" in decision.actions[0].text.lower()
+
+
+def test_reply_out_of_scope_escalates_after_clarify_budget_exhausted():
+    chase = base_chase(state="awaiting_customer", target="customer", clarify_count=1)
+    parsed = ParsedReply(intent="out_of_scope_request", confidence="high")
+
+    decision = on_reply(chase, parsed, config=CONFIG, last_question="Is there a payment date you can share?")
+
+    assert decision.updates["state"] == "escalated"
+    assert isinstance(decision.actions[0], Escalate)
+
+
 def test_reply_low_confidence_checkback_falls_through_to_clarify():
     chase = base_chase(state="awaiting_pm", target="pm")
     parsed = ParsedReply(intent="checkback_requested", confidence="low")

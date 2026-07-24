@@ -63,6 +63,7 @@ VALID_INTENTS = (
     "claims_paid",
     "dispute",
     "checkback_requested",
+    "out_of_scope_request",
     "no_commitment",
     "unclear",
 )
@@ -111,6 +112,11 @@ _TOOL_SCHEMA: Dict[str, Any] = {
                         "commitment_date instead even if they also ask you to check back. Set followup_date if "
                         "they gave a specific timeframe for when to check back; omit it if they didn't (e.g. "
                         "just 'let me check on it' with no timing at all). "
+                        "out_of_scope_request: asks about something we can't discuss -- another customer's "
+                        "account, another invoice or project that isn't theirs, our total receivables, or any "
+                        "other internal/third-party information ('are other customers late too?', 'what's your "
+                        "total outstanding?'). Not a commitment, redirect, dispute, or check-back -- it's a "
+                        "boundary question that needs to be declined and the conversation steered back. "
                         "no_commitment: acknowledges but gives no date, no redirect, and no check-back timing at "
                         "all -- just a bare acknowledgment ('ok', 'noted'). "
                         "unclear: doesn't meaningfully address the question."
@@ -197,7 +203,11 @@ def _build_messages(
         "(commitment_date)? (5) do they ask you to check back with them later, or name a point when they'll "
         "know more, without committing to a payment date (checkback_requested -- 'let me check on this', "
         "'check with me again in 5 days', 'ask me next week', 'I'll know more after I speak to the team')? Set "
-        "followup_date only if a specific timeframe was actually given. "
+        "followup_date only if a specific timeframe was actually given. (6) does it ask about another "
+        "customer's account, another invoice/project that isn't theirs, or other internal/third-party "
+        "information we can't share (out_of_scope_request -- 'are other customers late too?', 'what's your "
+        "total outstanding?')? This takes priority over no_commitment even if the reply also says something "
+        "vague about their own payment, since the boundary question is what needs handling. "
         "Only if none of those apply -- a bare acknowledgment with no date, no redirect, and no check-back "
         "timing at all ('ok', 'noted') -- use no_commitment. Example: 'reach out to bob@x.com' or 'ask BU "
         "Finance' is a handoff, NOT no_commitment, even though it names no payment date. "

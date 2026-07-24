@@ -523,7 +523,10 @@ async def advance_chase_with_reply(
         match = next((c for c in contacts if c.get("contact_type") == parsed.contact_role and c.get("email")), None)
         resolved_contact_email = match.get("email") if match else None
 
-    decision = chase_machine.on_reply(chase, parsed, config=config, resolved_contact_email=resolved_contact_email)
+    last_question = next((t["content"] for t in reversed(recent_turns) if t["role"] == "assistant"), None)
+    decision = chase_machine.on_reply(
+        chase, parsed, config=config, resolved_contact_email=resolved_contact_email, last_question=last_question
+    )
 
     await _apply_decision(chase_store, chase, decision)
     chase = {**chase, **decision.updates}

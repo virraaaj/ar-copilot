@@ -148,6 +148,7 @@ def on_reply(
     parsed: ParsedReply,
     config: ChaseConfig = ChaseConfig(),
     resolved_contact_email: Optional[str] = None,
+    last_question: Optional[str] = None,
 ) -> Decision:
     """The engine has already fetched the reply, run it through
     chase_parser.parse_chase_reply, and knows which target (pm/customer)
@@ -157,7 +158,15 @@ def on_reply(
     handoff_to_contact, the engine has already looked up
     parsed.contact_role's email from the project's contacts (I/O this
     pure module can't do itself) and hands it in here, same idea as
-    start_pm_outreach taking pm_email as a parameter."""
+    start_pm_outreach taking pm_email as a parameter.
+
+    `last_question` (added 2026-07-24): the text of the question we most
+    recently asked this target, if any -- used only for
+    out_of_scope_request, so the redirect can repeat the actual open
+    question instead of always falling back to a generic "is there a
+    payment date" line that may not even be what we were last waiting on
+    (e.g. we'd just asked "when's a good time to follow up" after a
+    checkback, not for a payment date)."""
     target = chase["target"]
     invoice_ref = chase.get("invoice_no") or chase.get("case_key")
 
@@ -285,6 +294,16 @@ def on_reply(
     if parsed.intent == "checkback_requested" and parsed.confidence == "high":
         return _on_checkback_requested(chase, parsed, config)
 
+    if parsed.intent == "out_of_scope_request" and parsed.confidence == "high":
+        decline = "I'm not able to share details about other customers, invoices, or projects."
+        if last_question:
+            text = f"{decline} Going back to what we were discussing -- {last_question}"
+        else:
+            text = f"{decline} Is there a specific date I should expect payment by?"
+        return _clarify_or_escalate(
+            chase, config, reason="asked about another customer/invoice (out of scope)", redirect_text=text
+        )
+
     # no_commitment / unclear / low confidence on anything else
     return _clarify_or_escalate(chase, config, reason=f"reply did not resolve to a clear commitment (intent={parsed.intent})")
 
@@ -337,7 +356,9 @@ def _on_checkback_requested(chase: Dict[str, Any], parsed: ParsedReply, config: 
     )
 
 
-def _clarify_or_escalate(chase: Dict[str, Any], config: ChaseConfig, reason: str) -> Decision:
+def _clarify_or_escalate(
+    chase: Dict[str, Any], config: ChaseConfig, reason: str, redirect_text: Optional[str] = None
+) -> Decision:
     target = chase["target"]
     clarify_count = chase.get("clarify_count") or 0
     if clarify_count >= config.max_clarifications:
@@ -346,7 +367,7 @@ def _clarify_or_escalate(chase: Dict[str, Any], config: ChaseConfig, reason: str
             actions=[Escalate(reason=f"Could not get a clear commitment from {target}: {reason}.")],
             events=[("escalated", {"reason": "clarify_budget_exhausted", "detail": reason})],
         )
-    text = "Thanks for the update -- is there a specific date I should expect payment by?"
+    text = redirect_text or "Thanks for the update -- is there a specific date I should expect payment by?"
     return Decision(
         updates={
             "clarify_count": clarify_count + 1,
