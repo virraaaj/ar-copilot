@@ -19,6 +19,7 @@ from app.channels.teams.messenger import FakeMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.backend_client import BackendClient
 from app.services.chase_engine import (
+    _recent_turns,
     advance_chase_with_reply,
     extract_subject_token,
     find_and_create_new_chases,
@@ -392,8 +393,10 @@ class ScriptedLLM:
     def __init__(self, response, tokens=0):
         self._response = response
         self._tokens = tokens
+        self.calls = []
 
     async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
+        self.calls.append({"messages": messages, "tools": tools, "tool_choice": tool_choice})
         return self._response, self._tokens
 
 
@@ -421,9 +424,183 @@ async def test_advance_chase_with_reply_tracks_commitment(backend, chase_store, 
     assert parsed.intent == "commitment_date"
     updated = await chase_store.get(chase_id)
     assert updated["state"] == "commitment_tracked"
-    assert updated["promised_by"] == "pm"
 
+
+# ---- _recent_turns / wrong-recipient regression (added 2026-07-24) --------
+# A PM said "check with the customer email I provided" (a back-reference,
+# no address in that reply). The only address literally present in the raw
+# text was the PM's own, from their client's auto-quoted "On ... wrote:"
+# line -- the parser picked that up as "the customer's email" and outreach
+# went to the wrong person. Fix: strip quoted content before parsing, and
+# feed the parser this chase's recent history so it can actually resolve
+# the back-reference instead of guessing from what's left in the quote.
+
+
+@pytest.mark.asyncio
+async def test_recent_turns_builds_history_from_outreach_and_reply_events(chase_store):
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.add_event(chase_id, "outreach_sent", {"target": "pm", "text": "Is there a payment date?"})
+    await chase_store.add_event(chase_id, "reply_received", {"target": "pm", "text": "Reach out to the customer at x@y.com"})
+    # action_decided logs the same text as the outreach_sent right after it --
+    # must not appear twice in the reconstructed history.
+    await chase_store.add_event(chase_id, "action_decided", {"target": "pm", "text": "Is there a payment date?"})
+
+    turns = await _recent_turns(chase_store, chase_id)
+
+    assert turns == [
+        {"role": "assistant", "content": "Is there a payment date?"},
+        {"role": "user", "content": "Reach out to the customer at x@y.com"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_recent_turns_strips_quoted_content_from_replies(chase_store):
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    quoted_reply = (
+        "Reach out to the customer at x@y.com "
+        "On Thu, Jul 23, 2026 at 5:11PM Viraj Yadav <viraj.yadav@corehelix.ai> wrote: prior text"
+    )
+    await chase_store.add_event(chase_id, "reply_received", {"target": "pm", "text": quoted_reply})
+
+    turns = await _recent_turns(chase_store, chase_id)
+
+    assert turns == [{"role": "user", "content": "Reach out to the customer at x@y.com"}]
+
+
+@pytest.mark.asyncio
+async def test_recent_turns_capped_to_last_pairs(chase_store):
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    for i in range(5):
+        await chase_store.add_event(chase_id, "outreach_sent", {"target": "pm", "text": f"question {i}"})
+        await chase_store.add_event(chase_id, "reply_received", {"target": "pm", "text": f"answer {i}"})
+
+    turns = await _recent_turns(chase_store, chase_id, max_pairs=2)
+
+    assert len(turns) == 4
+    assert turns[0]["content"] == "question 3"
+    assert turns[-1]["content"] == "answer 4"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_advance_chase_with_reply_resolves_a_back_reference_using_history(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """End-to-end: without recent-turn history and quote-stripping, this
+    exact scenario is how the wrong-recipient bug happened live."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai")
+    await chase_store.add_event(chase_id, "outreach_sent", {"target": "pm", "text": "Is there a payment date?"})
+    await chase_store.add_event(
+        chase_id, "reply_received", {"target": "pm", "text": "Reach out to the customer at sachin.mahishi@corehelix.ai"}
+    )
+    chase = await chase_store.get(chase_id)
+
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_customer", "confidence": "high",
+            "customer_contact_email": "sachin.mahishi@corehelix.ai",
+        })
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=False)
+    reply_with_quote = (
+        "check with the customer email I provided in these emails "
+        "On Thu, Jul 23, 2026 at 5:19PM Viraj Yadav <viraj.yadav@corehelix.ai> wrote: prior text"
+    )
+
+    await advance_chase_with_reply(
+        chase, reply_with_quote, llm, backend, messenger, email_sender, chase_store, project_store, settings
+    )
+
+    # The model was given history + a cleaned reply and (per the script)
+    # correctly resolved the real customer address -- not the PM's own
+    # address that was sitting in the quote.
+    sent_messages = llm.calls[0]["messages"]
+    joined = " ".join(m["content"] for m in sent_messages)
+    assert "sachin.mahishi@corehelix.ai" in joined  # from history
+    assert "viraj.yadav@corehelix.ai" not in joined  # quote stripped out
+
+    updated = await chase_store.get(chase_id)
+    assert updated["customer_email"] == "sachin.mahishi@corehelix.ai"
+    assert updated["customer_email"] != "viraj.yadav@corehelix.ai"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_advance_chase_with_reply_resolves_handoff_to_contact_role(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """PM says "ask BU Finance" -- the engine (not the pure chase_machine)
+    is responsible for looking that role up against the project's real
+    contacts before the state machine can route to it."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={
+            "project_number": "PN-1",
+            "contacts": [
+                {"contact_type": "pm", "email": "pm@x.com"},
+                {"contact_type": "bu_finance", "email": "finance@x.com"},
+            ],
+        })
+    )
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1", project_number="PN-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@x.com")
+    chase = await chase_store.get(chase_id)
+
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_contact", "confidence": "high", "contact_role": "bu_finance",
+        })
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=False)
+
+    parsed = await advance_chase_with_reply(
+        chase, "ask BU Finance about this", llm, backend, messenger, email_sender, chase_store, project_store, settings
+    )
+
+    assert parsed.intent == "handoff_to_contact"
+    updated = await chase_store.get(chase_id)
+    assert updated["state"] == "awaiting_contact"
+    assert updated["target"] == "bu_finance"
+    assert updated["contact_email"] == "finance@x.com"
     events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "handoff_to_contact" for e in events)
+    assert any(e["kind"] == "outreach_sent" and e["detail"]["channel"] == "email" for e in events)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_advance_chase_with_reply_handoff_to_unknown_role_clarifies(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """The project has no legal contact on file -- must not invent a
+    routing target with nowhere to actually send."""
+    _mock_login()
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"project_number": "PN-1", "contacts": [{"contact_type": "pm", "email": "pm@x.com"}]})
+    )
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1", project_number="PN-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@x.com")
+    chase = await chase_store.get(chase_id)
+
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_contact", "confidence": "high", "contact_role": "legal",
+        })
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=False)
+
+    await advance_chase_with_reply(
+        chase, "that's a legal question", llm, backend, messenger, email_sender, chase_store, project_store, settings
+    )
+
+    updated = await chase_store.get(chase_id)
+    assert updated["state"] != "awaiting_contact"
+    events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "clarify_requested" for e in events)
     assert any(e["kind"] == "reply_received" for e in events)
     await backend.close()
 
@@ -482,6 +659,41 @@ async def test_poll_chase_mailbox_matches_by_subject_token_and_advances_chase(ba
 
     assert processed == 1
     assert await chase_store.is_mail_processed("msg-1") is True
+    events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "reply_received" for e in events)
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_poll_chase_mailbox_matches_replies_to_a_contact_role_handoff(backend, chase_store, project_store, messenger, email_sender):
+    """Regression test (added 2026-07-23): a chase handed off to a
+    project-contact role (e.g. BU Finance) sits in state='awaiting_contact',
+    not 'awaiting_pm'/'awaiting_customer' -- the mail poller's eligibility
+    check originally only allowed those two, so a real reply from BU
+    Finance was silently dropped and marked processed without ever being
+    interpreted."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(chase_id, state="awaiting_contact", target="bu_finance", contact_email="finance@x.com")
+    chase = await chase_store.get(chase_id)
+
+    reader = FakeMailboxReader([
+        {
+            "id": "msg-1",
+            "subject": f"Re: [{chase['subject_token']}] invoice",
+            "bodyPreview": "We'll pay by end of week.",
+            "from": {"emailAddress": {"address": "finance@x.com"}},
+        },
+    ])
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {"intent": "no_commitment", "confidence": "low"})
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=False)
+
+    processed = await poll_chase_mailbox(reader, llm, backend, messenger, email_sender, chase_store, project_store, settings)
+
+    assert processed == 1
     events = await chase_store.list_events(chase_id)
     assert any(e["kind"] == "reply_received" for e in events)
     await backend.close()

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.chase_parser import ParsedReply, parse_chase_reply
+from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
 
 
 def make_tool_call(name: str, arguments: dict) -> SimpleNamespace:
@@ -87,6 +87,34 @@ async def test_handoff_with_invalid_email_drops_it():
     result = await parse_chase_reply(llm, "talk to the customer", {})
 
     assert result.customer_contact_email is None
+
+
+@pytest.mark.asyncio
+async def test_handoff_to_contact_with_recognized_role():
+    llm = ScriptedLLM(make_message(tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_contact", "confidence": "high", "contact_role": "bu_finance",
+        })
+    ]))
+
+    result = await parse_chase_reply(llm, "Ask BU Finance about this.", {})
+
+    assert result.intent == "handoff_to_contact"
+    assert result.contact_role == "bu_finance"
+
+
+@pytest.mark.asyncio
+async def test_handoff_to_contact_with_unrecognized_role_falls_back_to_unclear():
+    llm = ScriptedLLM(make_message(tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_contact", "confidence": "high", "contact_role": "not-a-real-role",
+        })
+    ]))
+
+    result = await parse_chase_reply(llm, "ask someone else", {})
+
+    assert result.intent == "unclear"
+    assert result.confidence == "low"
 
 
 @pytest.mark.asyncio
@@ -210,3 +238,82 @@ async def test_prompt_includes_todays_date_and_reply_text():
     assert "2026-07-20" in system_content
     assert "INV-99" in system_content
     assert sent[1]["content"] == "the actual reply text"
+
+
+# ---- strip_quoted_reply / recent_turns (added 2026-07-24) -----------------
+# Regression: a reply that referenced an email given in an earlier turn
+# ("check with the customer email I provided") had no address in the raw
+# text -- the only email address literally present was the PM's OWN,
+# sitting in the auto-quoted "On ... wrote:" line their client appended.
+# The parser picked that up as "the customer's email" and outreach went to
+# the wrong person.
+
+
+def test_strip_quoted_reply_removes_on_wrote_quote():
+    text = (
+        "Check with customer email id I provided in these emails "
+        "On Thu, Jul 23, 2026 at 5:11PM Viraj Yadav <viraj.yadav@corehelix.ai> wrote: "
+        "Thanks for the update -- is there a specific date I should expect payment by?"
+    )
+    cleaned = strip_quoted_reply(text)
+    assert "viraj.yadav@corehelix.ai" not in cleaned
+    assert cleaned == "Check with customer email id I provided in these emails"
+
+
+def test_strip_quoted_reply_removes_outlook_header_block():
+    text = "Sounds good. From: A Sent: today To: B Subject: Re: invoice"
+    cleaned = strip_quoted_reply(text)
+    assert cleaned == "Sounds good."
+
+
+def test_strip_quoted_reply_removes_mobile_signature():
+    text = "Check with bu finance for an update Sent from Samsung Galaxy Tab 4"
+    cleaned = strip_quoted_reply(text)
+    assert cleaned == "Check with bu finance for an update"
+
+
+def test_strip_quoted_reply_leaves_plain_text_unchanged():
+    assert strip_quoted_reply("we'll pay by Friday") == "we'll pay by Friday"
+
+
+def test_strip_quoted_reply_handles_empty_string():
+    assert strip_quoted_reply("") == ""
+
+
+@pytest.mark.asyncio
+async def test_parse_chase_reply_sends_cleaned_text_to_the_model():
+    llm = ScriptedLLM(make_message(tool_calls=[
+        make_tool_call("record_reply_interpretation", {"intent": "no_commitment", "confidence": "low"})
+    ]))
+    raw = (
+        "Check with customer email id I provided in these emails "
+        "On Thu, Jul 23, 2026 at 5:11PM Viraj Yadav <viraj.yadav@corehelix.ai> wrote: prior text"
+    )
+
+    result = await parse_chase_reply(llm, raw, {"today": "2026-07-24"})
+
+    sent_user_message = llm.calls[0]["messages"][-1]["content"]
+    assert "viraj.yadav@corehelix.ai" not in sent_user_message
+    # raw_text on the result keeps the original, uncleaned text for the audit trail
+    assert result.raw_text == raw
+
+
+@pytest.mark.asyncio
+async def test_parse_chase_reply_includes_recent_turns_before_the_latest_reply():
+    llm = ScriptedLLM(make_message(tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "handoff_to_customer", "confidence": "high", "customer_contact_email": "sachin.mahishi@corehelix.ai",
+        })
+    ]))
+    history = [
+        {"role": "assistant", "content": "Is there a payment date I should be tracking?"},
+        {"role": "user", "content": "Reach out to the customer at sachin.mahishi@corehelix.ai"},
+    ]
+
+    await parse_chase_reply(llm, "check with the customer email I provided", {"today": "2026-07-24"}, recent_turns=history)
+
+    sent = llm.calls[0]["messages"]
+    # system, then the two history turns, then the new reply -- in order
+    assert sent[1] == history[0]
+    assert sent[2] == history[1]
+    assert sent[3]["content"] == "check with the customer email I provided"

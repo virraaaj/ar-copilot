@@ -184,6 +184,65 @@ def test_reply_handoff_from_customer_itself_is_treated_as_unclear():
     assert decision.actions[0].kind == "clarify"
 
 
+# ---- on_reply: handoff_to_contact (added 2026-07-23) ----------------------
+
+
+def test_reply_handoff_to_contact_routes_to_resolved_role_email():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="handoff_to_contact", confidence="high", contact_role="bu_finance")
+
+    decision = on_reply(chase, parsed, config=CONFIG, resolved_contact_email="finance@x.com")
+
+    assert decision.updates["state"] == "awaiting_contact"
+    assert decision.updates["target"] == "bu_finance"
+    assert decision.updates["contact_email"] == "finance@x.com"
+    assert decision.updates["nudge_count"] == 0
+    assert decision.updates["clarify_count"] == 0
+    assert decision.actions[0].target == "bu_finance"
+    assert decision.actions[0].kind == "outreach"
+    assert decision.events[0][0] == "handoff_to_contact"
+
+
+def test_reply_handoff_to_contact_with_no_resolved_email_clarifies_instead():
+    """The engine (chase_engine.py, not this pure module) looks the role up
+    against the project's contacts before calling on_reply -- if nothing
+    was found, resolved_contact_email is None and this must not silently
+    invent a target with nowhere to actually send."""
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="handoff_to_contact", confidence="high", contact_role="legal")
+
+    decision = on_reply(chase, parsed, config=CONFIG, resolved_contact_email=None)
+
+    assert decision.updates.get("state") != "awaiting_contact"
+    assert decision.actions[0].kind == "clarify"
+
+
+def test_reply_handoff_to_contact_low_confidence_falls_through_to_clarify():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="handoff_to_contact", confidence="low", contact_role="bu_finance")
+
+    decision = on_reply(chase, parsed, config=CONFIG, resolved_contact_email="finance@x.com")
+
+    assert decision.updates.get("state") != "awaiting_contact"
+    assert decision.actions[0].kind == "clarify"
+
+
+def test_missed_commitment_rechase_to_a_contact_role_uses_generic_awaiting_state():
+    """A commitment promised by a non-pm/non-customer contact (e.g. BU
+    Finance) that's later missed must rechase into 'awaiting_contact', not
+    an unbounded 'awaiting_bu_finance' -- ChaseStore.OPEN_STATES is a fixed
+    set, not one entry per possible project-contact role."""
+    chase = base_chase(
+        state="commitment_tracked", target="bu_finance", promised_by="bu_finance",
+        promised_date=past_date(3), contact_email="finance@x.com",
+    )
+
+    decision = on_commitment_due(chase, paid=False, config=CONFIG)
+
+    assert decision.updates["state"] == "awaiting_contact"
+    assert decision.actions[0].target == "bu_finance"
+
+
 # ---- on_reply: claims_paid / dispute -------------------------------------
 
 
@@ -205,6 +264,92 @@ def test_reply_dispute_escalates_immediately():
 
     assert decision.updates["state"] == "escalated"
     assert isinstance(decision.actions[0], Escalate)
+
+
+def test_reply_low_confidence_dispute_clarifies_instead_of_escalating():
+    """Regression test (added 2026-07-24): a customer said 'let me check
+    with the team, I heard service wasn't up to par' -- investigating a
+    possible concern, not a confident refusal to pay -- and it escalated
+    to a human immediately anyway, with zero chance for the customer to
+    come back with a real commitment. dispute must only bypass the
+    clarify budget when the model is actually confident it's a genuine
+    dispute; a low-confidence/tentative one gets a clarifying question
+    first, same as any other ambiguous reply."""
+    chase = base_chase(state="awaiting_customer", target="customer", clarify_count=0)
+    parsed = ParsedReply(intent="dispute", confidence="low")
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert decision.actions[0].kind == "clarify"
+    assert not any(isinstance(a, Escalate) for a in decision.actions)
+
+
+# ---- on_reply: checkback_requested ---------------------------------------
+
+
+def test_reply_checkback_with_a_date_schedules_followup_and_does_not_escalate():
+    chase = base_chase(state="awaiting_pm", target="pm", postpone_count=0)
+    parsed = ParsedReply(intent="checkback_requested", confidence="high", followup_date=future_date(5))
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert decision.updates["postpone_count"] == 1
+    assert decision.updates["next_action_at"].startswith(future_date(5))
+    assert decision.actions[0].kind == "checkback_ack"
+    assert decision.actions[0].target == "pm"
+    assert not any(isinstance(a, Escalate) for a in decision.actions)
+
+
+def test_reply_checkback_with_no_date_asks_when_to_follow_up():
+    """"Let me check on this" with no timeframe -- per the boss's guidance,
+    ask when a good time to follow up is instead of immediately treating it
+    like any other no-commitment stall."""
+    chase = base_chase(state="awaiting_customer", target="customer", postpone_count=0)
+    parsed = ParsedReply(intent="checkback_requested", confidence="high", followup_date=None)
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert decision.updates["postpone_count"] == 1
+    assert "follow up" in decision.actions[0].text.lower()
+    assert decision.actions[0].kind == "checkback_ack"
+
+
+def test_reply_checkback_past_followup_date_falls_back_to_normal_interval():
+    chase = base_chase(state="awaiting_pm", target="pm", postpone_count=0)
+    parsed = ParsedReply(intent="checkback_requested", confidence="high", followup_date=past_date(2))
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert not decision.updates["next_action_at"].startswith(past_date(2))
+
+
+def test_reply_checkback_escalates_after_repeated_postponing_with_no_progress():
+    """Guardrail: postponing itself is fine, but only up to a budget --
+    keep postponing without ever committing to a payment date or paying,
+    and it escalates to a human, same shape as the nudge/clarify/missed-
+    commitment budgets."""
+    chase = base_chase(state="awaiting_pm", target="pm", postpone_count=3)
+    parsed = ParsedReply(intent="checkback_requested", confidence="high", followup_date=future_date(5))
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates["state"] == "escalated"
+    assert isinstance(decision.actions[0], Escalate)
+    assert "postpon" in decision.actions[0].reason.lower()
+
+
+def test_reply_low_confidence_checkback_falls_through_to_clarify():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="checkback_requested", confidence="low")
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert decision.actions[0].kind == "clarify"
 
 
 # ---- on_reply: no_commitment / unclear / low confidence ------------------

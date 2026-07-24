@@ -102,7 +102,7 @@ async def compose_message(llm: Any, kind: str, chase: Dict[str, Any], template_t
     falls back to template_text (with 0 tokens charged) on any failure:
     LLM error, empty output, over-length output, or a detected
     unexplained date. `kind` (outreach/nudge/confirm/clarify/rechase/
-    verify_check/ask_for_customer_email) is accepted for future use
+    verify_check/ask_for_customer_email/checkback_ack) is accepted for future use
     (e.g. per-kind tone) but not currently branched on."""
     messages = _build_prompt(kind, chase, template_text)
 

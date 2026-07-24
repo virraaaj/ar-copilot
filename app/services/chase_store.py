@@ -29,6 +29,7 @@ OPEN_STATES = (
     "pending",
     "awaiting_pm",
     "awaiting_customer",
+    "awaiting_contact",
     "commitment_tracked",
     "verifying_payment",
     "escalated",
@@ -49,11 +50,13 @@ CREATE TABLE IF NOT EXISTS chases (
     target TEXT,
     pm_email TEXT,
     customer_email TEXT,
+    contact_email TEXT,
     promised_date TEXT,
     promised_by TEXT,
     missed_count INTEGER NOT NULL DEFAULT 0,
     nudge_count INTEGER NOT NULL DEFAULT 0,
     clarify_count INTEGER NOT NULL DEFAULT 0,
+    postpone_count INTEGER NOT NULL DEFAULT 0,
     last_outreach_at TEXT,
     next_action_at TEXT,
     total_tokens_used INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +115,27 @@ class ChaseStore:
             # "duplicate column" error on a table that's already migrated.
             try:
                 await db.execute("ALTER TABLE chases ADD COLUMN total_tokens_used INTEGER NOT NULL DEFAULT 0")
+                await db.commit()
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+            # Migration for handoff to an arbitrary project-contact role
+            # (added 2026-07-23) -- pm_email/customer_email stay dedicated
+            # columns for those two original targets; contact_email is the
+            # generic slot used when `target` holds any other role (e.g.
+            # "bu_finance", "general_manager").
+            try:
+                await db.execute("ALTER TABLE chases ADD COLUMN contact_email TEXT")
+                await db.commit()
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+            # Migration for "check back later" tracking (added 2026-07-24) --
+            # counts how many times a chase has been postponed with no
+            # payment date, so repeated stalling can escalate on its own
+            # budget instead of looping forever.
+            try:
+                await db.execute("ALTER TABLE chases ADD COLUMN postpone_count INTEGER NOT NULL DEFAULT 0")
                 await db.commit()
             except aiosqlite.OperationalError as exc:
                 if "duplicate column" not in str(exc).lower():

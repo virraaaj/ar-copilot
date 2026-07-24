@@ -33,7 +33,7 @@ from app.services import chase_machine
 from app.services.backend_client import BackendClient
 from app.services.chase_composer import compose_message
 from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMessage
-from app.services.chase_parser import ParsedReply, parse_chase_reply
+from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
 from app.services.chase_store import ChaseStore
 from app.services.chase_trajectory import assess_chase_trajectory
 from app.services.email_sender import EmailSender
@@ -127,7 +127,14 @@ class _SendBudget:
 
 
 def _resolve_target_email(action: SendMessage, chase: Dict[str, Any]) -> Optional[str]:
-    return chase.get("pm_email") if action.target == "pm" else chase.get("customer_email")
+    if action.target == "pm":
+        return chase.get("pm_email")
+    if action.target == "customer":
+        return chase.get("customer_email")
+    # Any other project-contact role (bu_finance, general_manager, ...)
+    # uses the generic contact_email slot set by the handoff_to_contact
+    # decision (chase_machine.on_reply).
+    return chase.get("contact_email")
 
 
 def _allowed_by_allowlist(email: Optional[str], allowlist: List[str]) -> bool:
@@ -346,7 +353,7 @@ async def _process_one_due_chase(
         pm_email = await _find_pm_email(backend, chase.get("project_number"))
         decision = chase_machine.start_pm_outreach(chase, pm_email=pm_email, config=config)
 
-    elif state in ("awaiting_pm", "awaiting_customer"):
+    elif state in ("awaiting_pm", "awaiting_customer", "awaiting_contact"):
         # next_action_at arrived with no reply yet (a reply would already
         # have moved the chase out of this state via advance_chase_with_reply).
         decision = await _maybe_smart_escalate(
@@ -432,6 +439,29 @@ async def process_due_chases(
     return len(due)
 
 
+async def _recent_turns(chase_store: ChaseStore, chase_id: str, max_pairs: int = 3) -> List[Dict[str, str]]:
+    """Reconstructs a short conversation history (assistant outreach, then
+    the reply it got, oldest first) from this chase's own event log --
+    added 2026-07-24 so the parser can resolve a back-reference ("the email
+    I gave you earlier") instead of only ever seeing the latest reply in
+    isolation. Only outreach_sent/dry_run_send carry the actual sent text
+    (action_decided logs the same text a step earlier -- skipped to avoid
+    duplicating each turn). Capped to the last few exchanges to keep the
+    prompt bounded."""
+    events = await chase_store.list_events(chase_id)
+    turns: List[Dict[str, str]] = []
+    for e in events:
+        detail = e.get("detail") or {}
+        text = detail.get("text")
+        if not text:
+            continue
+        if e["kind"] in ("outreach_sent", "dry_run_send"):
+            turns.append({"role": "assistant", "content": text})
+        elif e["kind"] == "reply_received":
+            turns.append({"role": "user", "content": strip_quoted_reply(text)})
+    return turns[-(max_pairs * 2):]
+
+
 async def advance_chase_with_reply(
     chase: Dict[str, Any],
     reply_text: str,
@@ -452,15 +482,28 @@ async def advance_chase_with_reply(
     config = _config_from_settings(settings)
     budget = _SendBudget(settings.CHASE_MAX_SENDS_PER_TICK)
 
+    recent_turns = await _recent_turns(chase_store, chase["id"])
     parsed = await parse_chase_reply(
         llm, reply_text,
         {"today": date.today().isoformat(), "invoice_no": chase.get("invoice_no"), "case_key": chase.get("case_key"),
          "target": chase.get("target")},
+        recent_turns=recent_turns,
     )
     await chase_store.increment_tokens(chase["id"], parsed.tokens_used)
 
     await chase_store.add_event(chase["id"], "reply_received", {"target": chase.get("target"), "text": reply_text})
-    decision = chase_machine.on_reply(chase, parsed, config=config)
+
+    resolved_contact_email = None
+    if parsed.intent == "handoff_to_contact" and parsed.contact_role and chase.get("project_number"):
+        try:
+            contacts = await backend.list_contacts_for_project(chase["project_number"])
+        except Exception:
+            logger.warning("Chase %s: could not load contacts to resolve %s handoff", chase["id"], parsed.contact_role)
+            contacts = []
+        match = next((c for c in contacts if c.get("contact_type") == parsed.contact_role and c.get("email")), None)
+        resolved_contact_email = match.get("email") if match else None
+
+    decision = chase_machine.on_reply(chase, parsed, config=config, resolved_contact_email=resolved_contact_email)
 
     await _apply_decision(chase_store, chase, decision)
     chase = {**chase, **decision.updates}
@@ -545,7 +588,7 @@ async def poll_chase_mailbox(
             continue
 
         chase = await chase_store.get_by_subject_token(token)
-        if not chase or chase["state"] not in ("awaiting_pm", "awaiting_customer"):
+        if not chase or chase["state"] not in ("awaiting_pm", "awaiting_customer", "awaiting_contact"):
             # Unknown token, or the chase has moved on (already tracked a
             # commitment, escalated, closed) -- a late/duplicate reply to
             # an old message shouldn't reopen or double-process it.

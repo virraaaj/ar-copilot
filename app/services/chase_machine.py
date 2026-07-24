@@ -33,12 +33,13 @@ class ChaseConfig:
     payment_verify_days: int = 3
     nudge_interval_days: int = 3
     max_clarifications: int = 1
+    max_postponements: int = 3  # "let me check and get back to you" budget, see on_reply's checkback_requested branch
 
 
 @dataclass(frozen=True)
 class SendMessage:
     target: str  # 'pm' | 'customer'
-    kind: str  # 'outreach' | 'nudge' | 'confirm' | 'clarify' | 'rechase' | 'verify_check' | 'ask_for_customer_email'
+    kind: str  # 'outreach' | 'nudge' | 'confirm' | 'clarify' | 'rechase' | 'verify_check' | 'ask_for_customer_email' | 'checkback_ack'
     text: str
 
 
@@ -63,6 +64,19 @@ def _now() -> datetime:
 
 def _iso(dt: datetime) -> str:
     return dt.isoformat()
+
+
+def _awaiting_state(target: str) -> str:
+    """State naming for "who we're currently waiting on" -- pm/customer
+    keep their own dedicated states (existing UI/filters key off them
+    directly), any other project-contact role (bu_finance, legal, ...)
+    collapses to one generic "awaiting_contact" state so ChaseStore's
+    OPEN_STATES stays a fixed, bounded set instead of growing one entry
+    per possible role. `target` itself (not the state) is what carries
+    which specific role a chase is waiting on."""
+    if target in ("pm", "customer"):
+        return f"awaiting_{target}"
+    return "awaiting_contact"
 
 
 def escalate_now(chase: Dict[str, Any], reason: str) -> Decision:
@@ -133,14 +147,21 @@ def on_reply(
     chase: Dict[str, Any],
     parsed: ParsedReply,
     config: ChaseConfig = ChaseConfig(),
+    resolved_contact_email: Optional[str] = None,
 ) -> Decision:
     """The engine has already fetched the reply, run it through
     chase_parser.parse_chase_reply, and knows which target (pm/customer)
-    it came from. This function decides what happens next."""
+    it came from. This function decides what happens next.
+
+    `resolved_contact_email` (added 2026-07-23): for intent=
+    handoff_to_contact, the engine has already looked up
+    parsed.contact_role's email from the project's contacts (I/O this
+    pure module can't do itself) and hands it in here, same idea as
+    start_pm_outreach taking pm_email as a parameter."""
     target = chase["target"]
     invoice_ref = chase.get("invoice_no") or chase.get("case_key")
 
-    if parsed.intent == "dispute":
+    if parsed.intent == "dispute" and parsed.confidence == "high":
         return Decision(
             updates={"state": "escalated", "next_action_at": None},
             actions=[Escalate(reason=f"{target} disputed invoice {invoice_ref}.")],
@@ -236,8 +257,84 @@ def on_reply(
             events=[("clarify_requested", {"reason": "missing_customer_email"})],
         )
 
+    if parsed.intent == "handoff_to_contact" and parsed.confidence == "high" and parsed.contact_role:
+        if not resolved_contact_email:
+            # Named a real role but the project has no contact on file for
+            # it -- can't route there, so treat like any other stall.
+            return _clarify_or_escalate(
+                chase, config, reason=f"no {parsed.contact_role} contact is on file for this project"
+            )
+        text = (
+            f"Hello -- following up on invoice {invoice_ref}, which is now overdue. "
+            f"Is there a payment date I should be tracking?"
+        )
+        return Decision(
+            updates={
+                "state": "awaiting_contact",
+                "target": parsed.contact_role,
+                "contact_email": resolved_contact_email,
+                "nudge_count": 0,
+                "clarify_count": 0,
+                "next_action_at": _iso(_now() + timedelta(days=config.nudge_interval_days)),
+                "last_outreach_at": _iso(_now()),
+            },
+            actions=[SendMessage(target=parsed.contact_role, kind="outreach", text=text)],
+            events=[("handoff_to_contact", {"contact_role": parsed.contact_role, "contact_email": resolved_contact_email})],
+        )
+
+    if parsed.intent == "checkback_requested" and parsed.confidence == "high":
+        return _on_checkback_requested(chase, parsed, config)
+
     # no_commitment / unclear / low confidence on anything else
     return _clarify_or_escalate(chase, config, reason=f"reply did not resolve to a clear commitment (intent={parsed.intent})")
+
+
+def _on_checkback_requested(chase: Dict[str, Any], parsed: ParsedReply, config: ChaseConfig) -> Decision:
+    """They're not committing to pay, just asking us to check back later --
+    e.g. "let me check on this", "check with me again in 5 days". Distinct
+    from _clarify_or_escalate's budget: postponing isn't itself a bad sign
+    (the boss's own guidance: only pull in a human once someone keeps
+    postponing without ever making progress, or there's a genuine dispute --
+    not on the first "let me check"). Escalating here still only ever
+    happens on this dedicated postpone budget, never on the nudge/clarify
+    ones, so a chase that's cooperatively checking back repeatedly doesn't
+    also get penalized by the unrelated clarify counter."""
+    target = chase["target"]
+    invoice_ref = chase.get("invoice_no") or chase.get("case_key")
+    postpone_count = (chase.get("postpone_count") or 0) + 1
+
+    if postpone_count > config.max_postponements:
+        return Decision(
+            updates={"state": "escalated", "postpone_count": postpone_count, "next_action_at": None},
+            actions=[Escalate(
+                reason=f"{target} has postponed {postpone_count} times on invoice {invoice_ref} "
+                       "without a payment date or making a payment."
+            )],
+            events=[("escalated", {"reason": "postpone_budget_exhausted", "target": target, "postpone_count": postpone_count})],
+        )
+
+    followup_date = parsed.followup_date
+    if followup_date:
+        followup = datetime.fromisoformat(followup_date)
+        if followup.date() < _now().date():
+            followup_date = None  # given date already passed -- fall back to a normal nudge interval instead
+
+    if followup_date:
+        next_action_at = _iso(datetime.fromisoformat(followup_date))
+        text = f"No problem -- I'll check back with you on {followup_date} about invoice {invoice_ref}."
+    else:
+        next_action_at = _iso(_now() + timedelta(days=config.nudge_interval_days))
+        text = "No worries -- when would be a good time for me to follow up on this?"
+
+    return Decision(
+        updates={
+            "postpone_count": postpone_count,
+            "next_action_at": next_action_at,
+            "last_outreach_at": _iso(_now()),
+        },
+        actions=[SendMessage(target=target, kind="checkback_ack", text=text)],
+        events=[("checkback_scheduled", {"target": target, "followup_date": followup_date, "postpone_count": postpone_count})],
+    )
 
 
 def _clarify_or_escalate(chase: Dict[str, Any], config: ChaseConfig, reason: str) -> Decision:
@@ -289,7 +386,7 @@ def on_commitment_due(chase: Dict[str, Any], paid: bool, config: ChaseConfig = C
     )
     return Decision(
         updates={
-            "state": f"awaiting_{target}",
+            "state": _awaiting_state(target),
             "target": target,
             "missed_count": missed_count,
             "nudge_count": 0,
@@ -332,7 +429,7 @@ def on_verify_payment_timeout(chase: Dict[str, Any], paid: bool, config: ChaseCo
     )
     return Decision(
         updates={
-            "state": f"awaiting_{target}",
+            "state": _awaiting_state(target),
             "missed_count": missed_count,
             "nudge_count": 0,
             "next_action_at": _iso(_now() + timedelta(days=config.nudge_interval_days)),
