@@ -48,6 +48,7 @@ def make_settings(**overrides) -> SimpleNamespace:
         CHASE_PAYMENT_VERIFY_DAYS=3,
         CHASE_NUDGE_INTERVAL_DAYS=3,
         CHASE_MAX_CLARIFICATIONS=1,
+        CHASE_MAX_POSTPONEMENTS=3,
         chase_to_address_allowlist=[],
         CHASE_COMPOSER_ENABLED=False,
         CHASE_SMART_ESCALATION_ENABLED=False,
@@ -379,6 +380,33 @@ async def test_allowlist_blocks_non_listed_customer_email(backend, chase_store, 
     events = await chase_store.list_events(chase_id)
     outreach = [e for e in events if e["kind"] == "outreach_sent"][0]
     assert "allowlist" in outreach["detail"]["error"].lower()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_failed_send_retries_soon_instead_of_silently_waiting_out_the_nudge_interval(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """Regression test (added 2026-07-24): chase_machine already decided
+    to advance the chase (e.g. into awaiting_customer with a next_action_at
+    days out) before the send was even attempted -- if the send then fails,
+    that decision was made on a false premise (the recipient never actually
+    got anything). Left alone the chase silently waits out the full nudge
+    interval as if it had. A failed send must schedule a near-term retry
+    instead of trusting a message that never arrived."""
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    await chase_store.update(chase_id, state="awaiting_customer", target="customer", customer_email="blocked@x.com", nudge_count=0)
+
+    settings = make_settings(CHASE_DRY_RUN=False, chase_to_address_allowlist=["allowed@x.com"])
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+
+    chase = await chase_store.get(chase_id)
+    retry_at = datetime.fromisoformat(chase["next_action_at"])
+    assert retry_at < datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=3)
     await backend.close()
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.channels.teams import cards
@@ -52,6 +52,7 @@ def _config_from_settings(s: Any) -> ChaseConfig:
         payment_verify_days=s.CHASE_PAYMENT_VERIFY_DAYS,
         nudge_interval_days=s.CHASE_NUDGE_INTERVAL_DAYS,
         max_clarifications=s.CHASE_MAX_CLARIFICATIONS,
+        max_postponements=s.CHASE_MAX_POSTPONEMENTS,
     )
 
 
@@ -226,8 +227,10 @@ async def _send_message(
         to_email = _resolve_target_email(action, chase)
         allowlist = settings.chase_to_address_allowlist
         if not to_email:
+            channel = "email_failed"
             error = f"No {action.target} email address known"
         elif not _allowed_by_allowlist(to_email, allowlist):
+            channel = "email_failed"
             error = f"{to_email} is not on CHASE_TO_ADDRESS_ALLOWLIST"
         else:
             subject = f"[{chase['subject_token']}] Re: invoice {chase.get('invoice_no') or chase.get('case_key')}"
@@ -236,16 +239,33 @@ async def _send_message(
                 result = await email_sender.send(to_email, subject, body, [])
                 channel = "email" if result.get("success") else "email_failed"
                 if not result.get("success"):
-                    error = result.get("error")
+                    # result.get("error") can itself be falsy/missing (a
+                    # provider that reports failure with no detail) -- never
+                    # let that collapse to a blank, uninformative error.
+                    error = result.get("error") or "email provider reported failure with no further detail"
             except Exception as exc:
                 logger.warning("Chase %s: email send failed: %s", chase["id"], exc)
                 channel = "email_failed"
-                error = str(exc)
+                # str(exc) can be empty for some exception types (e.g. a bare
+                # httpx timeout with no message) -- fall back to the
+                # exception's type name so the event never records a blank
+                # reason for a real failure.
+                error = str(exc) or f"{type(exc).__name__} (no further detail)"
 
     await chase_store.add_event(
         chase["id"], "outreach_sent",
         {"target": action.target, "kind": action.kind, "text": text, "channel": channel, "error": error, "composed": composed},
     )
+
+    if channel not in ("teams", "email"):
+        # Delivery genuinely failed (or was never attempted) -- the state
+        # update chase_machine already decided on (e.g. "awaiting_customer")
+        # was applied before this send was attempted, so left alone the
+        # chase would silently wait out the full nudge interval believing
+        # the customer/PM was actually contacted. Retry soon instead of
+        # trusting a message that never arrived.
+        retry_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
+        await chase_store.update(chase["id"], next_action_at=retry_at.isoformat())
 
     # Mirror onto the real backend timeline (PLAN_AGENTIC_CHASE.md §4.1's
     # "every transition is visible on the invoice, not just locally" rule).

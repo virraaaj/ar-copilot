@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     CHASE_PAYMENT_VERIFY_DAYS: int = 3
     CHASE_NUDGE_INTERVAL_DAYS: int = 3
     CHASE_MAX_CLARIFICATIONS: int = 1
+    CHASE_MAX_POSTPONEMENTS: int = 3
     CHASE_MIN_HOURS_BETWEEN_TOUCHES: int = 72
     # Comma-separated. Non-empty -> outbound chase email only goes to these
     # addresses (UAT safety net, so "the customer" is always a test mailbox).
