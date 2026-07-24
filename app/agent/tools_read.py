@@ -17,12 +17,53 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Optional
 
-from app.services.backend_client import BackendClient
+from app.services.backend_client import BackendClient, BackendError
 from app.services.chase_store import ChaseStore
 
 # ---------------------------------------------------------------------------
 # Handlers — each takes the shared BackendClient plus its own kwargs.
 # ---------------------------------------------------------------------------
+
+
+async def _project_name_map(client: BackendClient) -> Dict[str, Optional[str]]:
+    """project_number -> project_name for every real project, sourced from
+    the project-contacts listing (a genuine Project-table join, case-
+    independent) rather than derived from cases -- every real project has
+    at least a default contact seeded, so this covers projects a case
+    listing would miss entirely."""
+    projects = await client.list_all_project_contacts()
+    return {p.get("project_number"): p.get("project_name") for p in projects if p.get("project_number")}
+
+
+# Raw Invoice.status values -> the case_status-shaped vocabulary the
+# frontend's status filter/pills already use, so a case-less invoice slots
+# into the same filter UI without a separate status system.
+_RAW_STATUS_MAP = {"Open": "active", "Paid": "closed_paid"}
+
+
+def _summarize_raw_invoice(inv: Dict[str, Any], project_names: Dict[str, Optional[str]]) -> Dict[str, Any]:
+    """Projects a raw Invoice row (no dunning case yet) into the same shape
+    _summarize_case produces, so the UI renders it identically -- added
+    2026-07-24 after an uploaded invoice that wasn't overdue yet (so its
+    case-feeder hadn't created a case for it) was invisible everywhere in
+    the app, even though the invoice itself had synced fine. Case-only
+    fields (case_key, stage, active_pause_id, ...) are simply absent/None;
+    a chase/comments/timeline section naturally renders empty for these,
+    the same as a real case with no activity yet would."""
+    pn = inv.get("project_number")
+    return {
+        "invoice_id": inv.get("id"),
+        "case_key": None,
+        "invoice_no": inv.get("invoice_no"),
+        "status": _RAW_STATUS_MAP.get(inv.get("status"), "closed_other"),
+        "stage": None,
+        "project_number": pn,
+        "project_name": project_names.get(pn),
+        "business_unit_id": None,
+        "due_date": inv.get("due_date"),
+        "open_amount": inv.get("amount"),
+        "aging_status": "pre_due",
+    }
 
 
 async def list_invoices(
@@ -34,53 +75,84 @@ async def list_invoices(
     overdue_days_min: Optional[int] = None,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    """List invoices/cases, optionally filtered. Returns human-readable
-    fields (project_name, amounts, dates) so the caller can match on
-    customer/project by name rather than needing an ID."""
-    cases = await client.list_cases(
-        case_status=status,
-        current_stage_code=stage,
-        business_unit_id=business_unit_id,
-        project_id=project_id,
-        limit=limit,
-    )
+    """List invoices, optionally filtered. Returns human-readable fields
+    (project_name, amounts, dates) so the caller can match on customer/
+    project by name rather than needing an ID.
+
+    Merges two sources (added 2026-07-24): /api/v2/dunning/cases (which
+    only ever has invoices a case-feeder tick has already picked up --
+    i.e. invoices that are actually overdue) and the raw, case-independent
+    invoice table, so a just-uploaded invoice that isn't overdue yet still
+    shows up instead of being invisible until its due date passes. Case-
+    scoped filters (stage/business_unit_id/project_id) fall back to the
+    case-only listing unchanged, since those concepts don't apply to a
+    case-less invoice."""
+    if stage or business_unit_id or project_id:
+        cases = await client.list_cases(
+            case_status=status,
+            current_stage_code=stage,
+            business_unit_id=business_unit_id,
+            project_id=project_id,
+            limit=limit,
+        )
+        merged = [_summarize_case(c) for c in cases]
+    else:
+        cases = await client.list_cases(limit=max(limit, 500))
+        cases_by_invoice_no = {c.get("primary_invoice_id"): c for c in cases if c.get("primary_invoice_id")}
+        raw_invoices = await client.list_invoices_raw(limit=max(limit, 1000))
+        project_names = await _project_name_map(client)
+
+        merged = []
+        for inv in raw_invoices:
+            case = cases_by_invoice_no.get(inv.get("invoice_no"))
+            merged.append(_summarize_case(case) if case else _summarize_raw_invoice(inv, project_names))
+        if status:
+            merged = [m for m in merged if m["status"] == status]
+
     if overdue_days_min is not None:
         today = datetime.date.today()
         filtered = []
-        for c in cases:
-            due = c.get("primary_invoice_due_date")
+        for m in merged:
+            due = m.get("due_date")
             if not due:
                 continue
             due_date = datetime.date.fromisoformat(due) if isinstance(due, str) else due
             if (today - due_date).days >= overdue_days_min:
-                filtered.append(c)
-        cases = filtered
-    return [_summarize_case(c) for c in cases]
+                filtered.append(m)
+        merged = filtered
+    return merged[:limit]
 
 
 async def list_projects(client: BackendClient) -> List[Dict[str, Any]]:
-    """Distinct projects (project_number/project_name pairs), derived live
-    from invoice data -- there's no separate "Project" entity in this app's
-    own storage, matching the grouping Dashboard already does client-side.
-    Backs the Documents folder view and Chat's project picker (added
-    2026-07-23, project-folder restructuring)."""
-    cases = await client.list_cases(limit=500)
-    seen: Dict[str, Optional[str]] = {}
-    for c in cases:
-        pn = c.get("project_number")
-        if pn and pn not in seen:
-            seen[pn] = c.get("project_name")
+    """Distinct projects (project_number/project_name pairs) -- sourced
+    from the project-contacts listing (added 2026-07-24), a genuine
+    case-independent Project-table join, not derived from cases. Every
+    real project has contacts seeded, so this covers a project whose
+    invoices don't have any dunning case yet, which deriving from cases
+    would silently drop. Backs the Documents folder view and Chat's
+    project picker."""
+    project_names = await _project_name_map(client)
     return [
         {"project_number": pn, "project_name": name}
-        for pn, name in sorted(seen.items(), key=lambda kv: (kv[1] or kv[0]))
+        for pn, name in sorted(project_names.items(), key=lambda kv: (kv[1] or kv[0]))
     ]
 
 
 async def get_invoice(client: BackendClient, invoice_id: str) -> Dict[str, Any]:
-    """Full detail for one invoice/case. `invoice_id` is the case's internal
-    id — resolve it via list_invoices first, never ask the user for it."""
-    case = await client.get_case(invoice_id)
-    return _summarize_case(case, full=True)
+    """Full detail for one invoice. `invoice_id` is either a case's
+    internal id (when a dunning case exists) or the raw invoice's own id
+    (when it doesn't yet) -- resolve it via list_invoices first, never ask
+    the user for it. Tries the case lookup first (the common path, and the
+    one every write action -- snooze/comment/chase -- actually needs);
+    falls back to the raw invoice table for one that hasn't gotten a case
+    yet (added 2026-07-24)."""
+    try:
+        case = await client.get_case(invoice_id)
+        return _summarize_case(case, full=True)
+    except BackendError:
+        inv = await client.get_invoice_by_id(invoice_id)
+        project_names = await _project_name_map(client)
+        return _summarize_raw_invoice(inv, project_names)
 
 
 async def get_timeline(client: BackendClient, invoice_id: str, limit: int = 25) -> List[Dict[str, Any]]:
@@ -89,8 +161,15 @@ async def get_timeline(client: BackendClient, invoice_id: str, limit: int = 25) 
     — verified against live UAT data, not guessed: the timestamp field is
     `occurred_at`, not `created_at`/`at`. An earlier version checked the
     wrong names, so every non-comment event (stage transitions, emails,
-    case-opened) silently rendered with no timestamp in the UI."""
-    events = await client.get_case_timeline(invoice_id, limit=limit)
+    case-opened) silently rendered with no timestamp in the UI.
+
+    A case-less invoice (no dunning case yet, added 2026-07-24) has no
+    timeline to fetch -- returns empty rather than erroring, same as a
+    real case with zero activity would render."""
+    try:
+        events = await client.get_case_timeline(invoice_id, limit=limit)
+    except BackendError:
+        return []
     return [
         {
             "event_type": e.get("event_type"),

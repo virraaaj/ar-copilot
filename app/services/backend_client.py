@@ -142,6 +142,25 @@ class BackendClient:
         resp = await self._request("GET", f"/api/v2/dunning/cases/{case_id}")
         return self._ok_or_raise(resp, "Get case")
 
+    # ------------------------------------------------------- invoices (raw)
+    # /api/v2/dunning/cases only ever returns invoices that already have a
+    # dunning case -- a genuinely different, case-independent invoice
+    # listing (added 2026-07-24, found live: an uploaded aging sheet had 2
+    # invoices, one not yet overdue, and the not-yet-due one never showed
+    # up anywhere in the app since its case-feeder hasn't created a case
+    # for it yet and won't until it's actually overdue -- by design). This
+    # hits the real Invoice table directly, not the dunning_cases table.
+    async def list_invoices_raw(self, status: Optional[str] = None, limit: int = 1000) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"limit": limit}
+        if status:
+            params["status"] = status
+        resp = await self._request("GET", "/api/v1/dunning/invoices", params=params)
+        return self._unwrap_list(self._ok_or_raise(resp, "List invoices (raw)"))
+
+    async def get_invoice_by_id(self, invoice_id: str) -> Dict[str, Any]:
+        resp = await self._request("GET", f"/api/v1/dunning/invoices/{invoice_id}")
+        return self._ok_or_raise(resp, "Get invoice (raw)")
+
     async def get_case_timeline(self, case_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         resp = await self._request(
             "GET", f"/api/v2/dunning/cases/{case_id}/timeline", params={"limit": limit}

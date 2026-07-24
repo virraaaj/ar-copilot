@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from app.agent.tools_read import get_chase_status, get_timeline, list_invoices
+from app.agent.tools_read import get_chase_status, get_invoice, get_timeline, list_invoices, list_projects
 from app.services.backend_client import BackendClient
 from app.services.chase_store import ChaseStore
 
@@ -102,11 +102,117 @@ async def test_list_invoices_surfaces_the_real_invoice_number(client: BackendCli
             json={"items": [{"id": "case-1", "case_key": "V2-AUTO-RND-002", "primary_invoice_id": "UAT-RND-002"}]},
         )
     )
+    respx.get(f"{BASE}/api/v1/dunning/invoices").mock(
+        return_value=httpx.Response(200, json=[{"id": "UAT-RND-002", "invoice_no": "UAT-RND-002", "status": "Open"}])
+    )
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(return_value=httpx.Response(200, json=[]))
 
     invoices = await list_invoices(client)
 
     assert invoices[0]["invoice_no"] == "UAT-RND-002"
     assert invoices[0]["case_key"] == "V2-AUTO-RND-002"
+    await client.close()
+
+
+# ---------------------------------------------------------------------------
+# case-independent invoice listing (added 2026-07-24) -- an uploaded invoice
+# that isn't overdue yet has no dunning case (the case-feeder only creates
+# cases for genuinely past-due invoices, by design), so it never showed up
+# anywhere in the app -- not the Dashboard, not the project picker, nothing
+# -- even though the invoice itself synced fine. list_invoices/list_projects/
+# get_invoice/get_timeline all needed a case-independent path.
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_invoices_includes_invoices_with_no_case_yet(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(
+            200,
+            json={"items": [{"id": "case-1", "primary_invoice_id": "OVERDUE-1", "project_number": "PN-1", "project_name": "Overdue Project"}]},
+        )
+    )
+    respx.get(f"{BASE}/api/v1/dunning/invoices").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": "OVERDUE-1", "invoice_no": "OVERDUE-1", "status": "Open", "project_number": "PN-1", "due_date": "2026-07-01", "amount": 1000},
+                {"id": "PREDUE-1", "invoice_no": "PREDUE-1", "status": "Open", "project_number": "PN-2", "due_date": "2026-08-15", "amount": 2000},
+            ],
+        )
+    )
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(
+        return_value=httpx.Response(200, json=[{"project_number": "PN-2", "project_name": "Pre-Due Project"}])
+    )
+
+    invoices = await list_invoices(client)
+
+    by_no = {i["invoice_no"]: i for i in invoices}
+    assert set(by_no) == {"OVERDUE-1", "PREDUE-1"}
+    # the cased one keeps its real case id/project_name from the case
+    assert by_no["OVERDUE-1"]["invoice_id"] == "case-1"
+    assert by_no["OVERDUE-1"]["project_name"] == "Overdue Project"
+    # the case-less one gets its own raw id and project_name from contacts
+    assert by_no["PREDUE-1"]["invoice_id"] == "PREDUE-1"
+    assert by_no["PREDUE-1"]["project_name"] == "Pre-Due Project"
+    assert by_no["PREDUE-1"]["open_amount"] == 2000
+    assert by_no["PREDUE-1"]["case_key"] is None
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_projects_includes_a_project_with_no_cased_invoices(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"project_number": "PN-1", "project_name": "Has Cases"},
+                {"project_number": "PN-2", "project_name": "No Cases Yet"},
+            ],
+        )
+    )
+
+    projects = await list_projects(client)
+
+    assert {p["project_number"] for p in projects} == {"PN-1", "PN-2"}
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_invoice_falls_back_to_raw_invoice_when_no_case_exists(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/PREDUE-1").mock(return_value=httpx.Response(404, json={"detail": "not found"}))
+    respx.get(f"{BASE}/api/v1/dunning/invoices/PREDUE-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "PREDUE-1", "invoice_no": "PREDUE-1", "status": "Open", "project_number": "PN-2", "due_date": "2026-08-15", "amount": 2000},
+        )
+    )
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(
+        return_value=httpx.Response(200, json=[{"project_number": "PN-2", "project_name": "Pre-Due Project"}])
+    )
+
+    invoice = await get_invoice(client, invoice_id="PREDUE-1")
+
+    assert invoice["invoice_id"] == "PREDUE-1"
+    assert invoice["project_name"] == "Pre-Due Project"
+    assert invoice["open_amount"] == 2000
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_timeline_returns_empty_for_a_case_less_invoice(client: BackendClient) -> None:
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/PREDUE-1/timeline").mock(return_value=httpx.Response(404, json={"detail": "not found"}))
+
+    events = await get_timeline(client, invoice_id="PREDUE-1")
+
+    assert events == []
     await client.close()
 
 

@@ -155,8 +155,14 @@ def test_invoices_endpoint_with_valid_session(client: TestClient) -> None:
     token = login_resp.json()["session_token"]
 
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(
-        return_value=httpx.Response(200, json={"items": [{"id": "case-1", "project_name": "Meridian Bay"}]})
+        return_value=httpx.Response(
+            200, json={"items": [{"id": "case-1", "project_name": "Meridian Bay", "primary_invoice_id": "INV-1"}]}
+        )
     )
+    respx.get(f"{BASE}/api/v1/dunning/invoices").mock(
+        return_value=httpx.Response(200, json=[{"id": "INV-1", "invoice_no": "INV-1", "status": "Open"}])
+    )
+    respx.get(f"{BASE}/api/v1/dunning/project-contacts").mock(return_value=httpx.Response(200, json=[]))
 
     resp = client.get("/api/invoices", headers={"Authorization": f"Bearer {token}"})
 
