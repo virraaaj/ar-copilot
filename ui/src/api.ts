@@ -411,6 +411,7 @@ export interface Chase {
   target: string | null;
   pm_email: string | null;
   customer_email: string | null;
+  contact_email: string | null;
   promised_date: string | null;
   promised_by: string | null;
   missed_count: number;
