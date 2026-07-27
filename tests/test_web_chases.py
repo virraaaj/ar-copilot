@@ -98,6 +98,42 @@ def test_list_chases_filters_by_case_id(client: TestClient) -> None:
     assert resp.json()[0]["case_id"] == "case-1"
 
 
+def test_commitment_metric_requires_session(client: TestClient) -> None:
+    assert client.get("/api/chases/commitment-metric").status_code == 401
+
+
+def test_commitment_metric_route_does_not_collide_with_chase_id_route(client: TestClient) -> None:
+    """/chases/commitment-metric must resolve to the metric endpoint, not
+    get_chase_endpoint("commitment-metric") -- route registration order in
+    web.py is what makes this work."""
+    token = _login(client)
+
+    resp = client.get("/api/chases/commitment-metric", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert "known_pct" in resp.json()
+
+
+def test_commitment_metric_reflects_chase_states(client: TestClient) -> None:
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    import asyncio
+
+    known = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.update(known, state="commitment_tracked", target="pm"))
+    unknown = asyncio.run(store.create("case-2", invoice_no="INV-2"))
+    asyncio.run(store.update(unknown, state="awaiting_pm", target="pm"))
+
+    resp = client.get("/api/chases/commitment-metric", headers={"Authorization": f"Bearer {token}"})
+
+    body = resp.json()
+    assert body["total_open"] == 2
+    assert body["known"] == 1
+    assert body["known_pct"] == 50.0
+    assert len(body["unknown_cases"]) == 1
+    assert body["unknown_cases"][0]["case_id"] == "case-2"
+
+
 def test_get_chase_by_id(client: TestClient) -> None:
     token = _login(client)
     store = ChaseStore(db_path=client.chase_db_path)

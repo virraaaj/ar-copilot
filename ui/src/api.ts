@@ -440,6 +440,27 @@ export async function listChases(token: string, state?: string, caseId?: string)
   return request(`/chases${qs ? `?${qs}` : ""}`, token);
 }
 
+// Outcome-agent north-star metric (added 2026-07-25) -- % of open chases
+// with a known next commitment, per outcome_metrics.py.
+export interface CommitmentMetric {
+  total_open: number;
+  known: number;
+  unknown: number;
+  known_pct: number;
+  unknown_cases: Array<{
+    chase_id: string;
+    case_id: string;
+    invoice_no: string | null;
+    project_number: string | null;
+    state: string;
+    known_commitment: boolean;
+  }>;
+}
+
+export async function getCommitmentMetric(token: string): Promise<CommitmentMetric> {
+  return request(`/chases/commitment-metric`, token);
+}
+
 export async function getChase(token: string, chaseId: string): Promise<Chase> {
   return request(`/chases/${encodeURIComponent(chaseId)}`, token);
 }

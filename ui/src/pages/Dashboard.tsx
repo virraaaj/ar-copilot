@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { listInvoices, getAgingSummary, uploadAgingExcel, listChases, type Invoice, type AgingSummary, type Chase } from "../api";
+import {
+  listInvoices, getAgingSummary, uploadAgingExcel, listChases, getCommitmentMetric,
+  type Invoice, type AgingSummary, type Chase, type CommitmentMetric,
+} from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
 
@@ -40,6 +43,7 @@ export default function Dashboard() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [chases, setChases] = useState<Chase[]>([]);
+  const [commitmentMetric, setCommitmentMetric] = useState<CommitmentMetric | null>(null);
   // Collapsed by default (added 2026-07-23) -- with every project always
   // expanded this page was a wall of tables; an accordion makes "click a
   // project to see its invoices" the actual navigation model the boss asked
@@ -55,6 +59,15 @@ export default function Dashboard() {
   useEffect(() => {
     if (!token) return;
     listChases(token).then(setChases).catch(() => setChases([]));
+  }, [token, refreshKey]);
+
+  // North-star metric (added 2026-07-25, per the long-horizon outcome
+  // agent spec): what fraction of open chases have a known next
+  // commitment vs. still an open question mark -- the product's real
+  // success signal, distinct from "how many emails went out."
+  useEffect(() => {
+    if (!token) return;
+    getCommitmentMetric(token).then(setCommitmentMetric).catch(() => setCommitmentMetric(null));
   }, [token, refreshKey]);
 
   function toggleExpanded(key: string) {
@@ -201,6 +214,38 @@ export default function Dashboard() {
                 </p>
               </div>
             ))}
+        </div>
+      )}
+
+      {commitmentMetric && commitmentMetric.total_open > 0 && (
+        <div className="mb-8 rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">
+                Known next commitment
+              </p>
+              <p className="mt-1 flex items-baseline gap-2">
+                <span className="font-display text-[22px] font-semibold tabular-nums text-zinc-900">
+                  {commitmentMetric.known_pct}%
+                </span>
+                <span className="text-[13px] text-zinc-400">
+                  {commitmentMetric.known} of {commitmentMetric.total_open} open invoices have a payment date,
+                  agreed follow-up date, or an assigned owner
+                </span>
+              </p>
+            </div>
+            {commitmentMetric.unknown > 0 && (
+              <span className="shrink-0 rounded-full bg-amber-50 px-3 py-1 text-[12px] font-medium text-amber-700">
+                {commitmentMetric.unknown} unresolved
+              </span>
+            )}
+          </div>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${commitmentMetric.known_pct}%` }}
+            />
+          </div>
         </div>
       )}
 

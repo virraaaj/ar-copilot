@@ -596,6 +596,27 @@ async def list_chases_endpoint(
     return await store.list_all(state=state, case_id=case_id)
 
 
+@router.get("/chases/commitment-metric")
+async def commitment_metric_endpoint(
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """The outcome-agent north-star metric: what fraction of open chases
+    have a known next commitment (payment date, agreed follow-up date, or
+    a human owner via escalation) vs. still an open question mark."""
+    from app.services.outcome_metrics import commitment_breakdown, compute_commitment_metric
+
+    store = ChaseStore()
+    metric = await compute_commitment_metric(store)
+    breakdown = await commitment_breakdown(store)
+    return {
+        "total_open": metric.total_open,
+        "known": metric.known,
+        "unknown": metric.unknown,
+        "known_pct": metric.known_pct,
+        "unknown_cases": [r for r in breakdown if not r["known_commitment"]],
+    }
+
+
 @router.get("/chases/{chase_id}")
 async def get_chase_endpoint(
     chase_id: str,
