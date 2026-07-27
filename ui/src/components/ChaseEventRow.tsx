@@ -58,6 +58,8 @@ const KIND_META: Record<string, KindMeta> = {
   handoff_to_customer: { icon: "🔀", color: "bg-violet-50 text-violet-700", ring: "ring-violet-200", label: "Handed off to customer" },
   handoff_to_contact: { icon: "🔀", color: "bg-violet-50 text-violet-700", ring: "ring-violet-200", label: "Handed off" },
   checkback_scheduled: { icon: "🕒", color: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-200", label: "Checking back later" },
+  blocker_reported: { icon: "🚧", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Blocker reported" },
+  blocker_check_in: { icon: "🚧", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Blocker check-in" },
   escalated: { icon: "⚠️", color: "bg-rose-50 text-rose-700", ring: "ring-rose-200", label: "Escalated" },
   closed: { icon: "✅", color: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-200", label: "Closed" },
   human_action: { icon: "🖐️", color: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-200", label: "Human action" },
@@ -160,6 +162,27 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
             </span>
           )}
         </p>
+      </EventShell>
+    );
+  }
+
+  if (event.kind === "blocker_reported") {
+    const blockerType = event.detail?.blocker_type ? String(event.detail.blocker_type).replace(/_/g, " ") : "blocker";
+    const description = event.detail?.blocker_description ? String(event.detail.blocker_description) : null;
+    const resolutionDate = event.detail?.blocker_resolution_date ? String(event.detail.blocker_resolution_date) : null;
+    return (
+      <EventShell kind="blocker_reported" at={event.at}>
+        <p className="mt-1 text-[12px] text-zinc-600">
+          <span className="font-medium capitalize text-zinc-700">{blockerType}</span>
+          {resolutionDate ? (
+            <>
+              {" "}-- expected to clear <span className="font-medium text-zinc-700">{resolutionDate}</span>
+            </>
+          ) : (
+            " -- no resolution date yet"
+          )}
+        </p>
+        {description && <MessageBubble text={description} tone="violet" />}
       </EventShell>
     );
   }

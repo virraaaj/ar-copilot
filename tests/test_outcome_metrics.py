@@ -99,6 +99,28 @@ async def test_stale_checkback_after_a_new_reply_no_longer_counts(store: ChaseSt
 
 
 @pytest.mark.asyncio
+async def test_blocked_with_a_resolution_date_counts_as_known(store: ChaseStore) -> None:
+    chase_id = await store.create("case-1", invoice_no="INV-1")
+    await store.update(chase_id, state="blocked", target="pm", blocker_type="approval_pending",
+                        blocker_resolution_date="2026-08-01")
+
+    metric = await compute_commitment_metric(store)
+
+    assert metric.known == 1
+
+
+@pytest.mark.asyncio
+async def test_blocked_with_no_resolution_date_is_unknown(store: ChaseStore) -> None:
+    chase_id = await store.create("case-1", invoice_no="INV-1")
+    await store.update(chase_id, state="blocked", target="pm", blocker_type="cash_flow")
+
+    metric = await compute_commitment_metric(store)
+
+    assert metric.total_open == 1
+    assert metric.known == 0
+
+
+@pytest.mark.asyncio
 async def test_paused_is_excluded_from_the_denominator(store: ChaseStore) -> None:
     chase_id = await store.create("case-1", invoice_no="INV-1")
     await store.update(chase_id, state="paused", target="pm")

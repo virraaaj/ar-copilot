@@ -12,6 +12,7 @@ from app.services.chase_machine import (
     Escalate,
     SendMessage,
     escalate_now,
+    on_blocker_check_in,
     on_commitment_due,
     on_nudge_check,
     on_reply,
@@ -283,6 +284,84 @@ def test_reply_low_confidence_dispute_clarifies_instead_of_escalating():
     assert decision.updates.get("state") != "escalated"
     assert decision.actions[0].kind == "clarify"
     assert not any(isinstance(a, Escalate) for a in decision.actions)
+
+
+# ---- on_reply: blocker_reported --------------------------------------------
+
+
+def test_reply_blocker_with_resolution_date_moves_to_blocked_and_schedules_checkin():
+    chase = base_chase(state="awaiting_pm", target="pm", postpone_count=1)
+    parsed = ParsedReply(
+        intent="blocker_reported", confidence="high", blocker_type="approval_pending",
+        blocker_description="Waiting on plant manager approval.", blocker_resolution_date=future_date(5),
+    )
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates["state"] == "blocked"
+    assert decision.updates["blocker_type"] == "approval_pending"
+    assert decision.updates["blocker_resolution_date"] == future_date(5)
+    assert decision.updates["postpone_count"] == 0  # fresh info resets the budget
+    assert decision.updates["next_action_at"].startswith(future_date(5 + CONFIG.grace_days))
+    assert decision.actions[0].kind == "blocker_ack"
+    assert decision.actions[0].target == "pm"
+
+
+def test_reply_blocker_with_no_date_asks_when_to_check_back():
+    chase = base_chase(state="awaiting_customer", target="customer")
+    parsed = ParsedReply(
+        intent="blocker_reported", confidence="high", blocker_type="cash_flow",
+        blocker_description="Cash-flow issue, board meeting pending.", blocker_resolution_date=None,
+    )
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates["state"] == "blocked"
+    assert decision.updates["blocker_resolution_date"] is None
+    assert "check back" in decision.actions[0].text.lower()
+
+
+def test_reply_blocker_with_past_resolution_date_falls_back_to_normal_interval():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(
+        intent="blocker_reported", confidence="high", blocker_type="approval_pending",
+        blocker_description="...", blocker_resolution_date=past_date(2),
+    )
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates["blocker_resolution_date"] is None
+    assert not decision.updates["next_action_at"].startswith(past_date(2))
+
+
+def test_reply_low_confidence_blocker_falls_through_to_clarify():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="blocker_reported", confidence="low", blocker_type="approval_pending")
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates.get("state") != "blocked"
+    assert decision.actions[0].kind == "clarify"
+
+
+def test_on_blocker_check_in_sends_status_request_under_budget():
+    chase = base_chase(state="blocked", target="pm", postpone_count=0, blocker_type="approval_pending")
+
+    decision = on_blocker_check_in(chase, config=CONFIG)
+
+    assert decision.updates.get("state") != "escalated"
+    assert decision.updates["postpone_count"] == 1
+    assert decision.updates["blocker_resolution_date"] is None
+    assert decision.actions[0].kind == "blocker_check_in"
+
+
+def test_on_blocker_check_in_escalates_after_postpone_budget_exhausted():
+    chase = base_chase(state="blocked", target="pm", postpone_count=3, blocker_type="approval_pending")
+
+    decision = on_blocker_check_in(chase, config=CONFIG)
+
+    assert decision.updates["state"] == "escalated"
+    assert isinstance(decision.actions[0], Escalate)
 
 
 # ---- on_reply: checkback_requested ---------------------------------------

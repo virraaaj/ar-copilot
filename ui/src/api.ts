@@ -417,6 +417,10 @@ export interface Chase {
   missed_count: number;
   nudge_count: number;
   clarify_count: number;
+  postpone_count: number;
+  blocker_type: string | null;
+  blocker_description: string | null;
+  blocker_resolution_date: string | null;
   last_outreach_at: string | null;
   next_action_at: string | null;
   total_tokens_used: number;

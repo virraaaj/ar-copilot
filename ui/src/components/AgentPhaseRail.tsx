@@ -12,7 +12,7 @@ type Step = { key: string; label: string; states: string[] };
 // happened (an escalation isn't step 5 of a plan, it's a detour from it).
 const STEPS: Step[] = [
   { key: "pending", label: "Starting", states: ["pending"] },
-  { key: "outreach", label: "Outreach sent, waiting for reply", states: ["awaiting_pm", "awaiting_customer", "awaiting_contact"] },
+  { key: "outreach", label: "Outreach sent, waiting for reply", states: ["awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked"] },
   { key: "commitment", label: "Commitment tracked", states: ["commitment_tracked"] },
   { key: "verifying", label: "Verifying payment", states: ["verifying_payment"] },
   { key: "done", label: "Done", states: ["closed_paid", "closed_manual"] },

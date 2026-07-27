@@ -62,6 +62,7 @@ VALID_INTENTS = (
     "handoff_to_contact",
     "claims_paid",
     "dispute",
+    "blocker_reported",
     "checkback_requested",
     "out_of_scope_request",
     "no_commitment",
@@ -73,6 +74,12 @@ VALID_INTENTS = (
 # CONTACT_TYPES minus "pm" (redirecting to the PM doesn't apply here, the
 # PM is who's usually doing the redirecting).
 CONTACT_ROLES = ("bu_finance", "corp_finance", "general_manager", "legal")
+
+# Blocker categories (added 2026-07-25, long-horizon outcome agent spec
+# §6.12) -- deliberately excludes "dispute", which already has its own
+# dedicated intent/escalation path; a blocker is a reason payment is
+# delayed, not a contest of the invoice itself.
+BLOCKER_TYPES = ("approval_pending", "cash_flow", "missing_invoice", "missing_po", "wrong_contact", "other")
 
 _TOOL_NAME = "record_reply_interpretation"
 
@@ -104,6 +111,13 @@ _TOOL_SCHEMA: Dict[str, Any] = {
                         "to par' is investigating, not refusing to pay; that's no_commitment (set confidence=low "
                         "if you're at all unsure whether it's a real dispute -- an escalation to a human should "
                         "only happen for a genuine, confident dispute, never a tentative one). "
+                        "blocker_reported: names a concrete reason payment is delayed that isn't a dispute -- "
+                        "waiting on an internal approval, a cash-flow issue, a missing invoice/PO, or the wrong "
+                        "contact. Set blocker_type, a short blocker_description, and blocker_resolution_date if "
+                        "they gave a date/timeframe for when it resolves (omit if not given). Use this even on a "
+                        "follow-up reply that just updates an existing blocker with a new date (e.g. 'he's back "
+                        "Monday') -- it doesn't have to be the first time the blocker was mentioned. If they also "
+                        "name a payment date, use commitment_date instead. "
                         "checkback_requested: they're not committing to a payment date, but are explicitly asking "
                         "you to check back with THEM later, or naming a point when they'll know more -- "
                         "'let me check on this and get back to you', 'check with me again in 5 days', 'ask me "
@@ -136,6 +150,27 @@ _TOOL_SCHEMA: Dict[str, Any] = {
                         "Only for intent=checkback_requested, and only if they gave a specific timeframe for "
                         "when to check back ('in 5 days', 'next Monday', 'end of week'). An absolute ISO date "
                         "(YYYY-MM-DD) resolved against today's date. Omit if no timeframe was given at all."
+                    ),
+                },
+                "blocker_type": {
+                    "type": "string",
+                    "enum": list(BLOCKER_TYPES),
+                    "description": (
+                        "Only for intent=blocker_reported. approval_pending (internal sign-off), cash_flow, "
+                        "missing_invoice (they say they never got it), missing_po (need a PO number first), "
+                        "wrong_contact (this isn't their invoice/account), or other."
+                    ),
+                },
+                "blocker_description": {
+                    "type": "string",
+                    "description": "Only for intent=blocker_reported. One short sentence summarizing the blocker in their own terms.",
+                },
+                "blocker_resolution_date": {
+                    "type": "string",
+                    "description": (
+                        "Only for intent=blocker_reported, and only if a date/timeframe for when the blocker "
+                        "resolves was given ('back Monday', 'after the board meeting next Thursday'). An "
+                        "absolute ISO date (YYYY-MM-DD) resolved against today's date. Omit if not given."
                     ),
                 },
                 "customer_contact_email": {
@@ -173,6 +208,9 @@ class ParsedReply:
     confidence: str  # 'high' | 'low'
     promised_date: Optional[str] = None
     followup_date: Optional[str] = None  # only for intent=checkback_requested, added 2026-07-24
+    blocker_type: Optional[str] = None  # only for intent=blocker_reported, added 2026-07-25
+    blocker_description: Optional[str] = None
+    blocker_resolution_date: Optional[str] = None
     customer_contact_email: Optional[str] = None
     contact_role: Optional[str] = None  # only for intent=handoff_to_contact, added 2026-07-23
     raw_text: str = ""
@@ -200,14 +238,17 @@ def _build_messages(
         "dispute; a mention of checking on a possible quality/service concern that hasn't been confirmed is "
         "no_commitment, not dispute -- disputes trigger an immediate human escalation, so getting this wrong "
         "pulls a human in over something that might resolve on its own)? (4) does it give a specific date "
-        "(commitment_date)? (5) do they ask you to check back with them later, or name a point when they'll "
-        "know more, without committing to a payment date (checkback_requested -- 'let me check on this', "
-        "'check with me again in 5 days', 'ask me next week', 'I'll know more after I speak to the team')? Set "
-        "followup_date only if a specific timeframe was actually given. (6) does it ask about another "
-        "customer's account, another invoice/project that isn't theirs, or other internal/third-party "
-        "information we can't share (out_of_scope_request -- 'are other customers late too?', 'what's your "
-        "total outstanding?')? This takes priority over no_commitment even if the reply also says something "
-        "vague about their own payment, since the boundary question is what needs handling. "
+        "(commitment_date)? (5) does it name a concrete non-dispute reason for the delay -- an approval, "
+        "cash-flow issue, missing invoice/PO, or wrong contact (blocker_reported)? Set blocker_type/"
+        "blocker_description always, and blocker_resolution_date if a date/timeframe for the blocker resolving "
+        "was given. (6) do they ask you to check back with them later, or name a point when they'll know more, "
+        "with no named reason and no payment date (checkback_requested -- 'let me check on this', 'check with "
+        "me again in 5 days', 'ask me next week')? Set followup_date only if a specific timeframe was actually "
+        "given. (7) does it ask about another customer's account, another invoice/project that isn't theirs, or "
+        "other internal/third-party information we can't share (out_of_scope_request -- 'are other customers "
+        "late too?', 'what's your total outstanding?')? This takes priority over no_commitment even if the "
+        "reply also says something vague about their own payment, since the boundary question is what needs "
+        "handling. "
         "Only if none of those apply -- a bare acknowledgment with no date, no redirect, and no check-back "
         "timing at all ('ok', 'noted') -- use no_commitment. Example: 'reach out to bob@x.com' or 'ask BU "
         "Finance' is a handoff, NOT no_commitment, even though it names no payment date. "
@@ -318,11 +359,28 @@ async def parse_chase_reply(
         # let an invented/garbled role masquerade as a real routing target.
         return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text, tokens_used=tokens)
 
+    blocker_type = args.get("blocker_type")
+    blocker_description = args.get("blocker_description")
+    blocker_resolution_date = args.get("blocker_resolution_date")
+    if intent == "blocker_reported":
+        if blocker_type not in BLOCKER_TYPES:
+            # Claimed a blocker but didn't name a type we recognize --
+            # don't let an invented category masquerade as a real one.
+            return ParsedReply(intent="unclear", confidence="low", raw_text=reply_text, tokens_used=tokens)
+        if blocker_resolution_date:
+            try:
+                date.fromisoformat(blocker_resolution_date)
+            except (ValueError, TypeError):
+                blocker_resolution_date = None
+
     return ParsedReply(
         intent=intent,
         confidence=confidence,
         promised_date=promised_date if intent == "commitment_date" else None,
         followup_date=followup_date if intent == "checkback_requested" else None,
+        blocker_type=blocker_type if intent == "blocker_reported" else None,
+        blocker_description=blocker_description if intent == "blocker_reported" else None,
+        blocker_resolution_date=blocker_resolution_date if intent == "blocker_reported" else None,
         customer_contact_email=customer_email,
         contact_role=contact_role if intent == "handoff_to_contact" else None,
         raw_text=reply_text,

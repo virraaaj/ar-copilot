@@ -39,7 +39,7 @@ class ChaseConfig:
 @dataclass(frozen=True)
 class SendMessage:
     target: str  # 'pm' | 'customer'
-    kind: str  # 'outreach' | 'nudge' | 'confirm' | 'clarify' | 'rechase' | 'verify_check' | 'ask_for_customer_email' | 'checkback_ack'
+    kind: str  # 'outreach' | 'nudge' | 'confirm' | 'clarify' | 'rechase' | 'verify_check' | 'ask_for_customer_email' | 'checkback_ack' | 'blocker_ack' | 'blocker_check_in'
     text: str
 
 
@@ -291,6 +291,9 @@ def on_reply(
             events=[("handoff_to_contact", {"contact_role": parsed.contact_role, "contact_email": resolved_contact_email})],
         )
 
+    if parsed.intent == "blocker_reported" and parsed.confidence == "high" and parsed.blocker_type:
+        return _on_blocker_reported(chase, parsed, config)
+
     if parsed.intent == "checkback_requested" and parsed.confidence == "high":
         return _on_checkback_requested(chase, parsed, config)
 
@@ -353,6 +356,86 @@ def _on_checkback_requested(chase: Dict[str, Any], parsed: ParsedReply, config: 
         },
         actions=[SendMessage(target=target, kind="checkback_ack", text=text)],
         events=[("checkback_scheduled", {"target": target, "followup_date": followup_date, "postpone_count": postpone_count})],
+    )
+
+
+def _on_blocker_reported(chase: Dict[str, Any], parsed: ParsedReply, config: ChaseConfig) -> Decision:
+    """A concrete, non-dispute reason payment is delayed (long-horizon
+    outcome agent spec §6.12/§9.2-9.3) -- e.g. "waiting on plant manager
+    approval". Moves the chase to its own 'blocked' state (distinct from
+    a plain awaiting_* -- there's a known reason now, not just silence)
+    and tracks the blocker as fields on the chase itself so it can be
+    displayed and queried directly, same idea as promised_date/promised_by
+    for a payment commitment. Reuses the checkback postpone budget: a
+    fresh blocker report resets it (new information is progress), and
+    on_blocker_check_in below increments it when a resolution date passes
+    with nothing new."""
+    target = chase["target"]
+    invoice_ref = chase.get("invoice_no") or chase.get("case_key")
+    blocker_label = (parsed.blocker_type or "other").replace("_", " ")
+
+    resolution_date = parsed.blocker_resolution_date
+    if resolution_date:
+        resolution = datetime.fromisoformat(resolution_date)
+        if resolution.date() < _now().date():
+            resolution_date = None  # given date already passed -- treat as no date
+
+    if resolution_date:
+        next_action_at = _iso(datetime.fromisoformat(resolution_date) + timedelta(days=config.grace_days))
+        text = f"Understood -- I'll check back around {resolution_date} on invoice {invoice_ref} ({blocker_label})."
+    else:
+        next_action_at = _iso(_now() + timedelta(days=config.nudge_interval_days))
+        text = f"Thanks for letting me know about the {blocker_label} on invoice {invoice_ref} -- when should I check back?"
+
+    return Decision(
+        updates={
+            "state": "blocked",
+            "blocker_type": parsed.blocker_type,
+            "blocker_description": parsed.blocker_description,
+            "blocker_resolution_date": resolution_date,
+            "postpone_count": 0,
+            "next_action_at": next_action_at,
+            "last_outreach_at": _iso(_now()),
+        },
+        actions=[SendMessage(target=target, kind="blocker_ack", text=text)],
+        events=[("blocker_reported", {
+            "target": target, "blocker_type": parsed.blocker_type,
+            "blocker_description": parsed.blocker_description, "blocker_resolution_date": resolution_date,
+        })],
+    )
+
+
+def on_blocker_check_in(chase: Dict[str, Any], config: ChaseConfig = ChaseConfig()) -> Decision:
+    """Called when a 'blocked' chase's next_action_at (its blocker's
+    expected resolution date, or a plain nudge interval if no date was
+    given) arrives with no new reply. Escalates once the postpone budget
+    is exhausted -- same guardrail as checkback: a blocker alone is never
+    a reason to loop forever, only repeated silence past it is."""
+    target = chase["target"]
+    invoice_ref = chase.get("invoice_no") or chase.get("case_key")
+    postpone_count = (chase.get("postpone_count") or 0) + 1
+    blocker_label = (chase.get("blocker_type") or "blocker").replace("_", " ")
+
+    if postpone_count > config.max_postponements:
+        return Decision(
+            updates={"state": "escalated", "postpone_count": postpone_count, "next_action_at": None},
+            actions=[Escalate(
+                reason=f"Blocker ({blocker_label}) on invoice {invoice_ref} has not resolved after "
+                       f"{postpone_count} check-ins."
+            )],
+            events=[("escalated", {"reason": "blocker_postpone_budget_exhausted", "blocker_type": chase.get("blocker_type"), "postpone_count": postpone_count})],
+        )
+
+    text = f"Checking in on invoice {invoice_ref} -- any update on the {blocker_label}?"
+    return Decision(
+        updates={
+            "postpone_count": postpone_count,
+            "blocker_resolution_date": None,
+            "next_action_at": _iso(_now() + timedelta(days=config.nudge_interval_days)),
+            "last_outreach_at": _iso(_now()),
+        },
+        actions=[SendMessage(target=target, kind="blocker_check_in", text=text)],
+        events=[("blocker_check_in", {"blocker_type": chase.get("blocker_type"), "postpone_count": postpone_count})],
     )
 
 

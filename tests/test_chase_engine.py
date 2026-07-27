@@ -257,6 +257,32 @@ async def test_awaiting_pm_no_reply_sends_a_nudge(backend, chase_store, project_
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_blocked_chase_due_for_checkin_sends_a_status_request(backend, chase_store, project_store, messenger, email_sender):
+    """Regression test (added 2026-07-25): before the 'blocked' state was
+    wired into _process_one_due_chase's dispatch, a blocked chase whose
+    next_action_at arrived hit the `else: return` fallthrough and silently
+    did nothing -- the PM/customer never heard from the agent again."""
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", project_number="PN-1", next_action_at=past_iso())
+    await chase_store.update(
+        chase_id, state="blocked", target="pm", pm_email="pm@corehelix.ai",
+        blocker_type="approval_pending", postpone_count=0,
+    )
+
+    settings = make_settings(CHASE_DRY_RUN=False)
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["postpone_count"] == 1
+    assert chase["state"] == "blocked"
+    assert len(email_sender.sent) == 1
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_awaiting_pm_escalates_once_nudge_budget_exhausted(backend, chase_store, project_store, messenger, email_sender):
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))

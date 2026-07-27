@@ -30,6 +30,7 @@ OPEN_STATES = (
     "awaiting_pm",
     "awaiting_customer",
     "awaiting_contact",
+    "blocked",
     "commitment_tracked",
     "verifying_payment",
     "escalated",
@@ -57,6 +58,9 @@ CREATE TABLE IF NOT EXISTS chases (
     nudge_count INTEGER NOT NULL DEFAULT 0,
     clarify_count INTEGER NOT NULL DEFAULT 0,
     postpone_count INTEGER NOT NULL DEFAULT 0,
+    blocker_type TEXT,
+    blocker_description TEXT,
+    blocker_resolution_date TEXT,
     last_outreach_at TEXT,
     next_action_at TEXT,
     total_tokens_used INTEGER NOT NULL DEFAULT 0,
@@ -140,6 +144,20 @@ class ChaseStore:
             except aiosqlite.OperationalError as exc:
                 if "duplicate column" not in str(exc).lower():
                     raise
+            # Migration for the "blocked" state / blocker tracking (added
+            # 2026-07-25, long-horizon outcome agent spec) -- a blocker is
+            # tracked as first-class fields on the chase itself (mirrors
+            # promised_date/promised_by for commitments) rather than only
+            # living inside an event's detail blob, so it can be queried
+            # directly (e.g. by the commitment-known metric) without
+            # replaying the whole event log.
+            for col in ("blocker_type", "blocker_description", "blocker_resolution_date"):
+                try:
+                    await db.execute(f"ALTER TABLE chases ADD COLUMN {col} TEXT")
+                    await db.commit()
+                except aiosqlite.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
             await db.commit()
         self._initialized = True
 

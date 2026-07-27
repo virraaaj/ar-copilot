@@ -382,6 +382,17 @@ async def _process_one_due_chase(
         if decision is None:
             decision = chase_machine.on_nudge_check(chase, config=config)
 
+    elif state == "blocked":
+        # The blocker's expected resolution date (or a plain nudge interval
+        # if none was given) arrived with no new reply -- check in rather
+        # than silently doing nothing, which is what happened here before
+        # this state existed (it fell through the `else: return` below).
+        decision = await _maybe_smart_escalate(
+            chase, llm, chase_store, settings, chase.get("postpone_count") or 0, config.max_postponements
+        )
+        if decision is None:
+            decision = chase_machine.on_blocker_check_in(chase, config=config)
+
     elif state == "commitment_tracked":
         try:
             case = await backend.get_case(chase["case_id"])

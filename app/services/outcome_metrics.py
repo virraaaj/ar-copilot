@@ -12,6 +12,9 @@ A chase counts as "known" when it's in one of:
   - escalated -- a human is assigned. Covers both "dispute routed" and
     "no reply, escalate": both mean the case has a concrete owner instead
     of sitting in automated limbo.
+  - blocked with a blocker_resolution_date on record -- a concrete reason
+    for the delay AND a date it's expected to clear (the spec's "blocker
+    plus expected blocker resolution date" commitment type).
   - any awaiting_* / pending state whose most recent event is a
     checkback_scheduled with a real followup_date -- the customer agreed
     to a specific follow-up date, even though no payment date exists yet.
@@ -64,6 +67,8 @@ async def _has_scheduled_followup(chase_store: ChaseStore, chase_id: str) -> boo
 async def _is_known(chase_store: ChaseStore, chase: Dict[str, Any]) -> bool:
     if chase["state"] in _KNOWN_STATES:
         return True
+    if chase["state"] == "blocked":
+        return bool(chase.get("blocker_resolution_date"))
     if chase["state"] in _AMBIGUOUS_STATES:
         return await _has_scheduled_followup(chase_store, chase["id"])
     return False

@@ -28,6 +28,7 @@ const STATE_STYLES: Record<string, string> = {
   awaiting_pm: "bg-sky-50 text-sky-700",
   awaiting_customer: "bg-sky-50 text-sky-700",
   awaiting_contact: "bg-sky-50 text-sky-700",
+  blocked: "bg-amber-50 text-amber-700",
   commitment_tracked: "bg-emerald-50 text-emerald-700",
   verifying_payment: "bg-amber-50 text-amber-700",
   escalated: "bg-rose-50 text-rose-700",
@@ -41,6 +42,7 @@ const STATE_LABELS: Record<string, string> = {
   awaiting_pm: "Waiting on PM",
   awaiting_customer: "Waiting on customer",
   awaiting_contact: "Waiting on contact",
+  blocked: "Blocked",
   commitment_tracked: "Payment date tracked",
   verifying_payment: "Verifying payment",
   escalated: "Escalated",
@@ -49,7 +51,7 @@ const STATE_LABELS: Record<string, string> = {
   closed_manual: "Closed",
 };
 
-const OPEN_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "commitment_tracked", "verifying_payment"]);
+const OPEN_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
 
 function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state;

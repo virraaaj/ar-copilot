@@ -7,7 +7,7 @@ import {
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
 
-const OPEN_CHASE_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "commitment_tracked", "verifying_payment"]);
+const OPEN_CHASE_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
 
 function money(n: number | null): string {
   if (n === null) return "--";
