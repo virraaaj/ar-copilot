@@ -793,6 +793,43 @@ async def test_poll_chase_mailbox_matches_replies_to_a_contact_role_handoff(back
 
 
 @pytest.mark.asyncio
+async def test_poll_chase_mailbox_matches_replies_to_a_blocked_chase(backend, chase_store, project_store, messenger, email_sender):
+    """Regression test (added 2026-07-27, found live): a customer replied
+    "in two days" to the blocker check-in question ("when should I check
+    back?"), but the chase was in state='blocked' -- not in the mail
+    poller's eligibility tuple -- so the reply was silently marked
+    processed and dropped without ever reaching chase_machine. Same class
+    of bug as the awaiting_contact fix above, different state."""
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(
+        chase_id, state="blocked", target="customer", customer_email="cust@x.com",
+        blocker_type="approval_pending", blocker_description="Checking with team on SLAs",
+    )
+    chase = await chase_store.get(chase_id)
+
+    reader = FakeMailboxReader([
+        {"id": "msg-1", "subject": f"Re: [{chase['subject_token']}] invoice", "bodyPreview": "In two days."},
+    ])
+    llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "checkback_requested", "confidence": "high",
+            "followup_date": (date.today() + timedelta(days=2)).isoformat(),
+        })
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=False)
+
+    processed = await poll_chase_mailbox(reader, llm, backend, messenger, email_sender, chase_store, project_store, settings)
+
+    assert processed == 1
+    events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "reply_received" for e in events)
+    assert any(e["kind"] == "checkback_scheduled" for e in events)
+    await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_poll_chase_mailbox_ignores_self_addressed_mail(backend, chase_store, project_store, messenger, email_sender):
     """Regression test (added 2026-07-23): a chase escalated after the
     poller re-ingested its own outreach as a "reply" -- self-addressed

@@ -697,10 +697,15 @@ async def poll_chase_mailbox(
             continue
 
         chase = await chase_store.get_by_subject_token(token)
-        if not chase or chase["state"] not in ("awaiting_pm", "awaiting_customer", "awaiting_contact"):
+        if not chase or chase["state"] not in ("awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked"):
             # Unknown token, or the chase has moved on (already tracked a
             # commitment, escalated, closed) -- a late/duplicate reply to
             # an old message shouldn't reopen or double-process it.
+            # "blocked" belongs in this list, not the "moved on" set --
+            # bug found live 2026-07-27: a customer replied "in two days"
+            # to the blocker check-in question and the poller silently
+            # swallowed it (marked processed, never advanced the chase)
+            # because "blocked" wasn't in the recognized-states tuple.
             await chase_store.mark_mail_processed(message_id, chase["id"] if chase else None)
             continue
 
