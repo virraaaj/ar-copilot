@@ -36,6 +36,7 @@ from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMess
 from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
 from app.services.chase_store import ChaseStore
 from app.services.chase_trajectory import assess_chase_trajectory
+from app.services.graph_store import GraphStore
 from app.services import sim_clock
 from app.services.email_sender import EmailSender
 
@@ -313,11 +314,81 @@ async def _handle_escalation(
         logger.warning("Chase %s: could not mirror escalation to backend timeline", chase["id"])
 
 
+def _invoice_node_id(chase: Dict[str, Any]) -> str:
+    return f"invoice:{chase.get('invoice_no') or chase.get('case_key') or chase['case_id']}"
+
+
+def _project_node_id(chase: Dict[str, Any]) -> Optional[str]:
+    # This app's domain model doesn't have a distinct Customer entity
+    # separate from the project (Lummus dunning cases are project-scoped,
+    # not customer-scoped) -- the project stands in for the spec's
+    # Customer node, and CUSTOMER_HAS_INVOICE is the closest real
+    # relationship this data actually supports.
+    project_number = chase.get("project_number")
+    return f"project:{project_number}" if project_number else None
+
+
+async def _apply_graph_updates(chase_store: ChaseStore, chase: Dict[str, Any], decision: Decision) -> None:
+    """Writes the subset of decision.events that represent a durable fact
+    about the invoice into the temporal knowledge graph (§6.8) -- a
+    blocker being reported, a commitment being tracked, or the invoice
+    closing out. Best-effort: a graph-write failure must never break the
+    actual chase transition, which has already been committed by the
+    time this runs."""
+    invoice_id = _invoice_node_id(chase)
+    try:
+        graph = GraphStore(db_path=chase_store.db_path)
+        project_id = _project_node_id(chase)
+        if project_id:
+            await graph.upsert_node(project_id, "Customer", label=chase.get("project_number"))
+            await graph.upsert_node(
+                invoice_id, "Invoice", label=chase.get("invoice_no") or chase.get("case_key"),
+            )
+            existing = await graph.list_edges(project_id, relationship="CUSTOMER_HAS_INVOICE", active_only=True)
+            if not any(e["to_node_id"] == invoice_id for e in existing):
+                await graph.add_edge(project_id, "CUSTOMER_HAS_INVOICE", invoice_id)
+
+        for kind, detail in decision.events:
+            if kind == "blocker_reported":
+                blocker_id = f"blocker:{chase['id']}:{detail.get('blocker_type')}"
+                await graph.upsert_node(
+                    blocker_id, "Blocker", label=(detail.get("blocker_type") or "").replace("_", " "),
+                    attributes={
+                        "description": detail.get("blocker_description"),
+                        "expected_resolution_date": detail.get("blocker_resolution_date"),
+                    },
+                )
+                await graph.supersede_edge(invoice_id, "INVOICE_BLOCKED_BY", blocker_id)
+
+            elif kind == "commitment_tracked":
+                commitment_id = f"commitment:{chase['id']}:{detail.get('promised_date')}"
+                await graph.upsert_node(
+                    commitment_id, "Commitment", label=f"payment by {detail.get('promised_date')}",
+                    attributes={"promised_date": detail.get("promised_date"), "promised_by": detail.get("promised_by")},
+                )
+                # A payment promise resolves whatever was blocking progress
+                # -- the spec's own worked example ("blocked by approval,
+                # now has a payment promise"). Close the open blocker edge
+                # and record that this commitment is what superseded it.
+                open_blockers = await graph.list_edges(invoice_id, relationship="INVOICE_BLOCKED_BY", active_only=True)
+                await graph.supersede_edge(invoice_id, "INVOICE_HAS_COMMITMENT", commitment_id)
+                for edge in open_blockers:
+                    await graph.close_edge(edge["id"])
+                    await graph.add_edge(commitment_id, "COMMITMENT_SUPERSEDES", edge["to_node_id"])
+
+            elif kind == "closed" and detail.get("reason") == "paid":
+                for edge in await graph.list_edges(invoice_id, relationship="INVOICE_HAS_COMMITMENT", active_only=True):
+                    await graph.close_edge(edge["id"])
+    except Exception:
+        logger.warning("Chase %s: graph update failed (non-fatal)", chase.get("id"), exc_info=True)
+
+
 async def _apply_decision(chase_store: ChaseStore, chase: Dict[str, Any], decision: Decision) -> None:
     if decision.updates:
         await chase_store.update(chase["id"], **decision.updates)
     for kind, detail in decision.events:
         await chase_store.add_event(chase["id"], kind, detail)
+    await _apply_graph_updates(chase_store, chase, decision)
 
 
 async def _maybe_smart_escalate(

@@ -358,3 +358,50 @@ def test_run_chase_tick_endpoint_processes_and_returns_a_count(client: TestClien
 
     assert resp.status_code == 200
     assert resp.json() == {"processed": 0}
+
+
+# ---- temporal knowledge graph (added 2026-07-25) ---------------------------
+
+
+def test_chase_graph_requires_session(client: TestClient) -> None:
+    assert client.get("/api/chases/chase-1/graph").status_code == 401
+
+
+def test_chase_graph_404_for_unknown_chase(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.get("/api/chases/unknown-id/graph", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 404
+
+
+def test_chase_graph_empty_for_a_chase_with_no_graph_events_yet(client: TestClient) -> None:
+    import asyncio
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+
+    resp = client.get(f"/api/chases/{chase_id}/graph", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": {}, "edges": []}
+
+
+def test_chase_graph_reflects_written_facts(client: TestClient) -> None:
+    import asyncio
+    from app.services.graph_store import GraphStore
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1", project_number="PN-1"))
+
+    graph = GraphStore(db_path=client.chase_db_path)
+    asyncio.run(graph.upsert_node("project:PN-1", "Customer", label="PN-1"))
+    asyncio.run(graph.upsert_node("invoice:INV-1", "Invoice", label="INV-1"))
+    asyncio.run(graph.add_edge("project:PN-1", "CUSTOMER_HAS_INVOICE", "invoice:INV-1"))
+
+    resp = client.get(f"/api/chases/{chase_id}/graph", headers={"Authorization": f"Bearer {token}"})
+
+    body = resp.json()
+    assert set(body["nodes"].keys()) == {"project:PN-1", "invoice:INV-1"}
+    assert len(body["edges"]) == 1
+    assert body["edges"][0]["relationship"] == "CUSTOMER_HAS_INVOICE"

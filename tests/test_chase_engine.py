@@ -962,6 +962,79 @@ async def test_process_due_chases_uses_the_sim_clock_not_real_time(backend, chas
     await backend.close()
 
 
+# ---- temporal knowledge graph (added 2026-07-25) ---------------------------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_blocker_then_commitment_writes_and_supersedes_graph_facts(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """End-to-end proof of the spec's own worked example: an invoice used
+    to be blocked by an approval, then got a payment promise instead --
+    the graph must show the commitment as current AND still have the
+    (now closed) blocker fact, linked by COMMITMENT_SUPERSEDES."""
+    from app.services.graph_store import GraphStore
+
+    _mock_login()
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1", project_number="PN-1")
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai")
+    chase = await chase_store.get(chase_id)
+
+    blocker_llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "blocker_reported", "confidence": "high", "blocker_type": "approval_pending",
+            "blocker_description": "Waiting on plant manager approval.",
+        })
+    ]))
+    settings = make_settings(CHASE_DRY_RUN=True)
+    await advance_chase_with_reply(
+        chase, "We are waiting for the plant manager to approve it.",
+        blocker_llm, backend, messenger, email_sender, chase_store, project_store, settings,
+    )
+
+    graph = GraphStore(db_path=chase_store.db_path)
+    invoice_id = "invoice:INV-1"
+    blocked_edges = await graph.list_edges(invoice_id, relationship="INVOICE_BLOCKED_BY", active_only=True)
+    assert len(blocked_edges) == 1
+    blocker_node_id = blocked_edges[0]["to_node_id"]
+    blocker_node = await graph.get_node(blocker_node_id)
+    assert blocker_node["type"] == "Blocker"
+
+    # Also confirm the Customer(project)-has-Invoice fact was written.
+    project_edges = await graph.list_edges("project:PN-1", relationship="CUSTOMER_HAS_INVOICE", active_only=True)
+    assert any(e["to_node_id"] == invoice_id for e in project_edges)
+
+    chase = await chase_store.get(chase_id)
+    commitment_llm = ScriptedLLM(SimpleNamespace(content=None, tool_calls=[
+        make_tool_call("record_reply_interpretation", {
+            "intent": "commitment_date", "confidence": "high",
+            "promised_date": (date.today() + timedelta(days=5)).isoformat(),
+        })
+    ]))
+    await advance_chase_with_reply(
+        chase, "Approved now. We will pay this Friday.",
+        commitment_llm, backend, messenger, email_sender, chase_store, project_store, settings,
+    )
+
+    active_blocked = await graph.list_edges(invoice_id, relationship="INVOICE_BLOCKED_BY", active_only=True)
+    assert active_blocked == []  # resolved, not deleted -- still queryable below
+    all_blocked = await graph.list_edges(invoice_id, relationship="INVOICE_BLOCKED_BY", active_only=False)
+    assert len(all_blocked) == 1
+    assert all_blocked[0]["valid_to"] is not None
+
+    active_commitment = await graph.list_edges(invoice_id, relationship="INVOICE_HAS_COMMITMENT", active_only=True)
+    assert len(active_commitment) == 1
+    commitment_node_id = active_commitment[0]["to_node_id"]
+
+    supersede_edges = await graph.list_edges(commitment_node_id, relationship="COMMITMENT_SUPERSEDES", active_only=False)
+    assert len(supersede_edges) == 1
+    assert supersede_edges[0]["to_node_id"] == blocker_node_id
+
+    await backend.close()
+
+
 # ---- AI features: composer + smart escalation + token tracking (added 2026-07-22) ---
 
 

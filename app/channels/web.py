@@ -643,6 +643,28 @@ async def list_chase_events_endpoint(
     return await store.list_events(chase_id)
 
 
+@router.get("/chases/{chase_id}/graph")
+async def get_chase_graph_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """The temporal knowledge graph's neighborhood for this chase's
+    invoice -- entities and relationships written by
+    chase_engine.py's _apply_graph_updates (long-horizon outcome agent
+    spec §6.8). Returns an empty graph (not 404) for a chase that hasn't
+    had any graph-worthy event yet, since "nothing to show" is a normal,
+    valid state, not an error."""
+    from app.services.graph_store import GraphStore
+
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    invoice_id = f"invoice:{chase.get('invoice_no') or chase.get('case_key') or chase['case_id']}"
+    graph = GraphStore(db_path=store.db_path)
+    return await graph.neighborhood(invoice_id)
+
+
 @router.post("/chases/{chase_id}/pause")
 async def pause_chase_endpoint(
     chase_id: str,

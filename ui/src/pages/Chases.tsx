@@ -22,6 +22,7 @@ import {
 import { useSession } from "../context/SessionContext";
 import { ChaseEventRow } from "../components/ChaseEventRow";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
+import { MemoryGraphPanel } from "../components/MemoryGraphPanel";
 
 const STATE_STYLES: Record<string, string> = {
   pending: "bg-zinc-100 text-zinc-600",
@@ -157,6 +158,8 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           </dd>
         </div>
       </dl>
+
+      <MemoryGraphPanel chaseId={chase.id} />
 
       {error && <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-[12.5px] text-rose-600">{error}</p>}
 

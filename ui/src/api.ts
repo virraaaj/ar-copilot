@@ -492,6 +492,36 @@ export async function runChaseTick(token: string): Promise<{ processed: number }
   return request(`/chases/run-tick`, token, { method: "POST" });
 }
 
+// Temporal knowledge graph (added 2026-07-25) -- entities/relationships
+// for a chase's invoice, per graph_store.py.
+export interface GraphNode {
+  id: string;
+  type: string;
+  label: string | null;
+  attributes: Record<string, unknown> | null;
+}
+
+export interface GraphEdge {
+  id: string;
+  from_node_id: string;
+  relationship: string;
+  to_node_id: string;
+  valid_from: string;
+  valid_to: string | null;
+  observed_at: string;
+  source_event_id: string | null;
+  confidence: number;
+}
+
+export interface ChaseGraph {
+  nodes: Record<string, GraphNode>;
+  edges: GraphEdge[];
+}
+
+export async function getChaseGraph(token: string, chaseId: string): Promise<ChaseGraph> {
+  return request(`/chases/${encodeURIComponent(chaseId)}/graph`, token);
+}
+
 export async function getChase(token: string, chaseId: string): Promise<Chase> {
   return request(`/chases/${encodeURIComponent(chaseId)}`, token);
 }
