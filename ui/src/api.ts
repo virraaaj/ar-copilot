@@ -465,6 +465,33 @@ export async function getCommitmentMetric(token: string): Promise<CommitmentMetr
   return request(`/chases/commitment-metric`, token);
 }
 
+// Simulation clock (added 2026-07-25) -- lets an operator advance the
+// demo's notion of "today" instead of waiting for real days to pass.
+export interface SimClockState {
+  now: string;
+  is_simulated: boolean;
+}
+
+export async function getSimClock(token: string): Promise<SimClockState> {
+  return request(`/sim-clock`, token);
+}
+
+export async function advanceSimClock(token: string, days: number): Promise<SimClockState> {
+  return request(`/sim-clock/advance`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days }),
+  });
+}
+
+export async function resetSimClock(token: string): Promise<SimClockState> {
+  return request(`/sim-clock/reset`, token, { method: "POST" });
+}
+
+export async function runChaseTick(token: string): Promise<{ processed: number }> {
+  return request(`/chases/run-tick`, token, { method: "POST" });
+}
+
 export async function getChase(token: string, chaseId: string): Promise<Chase> {
   return request(`/chases/${encodeURIComponent(chaseId)}`, token);
 }

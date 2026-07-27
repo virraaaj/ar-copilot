@@ -36,6 +36,7 @@ from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMess
 from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
 from app.services.chase_store import ChaseStore
 from app.services.chase_trajectory import assess_chase_trajectory
+from app.services import sim_clock
 from app.services.email_sender import EmailSender
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ async def find_and_create_new_chases(backend: BackendClient, chase_store: ChaseS
         logger.warning("Could not list active cases for chase creation -- skipping this pass")
         return 0
 
-    today = date.today()
+    today = (await sim_clock.now(chase_store.db_path)).date()
     created = 0
     for case in cases:
         case_id = case.get("id")
@@ -264,7 +265,7 @@ async def _send_message(
         # chase would silently wait out the full nudge interval believing
         # the customer/PM was actually contacted. Retry soon instead of
         # trusting a message that never arrived.
-        retry_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=2)
+        retry_at = await sim_clock.now(chase_store.db_path) + timedelta(hours=2)
         await chase_store.update(chase["id"], next_action_at=retry_at.isoformat())
 
     # Mirror onto the real backend timeline (PLAN_AGENTIC_CHASE.md §4.1's
@@ -368,10 +369,11 @@ async def _process_one_due_chase(
 ) -> None:
     state = chase["state"]
     decision: Optional[Decision] = None
+    now = await sim_clock.now(chase_store.db_path)
 
     if state == "pending":
         pm_email = await _find_pm_email(backend, chase.get("project_number"))
-        decision = chase_machine.start_pm_outreach(chase, pm_email=pm_email, config=config)
+        decision = chase_machine.start_pm_outreach(chase, pm_email=pm_email, config=config, now=now)
 
     elif state in ("awaiting_pm", "awaiting_customer", "awaiting_contact"):
         # next_action_at arrived with no reply yet (a reply would already
@@ -380,7 +382,7 @@ async def _process_one_due_chase(
             chase, llm, chase_store, settings, chase.get("nudge_count") or 0, config.max_nudges
         )
         if decision is None:
-            decision = chase_machine.on_nudge_check(chase, config=config)
+            decision = chase_machine.on_nudge_check(chase, config=config, now=now)
 
     elif state == "blocked":
         # The blocker's expected resolution date (or a plain nudge interval
@@ -391,7 +393,7 @@ async def _process_one_due_chase(
             chase, llm, chase_store, settings, chase.get("postpone_count") or 0, config.max_postponements
         )
         if decision is None:
-            decision = chase_machine.on_blocker_check_in(chase, config=config)
+            decision = chase_machine.on_blocker_check_in(chase, config=config, now=now)
 
     elif state == "commitment_tracked":
         try:
@@ -405,7 +407,7 @@ async def _process_one_due_chase(
                 chase, llm, chase_store, settings, chase.get("missed_count") or 0, config.max_missed_commitments
             )
         if decision is None:
-            decision = chase_machine.on_commitment_due(chase, paid=paid, config=config)
+            decision = chase_machine.on_commitment_due(chase, paid=paid, config=config, now=now)
 
     elif state == "verifying_payment":
         try:
@@ -419,7 +421,7 @@ async def _process_one_due_chase(
                 chase, llm, chase_store, settings, chase.get("missed_count") or 0, config.max_missed_commitments
             )
         if decision is None:
-            decision = chase_machine.on_verify_payment_timeout(chase, paid=paid, config=config)
+            decision = chase_machine.on_verify_payment_timeout(chase, paid=paid, config=config, now=now)
 
     else:
         return
@@ -449,7 +451,7 @@ async def process_due_chases(
     config = _config_from_settings(settings)
     budget = _SendBudget(settings.CHASE_MAX_SENDS_PER_TICK)
 
-    due = await chase_store.list_due()
+    due = await chase_store.list_due(now=await sim_clock.now(chase_store.db_path))
     for chase in due:
         # Also check for payment out-of-band (e.g. paid early, before any
         # commitment was even tracked) -- an active chase whose case is
@@ -514,9 +516,10 @@ async def advance_chase_with_reply(
     budget = _SendBudget(settings.CHASE_MAX_SENDS_PER_TICK)
 
     recent_turns = await _recent_turns(chase_store, chase["id"])
+    sim_now = await sim_clock.now(chase_store.db_path)
     parsed = await parse_chase_reply(
         llm, reply_text,
-        {"today": date.today().isoformat(), "invoice_no": chase.get("invoice_no"), "case_key": chase.get("case_key"),
+        {"today": sim_now.date().isoformat(), "invoice_no": chase.get("invoice_no"), "case_key": chase.get("case_key"),
          "target": chase.get("target")},
         recent_turns=recent_turns,
     )
@@ -536,7 +539,8 @@ async def advance_chase_with_reply(
 
     last_question = next((t["content"] for t in reversed(recent_turns) if t["role"] == "assistant"), None)
     decision = chase_machine.on_reply(
-        chase, parsed, config=config, resolved_contact_email=resolved_contact_email, last_question=last_question
+        chase, parsed, config=config, resolved_contact_email=resolved_contact_email, last_question=last_question,
+        now=sim_now,
     )
 
     await _apply_decision(chase_store, chase, decision)

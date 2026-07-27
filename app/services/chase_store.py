@@ -107,6 +107,17 @@ class ChaseStore:
         self._db_path = db_path or s.STATE_DB_PATH
         self._initialized = False
 
+    @property
+    def db_path(self) -> str:
+        """Exposed so callers that need to reach a *consistent* piece of
+        local state alongside this store (sim_clock.py's simulated-time
+        table lives in the same SQLite file) can target the same file this
+        instance was actually constructed with, rather than assuming it
+        matches get_settings().STATE_DB_PATH -- tests construct ChaseStore
+        with an explicit temp path that deliberately does NOT match global
+        settings."""
+        return self._db_path
+
     async def _ensure_schema(self) -> None:
         if self._initialized:
             return

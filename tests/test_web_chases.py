@@ -291,3 +291,70 @@ def test_edit_commitment_rejects_past_date(client: TestClient) -> None:
     )
 
     assert resp.status_code == 422
+
+
+# ---- simulation clock (added 2026-07-25) -----------------------------------
+
+
+def test_sim_clock_endpoints_require_session(client: TestClient) -> None:
+    assert client.get("/api/sim-clock").status_code == 401
+    assert client.post("/api/sim-clock/advance", json={"days": 1}).status_code == 401
+    assert client.post("/api/sim-clock/reset").status_code == 401
+
+
+def test_sim_clock_starts_unsimulated(client: TestClient) -> None:
+    token = _login(client)
+
+    resp = client.get("/api/sim-clock", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()["is_simulated"] is False
+
+
+def test_sim_clock_advance_sets_simulated_time(client: TestClient) -> None:
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    token = _login(client)
+    before = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    resp = client.post("/api/sim-clock/advance", json={"days": 5}, headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_simulated"] is True
+    new_time = datetime.fromisoformat(body["now"])
+    assert timedelta(days=5) <= (new_time - before) <= timedelta(days=5, minutes=1)
+
+
+def test_sim_clock_advance_rejects_non_positive_days(client: TestClient) -> None:
+    token = _login(client)
+
+    resp = client.post("/api/sim-clock/advance", json={"days": 0}, headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 400
+
+
+def test_sim_clock_reset_clears_simulated_time(client: TestClient) -> None:
+    token = _login(client)
+    client.post("/api/sim-clock/advance", json={"days": 5}, headers={"Authorization": f"Bearer {token}"})
+
+    resp = client.post("/api/sim-clock/reset", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()["is_simulated"] is False
+
+
+def test_run_chase_tick_endpoint_requires_session(client: TestClient) -> None:
+    assert client.post("/api/chases/run-tick").status_code == 401
+
+
+def test_run_chase_tick_endpoint_processes_and_returns_a_count(client: TestClient) -> None:
+    token = _login(client)
+
+    with respx.mock:
+        respx.get(f"{BASE}/api/v2/dunning/cases").mock(return_value=httpx.Response(200, json={"items": []}))
+        resp = client.post("/api/chases/run-tick", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"processed": 0}

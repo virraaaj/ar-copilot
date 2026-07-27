@@ -6,6 +6,7 @@ import {
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
+import { SimulationControls } from "../components/SimulationControls";
 
 const OPEN_CHASE_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
 
@@ -216,6 +217,8 @@ export default function Dashboard() {
             ))}
         </div>
       )}
+
+      <SimulationControls onRan={() => setRefreshKey((k) => k + 1)} />
 
       {commitmentMetric && commitmentMetric.total_open > 0 && (
         <div className="mb-8 rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">

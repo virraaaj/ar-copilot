@@ -906,6 +906,62 @@ async def test_run_chase_tick_creates_and_processes_in_one_call(backend, chase_s
     await backend.close()
 
 
+# ---- simulation clock (added 2026-07-25, long-horizon outcome agent spec) --
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_not_yet_due_invoice_becomes_eligible_after_advancing_the_sim_clock(backend, chase_store):
+    """End-to-end proof the sim clock actually drives chase-creation
+    timing, not just chase_machine's internal date math: an invoice due 2
+    days from now must NOT get a chase today, but must after the demo
+    clock is advanced 3 days."""
+    from app.services import sim_clock
+
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(200, json={"items": [_case_json(due_days_ago=-2)]})
+    )
+
+    created_before = await find_and_create_new_chases(backend, chase_store)
+    assert created_before == 0
+    assert await chase_store.get_open_for_case("case-1") is None
+
+    await sim_clock.advance_days(3, chase_store.db_path)
+
+    created_after = await find_and_create_new_chases(backend, chase_store)
+    assert created_after == 1
+    assert await chase_store.get_open_for_case("case-1") is not None
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_process_due_chases_uses_the_sim_clock_not_real_time(backend, chase_store, project_store, messenger, email_sender):
+    """A chase whose next_action_at is 2 days from real-world now must not
+    be picked up by a normal tick, but must once the sim clock has been
+    advanced past it."""
+    from app.services import sim_clock
+
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    future_next_action = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=2)).isoformat()
+    chase_id = await chase_store.create("case-1", project_number="PN-1", next_action_at=future_next_action)
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    settings = make_settings(CHASE_DRY_RUN=False)
+    processed_before = await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+    assert processed_before == 0
+
+    await sim_clock.advance_days(3, chase_store.db_path)
+
+    processed_after = await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+    assert processed_after == 1
+    chase = await chase_store.get(chase_id)
+    assert chase["nudge_count"] == 1
+    await backend.close()
+
+
 # ---- AI features: composer + smart escalation + token tracking (added 2026-07-22) ---
 
 

@@ -48,8 +48,13 @@ from app.guardrails.policy import (
 )
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
+from app.channels.teams.messenger import get_messenger
+from app.channels.teams.project_conversation_store import ProjectConversationStore
+from app.services.chase_engine import run_chase_tick
 from app.services.chase_store import ChaseStore
+from app.services.email_sender import get_email_sender
 from app.services.followup_store import FollowUpError, FollowUpStore
+from app.services import sim_clock
 from app.services.uat_reset import wipe_uat_data
 
 router = APIRouter(prefix="/api")
@@ -860,3 +865,68 @@ async def wipe_uat_data_endpoint(
         local_state_cleared = True
 
     return {**result, "local_state_cleared": local_state_cleared}
+
+
+# ---------------------------------------------------------------------------
+# Simulation clock (long-horizon outcome agent spec §6.16, added 2026-07-25).
+# Lets an operator advance the demo's notion of "today" without waiting for
+# real days to pass -- every chase-engine date decision (chase_machine.py's
+# `now` parameter, chase_engine.py's due-tick/creation-eligibility checks)
+# reads this same clock via app/services/sim_clock.py. Advancing it does NOT
+# by itself process anything due -- the operator (or the normal poller tick)
+# still has to trigger a chase-engine run afterward to see the effect, same
+# as any other tick.
+# ---------------------------------------------------------------------------
+
+
+class AdvanceClockRequest(BaseModel):
+    days: int
+
+
+def _clock_state(current: Any, simulated: bool) -> Dict[str, Any]:
+    return {"now": current.isoformat(), "is_simulated": simulated}
+
+
+@router.get("/sim-clock")
+async def get_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
+    store = ChaseStore()
+    current = await sim_clock.now(store.db_path)
+    simulated = await sim_clock.is_simulated(store.db_path)
+    return _clock_state(current, simulated)
+
+
+@router.post("/sim-clock/advance")
+async def advance_sim_clock_endpoint(
+    body: AdvanceClockRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    if body.days <= 0:
+        raise HTTPException(status_code=400, detail="days must be positive.")
+    store = ChaseStore()
+    new_time = await sim_clock.advance_days(body.days, store.db_path)
+    return _clock_state(new_time, True)
+
+
+@router.post("/sim-clock/reset")
+async def reset_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
+    store = ChaseStore()
+    await sim_clock.reset_to_real_time(store.db_path)
+    current = await sim_clock.now(store.db_path)
+    return _clock_state(current, False)
+
+
+@router.post("/chases/run-tick")
+async def run_chase_tick_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Manually triggers one chase-engine pass (create-eligible-cases +
+    process-due-chases), same call the background poller makes on its own
+    schedule -- the Simulation Control Panel's "Run Agent" button. Runs
+    regardless of CHASE_ENABLED (that flag only gates the automatic
+    background loop; an explicit operator click is a distinct decision),
+    so the demo works even in an environment where the poller is off."""
+    s = get_settings()
+    processed = await run_chase_tick(
+        backend, get_messenger(), get_email_sender(), ChaseStore(), ProjectConversationStore(), s, get_llm()
+    )
+    return {"processed": processed}
