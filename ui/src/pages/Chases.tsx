@@ -76,6 +76,23 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+// Azure OpenAI gpt-5-mini pricing (added 2026-07-28) -- $0.125/1M input,
+// $1.00/1M output tokens. Estimate only: displayed for cost visibility,
+// not billed anywhere in this app; check the Azure pricing page for the
+// current live rate before budgeting off this number.
+const GPT5_MINI_INPUT_PER_TOKEN = 0.125 / 1_000_000;
+const GPT5_MINI_OUTPUT_PER_TOKEN = 1.0 / 1_000_000;
+
+function estimateCost(promptTokens: number, completionTokens: number): number {
+  return promptTokens * GPT5_MINI_INPUT_PER_TOKEN + completionTokens * GPT5_MINI_OUTPUT_PER_TOKEN;
+}
+
+function formatCost(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
 function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void }) {
   const { token } = useSession();
   const [events, setEvents] = useState<ChaseEvent[] | null>(null);
@@ -161,6 +178,25 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
             {formatTokens(chase.total_tokens_used)}
           </dd>
         </div>
+        {chase.total_tokens_used > 0 && (
+          <>
+            <div>
+              <dt className="text-zinc-400">Token split (in / out)</dt>
+              <dd
+                className="text-zinc-700 tabular-nums"
+                title={`${chase.prompt_tokens_used.toLocaleString()} prompt / ${chase.completion_tokens_used.toLocaleString()} completion tokens`}
+              >
+                {formatTokens(chase.prompt_tokens_used)} / {formatTokens(chase.completion_tokens_used)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-zinc-400">Est. cost (gpt-5-mini)</dt>
+              <dd className="text-zinc-700 tabular-nums">
+                {formatCost(estimateCost(chase.prompt_tokens_used, chase.completion_tokens_used))}
+              </dd>
+            </div>
+          </>
+        )}
       </dl>
 
       <MemoryGraphPanel chaseId={chase.id} />
