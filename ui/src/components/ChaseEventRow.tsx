@@ -103,7 +103,26 @@ function MessageBubble({ text, tone = "zinc" }: { text: string; tone?: "zinc" | 
   );
 }
 
-function EventShell({ kind, at, children }: { kind: string; at: string | null; children: React.ReactNode }) {
+function WhyExplanation({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="text-[11px] font-medium text-zinc-400 underline decoration-dotted hover:text-zinc-600"
+      >
+        {open ? "hide why" : "why?"}
+      </button>
+      {open && <p className="mt-1 text-[12px] italic leading-relaxed text-zinc-500">{text}</p>}
+    </div>
+  );
+}
+
+function EventShell({
+  kind, at, explanation, children,
+}: {
+  kind: string; at: string | null; explanation?: string | null; children: React.ReactNode;
+}) {
   const meta = metaFor(kind);
   return (
     <div className="flex gap-3">
@@ -121,6 +140,7 @@ function EventShell({ kind, at, children }: { kind: string; at: string | null; c
           <span className="text-[11px] text-zinc-400">{formatWhen(at)}</span>
         </div>
         {children}
+        {explanation && <WhyExplanation text={explanation} />}
       </div>
     </div>
   );
@@ -130,7 +150,7 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
   if (event.kind === "trajectory_assessed") {
     const verdict = String(event.detail?.verdict ?? "");
     return (
-      <EventShell kind="trajectory_assessed" at={event.at}>
+      <EventShell kind="trajectory_assessed" at={event.at} explanation={event.explanation}>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <span className="text-[12px] text-zinc-500">🧭 AI trajectory check:</span>
           <span
@@ -150,7 +170,7 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
     const followupDate = event.detail?.followup_date ? String(event.detail.followup_date) : null;
     const postponeCount = event.detail?.postpone_count;
     return (
-      <EventShell kind="checkback_scheduled" at={event.at}>
+      <EventShell kind="checkback_scheduled" at={event.at} explanation={event.explanation}>
         <p className="mt-1 text-[12px] text-zinc-600">
           {followupDate ? (
             <>
@@ -174,7 +194,7 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
     const description = event.detail?.blocker_description ? String(event.detail.blocker_description) : null;
     const resolutionDate = event.detail?.blocker_resolution_date ? String(event.detail.blocker_resolution_date) : null;
     return (
-      <EventShell kind="blocker_reported" at={event.at}>
+      <EventShell kind="blocker_reported" at={event.at} explanation={event.explanation}>
         <p className="mt-1 text-[12px] text-zinc-600">
           <span className="font-medium capitalize text-zinc-700">{blockerType}</span>
           {resolutionDate ? (
@@ -199,7 +219,7 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
   const needsReview = event.kind === "reply_received" && event.detail?.requires_human_review === true;
 
   return (
-    <EventShell kind={event.kind} at={event.at}>
+    <EventShell kind={event.kind} at={event.at} explanation={event.explanation}>
       {(who || channel || composed || sentiment || needsReview) && (
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600">
           {who && (

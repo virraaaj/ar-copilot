@@ -639,8 +639,18 @@ async def list_chase_events_endpoint(
     chase_id: str,
     _user: str = Depends(require_session),
 ) -> List[Dict[str, Any]]:
+    """Each event carries an `explanation` (spec §6.19) -- a plain-English,
+    template-generated sentence saying why the agent took that action.
+    None for event kinds that don't represent a narratable decision
+    (e.g. 'created')."""
+    from app.services.chase_explain import explain_event
+
     store = ChaseStore()
-    return await store.list_events(chase_id)
+    chase = await store.get(chase_id)
+    events = await store.list_events(chase_id)
+    for e in events:
+        e["explanation"] = explain_event(chase, e) if chase else None
+    return events
 
 
 @router.get("/chases/{chase_id}/graph")

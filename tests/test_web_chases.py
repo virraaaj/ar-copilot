@@ -424,3 +424,24 @@ def test_outcome_definition_returns_spec_shape(client: TestClient) -> None:
     assert body["use_case"] == "collections"
     assert "payment_date" in body["acceptable_commitments"]
     assert "closed_paid" in body["terminal_states"]
+
+
+# ---- audit explainability (added 2026-07-28, spec §6.19) -------------------
+
+
+def test_chase_events_include_explanations(client: TestClient) -> None:
+    import asyncio
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.update(chase_id, state="escalated", target="pm"))
+    asyncio.run(store.add_event(chase_id, "escalated", {"reason": "dispute"}))
+
+    resp = client.get(f"/api/chases/{chase_id}/events", headers={"Authorization": f"Bearer {token}"})
+
+    events = resp.json()
+    created = [e for e in events if e["kind"] == "created"][0]
+    escalated = [e for e in events if e["kind"] == "escalated"][0]
+    assert created["explanation"] is None
+    assert "dispute" in escalated["explanation"].lower()

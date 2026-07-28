@@ -439,6 +439,9 @@ export interface ChaseEvent {
   at: string;
   kind: string;
   detail: Record<string, unknown> | null;
+  // Plain-English "why" narrative (spec §6.19), computed server-side.
+  // null for event kinds that aren't a narratable decision (e.g. "created").
+  explanation?: string | null;
 }
 
 export async function listChases(token: string, state?: string, caseId?: string): Promise<Chase[]> {
