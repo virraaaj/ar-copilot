@@ -576,6 +576,60 @@ export async function simulateChasePayment(token: string, chaseId: string): Prom
   return request(`/chases/${encodeURIComponent(chaseId)}/simulate-payment`, token, { method: "POST" });
 }
 
+// Policy/Configuration Viewer + Outbox screen (spec §6.18, added 2026-07-28).
+export interface PolicyConfig {
+  contact_frequency: { nudge_interval_days: number; max_nudges: number; min_hours_between_touches: number };
+  escalation_rules: {
+    max_missed_commitments: number;
+    max_commitment_days: number;
+    grace_days: number;
+    payment_verify_days: number;
+    max_clarifications: number;
+    max_postponements: number;
+    high_dollar_approval_threshold: number;
+    blackout_dates: string[];
+  };
+  allowed_actions: string[];
+  channel_configuration: {
+    chase_enabled: boolean;
+    dry_run: boolean;
+    mail_poll_enabled: boolean;
+    composer_enabled: boolean;
+    smart_escalation_enabled: boolean;
+    to_address_allowlist: string[];
+    max_sends_per_tick: number;
+  };
+}
+
+export async function getPolicyConfig(token: string): Promise<PolicyConfig> {
+  return request(`/policy-config`, token);
+}
+
+export interface OutboxEntry {
+  id: string;
+  chase_id: string;
+  at: string;
+  invoice_no: string | null;
+  case_key: string | null;
+  case_id: string;
+  project_number: string | null;
+  target: string | null;
+  recipient: string | null;
+  subject: string | null;
+  body: string | null;
+  channel: string | null;
+  composed: boolean;
+  requires_human_review: boolean;
+  evaluation_failures: string[];
+  policy_blocked: boolean;
+  policy_reason: string | null;
+  dry_run: boolean;
+}
+
+export async function getOutbox(token: string): Promise<OutboxEntry[]> {
+  return request(`/outbox`, token);
+}
+
 export async function editChaseCommitment(token: string, chaseId: string, promisedDate: string): Promise<void> {
   await request(`/chases/${encodeURIComponent(chaseId)}/commitment`, token, {
     method: "PATCH",

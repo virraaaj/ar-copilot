@@ -390,6 +390,32 @@ class ChaseStore:
             out.append(d)
         return out
 
+    async def list_events_by_kind(self, kinds: List[str], limit: int = 200) -> List[Dict[str, Any]]:
+        """Backs the Outbox screen (spec §6.18) -- every generated message
+        across every chase (outreach_sent/dry_run_send), newest first, with
+        enough chase context (recipient addresses, invoice/project) joined
+        in so the screen doesn't have to N+1 fetch each chase separately."""
+        await self._ensure_schema()
+        placeholders = ",".join("?" for _ in kinds)
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""SELECT e.id, e.chase_id, e.kind, e.detail, e.at,
+                           c.invoice_no, c.case_key, c.case_id, c.project_number,
+                           c.pm_email, c.customer_email
+                    FROM chase_events e JOIN chases c ON c.id = e.chase_id
+                    WHERE e.kind IN ({placeholders})
+                    ORDER BY e.at DESC LIMIT ?""",
+                (*kinds, limit),
+            )
+            rows = await cursor.fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["detail"] = json.loads(d["detail"]) if d["detail"] else None
+            out.append(d)
+        return out
+
     # ---- inbound mail dedupe (Phase C3) ------------------------------
 
     async def is_mail_processed(self, message_id: str) -> bool:

@@ -431,6 +431,64 @@ def test_inject_reply_endpoint_parses_and_advances_the_chase(client: TestClient,
     assert body["chase"]["state"] == "commitment_tracked"
 
 
+# ---- policy config viewer + outbox (added 2026-07-28, spec §6.18) ----------
+
+
+def test_policy_config_requires_session(client: TestClient) -> None:
+    assert client.get("/api/policy-config").status_code == 401
+
+
+def test_policy_config_reflects_real_settings(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("CHASE_MAX_NUDGES", "5")
+    import app.config as config_module
+    monkeypatch.setattr(config_module, "_settings", config_module.Settings())
+
+    token = _login(client)
+    resp = client.get("/api/policy-config", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["contact_frequency"]["max_nudges"] == 5
+    assert "high_dollar_approval_threshold" in body["escalation_rules"]
+    assert "outreach" in body["allowed_actions"]
+    assert "chase_enabled" in body["channel_configuration"]
+
+
+def test_outbox_requires_session(client: TestClient) -> None:
+    assert client.get("/api/outbox").status_code == 401
+
+
+def test_outbox_empty_when_no_messages_sent(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.get("/api/outbox", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_outbox_reflects_sent_messages_with_recipient_resolved(client: TestClient) -> None:
+    import asyncio
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.update(chase_id, pm_email="pm@example.com"))
+    asyncio.run(store.add_event(chase_id, "outreach_sent", {
+        "target": "pm", "kind": "outreach", "text": "Invoice INV-1 is overdue.",
+        "channel": "email", "error": None, "composed": False,
+        "requires_human_review": False, "evaluation_failures": [], "subject": "[TOK] Re: invoice INV-1",
+    }))
+
+    resp = client.get("/api/outbox", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["recipient"] == "pm@example.com"
+    assert body[0]["subject"] == "[TOK] Re: invoice INV-1"
+    assert body[0]["channel"] == "email"
+    assert body[0]["dry_run"] is False
+
+
 # ---- temporal knowledge graph (added 2026-07-25) ---------------------------
 
 

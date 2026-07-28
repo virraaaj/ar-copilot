@@ -958,6 +958,86 @@ async def get_outcome_definition_endpoint(_user: str = Depends(require_session))
     return OutcomeDefinition.from_chase_config(config).to_dict()
 
 
+@router.get("/policy-config")
+async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
+    """Policy/Configuration Viewer (spec §6.18) -- a read-only view of the
+    real, already-enforced rules (ChaseConfig, guardrails.py, config.py's
+    channel flags), not a second copy: every value here is read straight
+    from the same objects chase_engine.py/chase_machine.py actually use,
+    so this can never drift from what the agent is really doing."""
+    from app.services.chase_engine import _config_from_settings
+    from app.services.chase_guardrails import BLACKOUT_DATES, HIGH_DOLLAR_THRESHOLD
+
+    s = get_settings()
+    config = _config_from_settings(s)
+    return {
+        "contact_frequency": {
+            "nudge_interval_days": config.nudge_interval_days,
+            "max_nudges": config.max_nudges,
+            "min_hours_between_touches": s.CHASE_MIN_HOURS_BETWEEN_TOUCHES,
+        },
+        "escalation_rules": {
+            "max_missed_commitments": config.max_missed_commitments,
+            "max_commitment_days": config.max_commitment_days,
+            "grace_days": config.grace_days,
+            "payment_verify_days": config.payment_verify_days,
+            "max_clarifications": config.max_clarifications,
+            "max_postponements": config.max_postponements,
+            "high_dollar_approval_threshold": HIGH_DOLLAR_THRESHOLD,
+            "blackout_dates": sorted(str(d) for d in BLACKOUT_DATES),
+        },
+        "allowed_actions": [
+            "outreach", "nudge", "confirm", "clarify", "rechase", "verify_check",
+            "ask_for_customer_email", "checkback_ack", "blocker_ack", "blocker_check_in",
+        ],
+        "channel_configuration": {
+            "chase_enabled": s.CHASE_ENABLED,
+            "dry_run": s.CHASE_DRY_RUN,
+            "mail_poll_enabled": s.CHASE_MAIL_POLL_ENABLED,
+            "composer_enabled": s.CHASE_COMPOSER_ENABLED,
+            "smart_escalation_enabled": s.CHASE_SMART_ESCALATION_ENABLED,
+            "to_address_allowlist": s.chase_to_address_allowlist,
+            "max_sends_per_tick": s.CHASE_MAX_SENDS_PER_TICK,
+        },
+    }
+
+
+@router.get("/outbox")
+async def get_outbox_endpoint(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
+    """Outbox screen (spec §6.18) -- every message the agent has generated
+    (sent for real, or previewed under CHASE_DRY_RUN), newest first, with
+    policy/evaluation status surfaced per row so an operator can audit
+    what went out without opening each chase individually."""
+    store = ChaseStore()
+    events = await store.list_events_by_kind(["outreach_sent", "dry_run_send"])
+    out = []
+    for e in events:
+        d = e.get("detail") or {}
+        target = d.get("target")
+        recipient = e.get("pm_email") if target == "pm" else e.get("customer_email") if target == "customer" else None
+        out.append({
+            "id": e["id"],
+            "chase_id": e["chase_id"],
+            "at": e["at"],
+            "invoice_no": e.get("invoice_no"),
+            "case_key": e.get("case_key"),
+            "case_id": e.get("case_id"),
+            "project_number": e.get("project_number"),
+            "target": target,
+            "recipient": recipient,
+            "subject": d.get("subject"),
+            "body": d.get("text"),
+            "channel": d.get("channel") or d.get("would_use_channel"),
+            "composed": d.get("composed", False),
+            "requires_human_review": d.get("requires_human_review", False),
+            "evaluation_failures": d.get("evaluation_failures", []),
+            "policy_blocked": d.get("channel") == "blocked",
+            "policy_reason": d.get("error"),
+            "dry_run": e["kind"] == "dry_run_send",
+        })
+    return out
+
+
 @router.post("/chases/run-tick")
 async def run_chase_tick_endpoint(
     _user: str = Depends(require_session),

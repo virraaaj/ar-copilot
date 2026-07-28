@@ -11,6 +11,7 @@ import MagicLink from "./pages/MagicLink";
 import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 import Settings from "./pages/Settings";
 import Chases from "./pages/Chases";
+import Outbox from "./pages/Outbox";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -73,6 +74,14 @@ export default function App() {
         element={
           <RequireSession>
             <Chases />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/outbox"
+        element={
+          <RequireSession>
+            <Outbox />
           </RequireSession>
         }
       />

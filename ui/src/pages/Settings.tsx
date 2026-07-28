@@ -6,12 +6,14 @@
 import { useState } from "react";
 import ProjectContacts from "./ProjectContacts";
 import DefaultProjectContacts from "./DefaultProjectContacts";
+import PolicyConfig from "./PolicyConfig";
 
-type Tab = "contacts" | "defaults";
+type Tab = "contacts" | "defaults" | "policy";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "contacts", label: "Project Contacts" },
   { id: "defaults", label: "Default Contacts" },
+  { id: "policy", label: "Agent Policy" },
 ];
 
 export default function Settings() {
@@ -39,6 +41,7 @@ export default function Settings() {
 
       {tab === "contacts" && <ProjectContacts />}
       {tab === "defaults" && <DefaultProjectContacts />}
+      {tab === "policy" && <PolicyConfig />}
     </div>
   );
 }

@@ -247,6 +247,10 @@ async def _send_message(
 
     channel = "none"
     error: Optional[str] = None
+    # Computed up-front (not just inside the email branch) so the Outbox
+    # screen (spec §6.18) has a subject line to show regardless of which
+    # channel the message actually went out on.
+    subject = f"[{chase['subject_token']}] Re: invoice {chase.get('invoice_no') or chase.get('case_key')}"
 
     # Prefer Teams for the PM if this project has a known group chat --
     # replies then arrive through the already-working /api/messages edge.
@@ -262,7 +266,8 @@ async def _send_message(
             chase["id"], "dry_run_send",
             {"target": action.target, "kind": action.kind, "text": text, "composed": composed,
              "would_use_channel": "teams" if conversation_id else "email",
-             "requires_human_review": requires_human_review, "evaluation_failures": evaluation_failures},
+             "requires_human_review": requires_human_review, "evaluation_failures": evaluation_failures,
+             "subject": subject},
         )
         return
 
@@ -284,7 +289,6 @@ async def _send_message(
             channel = "email_failed"
             error = f"{to_email} is not on CHASE_TO_ADDRESS_ALLOWLIST"
         else:
-            subject = f"[{chase['subject_token']}] Re: invoice {chase.get('invoice_no') or chase.get('case_key')}"
             body = f"<p>{text}</p>"
             try:
                 result = await email_sender.send(to_email, subject, body, [])
@@ -307,7 +311,7 @@ async def _send_message(
         chase["id"], "outreach_sent",
         {"target": action.target, "kind": action.kind, "text": text, "channel": channel, "error": error,
          "composed": composed, "requires_human_review": requires_human_review,
-         "evaluation_failures": evaluation_failures},
+         "evaluation_failures": evaluation_failures, "subject": subject},
     )
 
     if channel not in ("teams", "email"):

@@ -32,6 +32,9 @@ export default function NavBar() {
             <NavLink to="/chases" className={linkClass}>
               Chases
             </NavLink>
+            <NavLink to="/outbox" className={linkClass}>
+              Outbox
+            </NavLink>
             <NavLink to="/settings" className={linkClass}>
               Settings
             </NavLink>
