@@ -405,3 +405,22 @@ def test_chase_graph_reflects_written_facts(client: TestClient) -> None:
     assert set(body["nodes"].keys()) == {"project:PN-1", "invoice:INV-1"}
     assert len(body["edges"]) == 1
     assert body["edges"][0]["relationship"] == "CUSTOMER_HAS_INVOICE"
+
+
+# ---- outcome definition (added 2026-07-28, spec §6.1) ----------------------
+
+
+def test_outcome_definition_requires_session(client: TestClient) -> None:
+    assert client.get("/api/outcome-definition").status_code == 401
+
+
+def test_outcome_definition_returns_spec_shape(client: TestClient) -> None:
+    token = _login(client)
+
+    resp = client.get("/api/outcome-definition", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["use_case"] == "collections"
+    assert "payment_date" in body["acceptable_commitments"]
+    assert "closed_paid" in body["terminal_states"]

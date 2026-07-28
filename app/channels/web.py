@@ -936,6 +936,18 @@ async def reset_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dic
     return _clock_state(current, False)
 
 
+@router.get("/outcome-definition")
+async def get_outcome_definition_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
+    """The spec's OutcomeDefinition (§6.1) -- what the agent is trying to
+    accomplish and what counts as progress, derived from the real,
+    already-enforced ChaseConfig rather than a second driftable copy."""
+    from app.services.chase_engine import _config_from_settings
+    from app.services.outcome_definition import OutcomeDefinition
+
+    config = _config_from_settings(get_settings())
+    return OutcomeDefinition.from_chase_config(config).to_dict()
+
+
 @router.post("/chases/run-tick")
 async def run_chase_tick_endpoint(
     _user: str = Depends(require_session),

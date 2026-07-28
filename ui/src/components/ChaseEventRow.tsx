@@ -63,6 +63,8 @@ const KIND_META: Record<string, KindMeta> = {
   escalated: { icon: "⚠️", color: "bg-rose-50 text-rose-700", ring: "ring-rose-200", label: "Escalated" },
   closed: { icon: "✅", color: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-200", label: "Closed" },
   human_action: { icon: "🖐️", color: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-200", label: "Human action" },
+  out_of_office_detected: { icon: "🌴", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "Out of office" },
+  suppressed: { icon: "🔕", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "Unsubscribed" },
 };
 
 const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "" };
@@ -192,10 +194,12 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
   const who = isOutreach ? targetLabel(chase, event.detail?.target) : null;
   const channel = isOutreach ? CHANNEL_LABELS[String(event.detail?.channel ?? "")] : null;
   const bodyText = event.detail?.text ? String(event.detail.text) : event.detail?.reason ? String(event.detail.reason) : null;
+  const sentiment = event.kind === "reply_received" ? (event.detail?.sentiment as string | undefined) : undefined;
+  const needsReview = event.kind === "reply_received" && event.detail?.requires_human_review === true;
 
   return (
     <EventShell kind={event.kind} at={event.at}>
-      {(who || channel || composed) && (
+      {(who || channel || composed || sentiment || needsReview) && (
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600">
           {who && (
             <span className="font-medium text-zinc-700">
@@ -206,6 +210,16 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
           {composed && (
             <span className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
               ✨ AI-composed
+            </span>
+          )}
+          {sentiment && (sentiment === "angry" || sentiment === "frustrated") && (
+            <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-700">
+              {sentiment}
+            </span>
+          )}
+          {needsReview && (
+            <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
+              ⚑ needs review
             </span>
           )}
         </div>

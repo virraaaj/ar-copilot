@@ -65,6 +65,8 @@ VALID_INTENTS = (
     "blocker_reported",
     "checkback_requested",
     "out_of_scope_request",
+    "out_of_office",
+    "unsubscribe",
     "no_commitment",
     "unclear",
 )
@@ -131,6 +133,14 @@ _TOOL_SCHEMA: Dict[str, Any] = {
                         "other internal/third-party information ('are other customers late too?', 'what's your "
                         "total outstanding?'). Not a commitment, redirect, dispute, or check-back -- it's a "
                         "boundary question that needs to be declined and the conversation steered back. "
+                        "out_of_office: an automated out-of-office/vacation autoresponder, not a real reply from "
+                        "the person -- 'I am out of the office until...', 'currently on leave'. Set return_date "
+                        "if a return date was given. This is not the person answering, so it should never be "
+                        "treated as evasion or count against them. "
+                        "unsubscribe: explicitly asks to stop receiving these emails / opts out -- 'please "
+                        "remove me from this list', 'unsubscribe', 'stop emailing me'. Must be an explicit "
+                        "opt-out request, not just a redirect to someone else (that's handoff_to_customer/"
+                        "handoff_to_contact) or a complaint about frequency. "
                         "no_commitment: acknowledges but gives no date, no redirect, and no check-back timing at "
                         "all -- just a bare acknowledgment ('ok', 'noted'). "
                         "unclear: doesn't meaningfully address the question."
@@ -195,8 +205,34 @@ _TOOL_SCHEMA: Dict[str, Any] = {
                         "low for anything requiring interpretation or guessing."
                     ),
                 },
+                "return_date": {
+                    "type": "string",
+                    "description": (
+                        "Only for intent=out_of_office, and only if a return date was actually given "
+                        "('back Monday', 'returning August 3rd'). An absolute ISO date (YYYY-MM-DD) resolved "
+                        "against today's date. Omit if no return date was given."
+                    ),
+                },
+                "sentiment": {
+                    "type": "string",
+                    "enum": ["cooperative", "neutral", "frustrated", "angry"],
+                    "description": (
+                        "Always set, regardless of intent. The person's tone in THIS reply -- cooperative "
+                        "(helpful, engaged), neutral (matter-of-fact, no particular tone), frustrated (annoyed "
+                        "but not hostile), or angry (hostile, accusatory, or threatening back)."
+                    ),
+                },
+                "requires_human_review": {
+                    "type": "boolean",
+                    "description": (
+                        "Always set. True if a human should look at this reply regardless of what automated "
+                        "action gets taken -- e.g. angry/hostile tone, legal threats, or anything that reads as "
+                        "a serious relationship risk. This is independent of confidence -- a high-confidence "
+                        "reply can still warrant human eyes if the tone is bad."
+                    ),
+                },
             },
-            "required": ["intent", "confidence"],
+            "required": ["intent", "confidence", "sentiment", "requires_human_review"],
         },
     },
 }
@@ -213,6 +249,9 @@ class ParsedReply:
     blocker_resolution_date: Optional[str] = None
     customer_contact_email: Optional[str] = None
     contact_role: Optional[str] = None  # only for intent=handoff_to_contact, added 2026-07-23
+    return_date: Optional[str] = None  # only for intent=out_of_office, added 2026-07-28
+    sentiment: Optional[str] = None  # always set (spec §6.12), added 2026-07-28
+    requires_human_review: bool = False  # always set (spec §6.12), added 2026-07-28
     raw_text: str = ""
     tokens_used: int = 0  # added 2026-07-22, for the Chases UI's per-invoice token total
 
@@ -231,7 +270,9 @@ def _build_messages(
         "You interpret replies to automated accounts-receivable follow-up messages. "
         f"Today's date is {today}. The reply below is from {target} about {invoice_ref}, which is overdue. "
         "Call record_reply_interpretation exactly once with your interpretation. "
-        "Check in this order: (1) does it redirect to someone else -- the customer, or an internal role like "
+        "Check in this order: (0) is this an automated out-of-office autoresponder, not a real reply from the "
+        "person (out_of_office)? Or an explicit request to stop emailing them (unsubscribe)? Either of these "
+        "overrides everything below -- check them first. (1) does it redirect to someone else -- the customer, or an internal role like "
         "BU Finance/legal/GM (handoff_to_customer / handoff_to_contact, even if no date is given -- a redirect "
         "IS the answer, not a non-answer)? (2) does it claim the invoice is already paid (claims_paid)? "
         "(3) does it firmly refuse to pay or contest the invoice (dispute -- only for a genuine, confident "
@@ -258,7 +299,8 @@ def _build_messages(
         "questions and their earlier replies) -- use them to resolve a back-reference like 'the email I gave "
         "you earlier' or 'like I said'. Only extract customer_contact_email/contact_role from what the person "
         "actually said (in this turn or an earlier one) -- never from an address that only appears because it "
-        "was quoted back from their own prior message."
+        "was quoted back from their own prior message. "
+        "Always set sentiment and requires_human_review, regardless of which intent you picked."
     )
     messages = [{"role": "system", "content": system}]
     messages.extend(recent_turns or [])
@@ -373,6 +415,16 @@ async def parse_chase_reply(
             except (ValueError, TypeError):
                 blocker_resolution_date = None
 
+    return_date = args.get("return_date")
+    if intent == "out_of_office" and return_date:
+        try:
+            date.fromisoformat(return_date)
+        except (ValueError, TypeError):
+            return_date = None
+
+    sentiment = args.get("sentiment") if args.get("sentiment") in ("cooperative", "neutral", "frustrated", "angry") else None
+    requires_human_review = bool(args.get("requires_human_review", False))
+
     return ParsedReply(
         intent=intent,
         confidence=confidence,
@@ -383,6 +435,9 @@ async def parse_chase_reply(
         blocker_resolution_date=blocker_resolution_date if intent == "blocker_reported" else None,
         customer_contact_email=customer_email,
         contact_role=contact_role if intent == "handoff_to_contact" else None,
+        return_date=return_date if intent == "out_of_office" else None,
+        sentiment=sentiment,
+        requires_human_review=requires_human_review,
         raw_text=reply_text,
         tokens_used=tokens,
     )

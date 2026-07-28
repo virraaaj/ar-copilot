@@ -244,6 +244,53 @@ def test_missed_commitment_rechase_to_a_contact_role_uses_generic_awaiting_state
     assert decision.actions[0].target == "bu_finance"
 
 
+# ---- on_reply: unsubscribe / out_of_office (added 2026-07-28, spec §6.12) -
+
+
+def test_reply_unsubscribe_pauses_and_sends_nothing():
+    chase = base_chase(state="awaiting_customer", target="customer")
+    parsed = ParsedReply(intent="unsubscribe", confidence="high")
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.updates["state"] == "paused"
+    assert decision.updates["next_action_at"] is None
+    assert decision.actions == []  # never send anything, not even a confirmation
+
+
+def test_reply_out_of_office_with_return_date_reschedules_without_penalty():
+    chase = base_chase(state="awaiting_pm", target="pm", nudge_count=1, clarify_count=0, postpone_count=0)
+    parsed = ParsedReply(intent="out_of_office", confidence="high", return_date=future_date(5))
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.actions == []  # no point emailing an autoresponder back
+    assert decision.updates["next_action_at"].startswith(future_date(6))  # return date + 1 day
+    # None of the failure/stall budgets are touched -- this isn't evasion.
+    assert "nudge_count" not in decision.updates
+    assert "clarify_count" not in decision.updates
+    assert "postpone_count" not in decision.updates
+
+
+def test_reply_out_of_office_with_no_return_date_falls_back_to_normal_interval():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="out_of_office", confidence="high", return_date=None)
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert decision.actions == []
+    assert decision.updates["next_action_at"] is not None
+
+
+def test_reply_out_of_office_with_past_return_date_falls_back_to_normal_interval():
+    chase = base_chase(state="awaiting_pm", target="pm")
+    parsed = ParsedReply(intent="out_of_office", confidence="high", return_date=past_date(2))
+
+    decision = on_reply(chase, parsed, config=CONFIG)
+
+    assert not decision.updates["next_action_at"].startswith(past_date(2))
+
+
 # ---- on_reply: claims_paid / dispute -------------------------------------
 
 

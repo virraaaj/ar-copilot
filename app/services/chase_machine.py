@@ -186,6 +186,21 @@ def on_reply(
     target = chase["target"]
     invoice_ref = chase.get("invoice_no") or chase.get("case_key")
 
+    if parsed.intent == "unsubscribe" and parsed.confidence == "high":
+        # Stop everything, permanently, no further message -- not even a
+        # confirmation email (spec §6.15's "do not email opted-out
+        # contacts" applies from this moment on). 'paused' is never
+        # touched by process_due_chases/the mail poller's eligibility
+        # checks, so this is a real, durable stop, not just a delay.
+        return Decision(
+            updates={"state": "paused", "next_action_at": None},
+            actions=[],
+            events=[("suppressed", {"reason": "unsubscribe", "target": target})],
+        )
+
+    if parsed.intent == "out_of_office" and parsed.confidence == "high":
+        return _on_out_of_office(chase, parsed, config, now=now)
+
     if parsed.intent == "dispute" and parsed.confidence == "high":
         return Decision(
             updates={"state": "escalated", "next_action_at": None},
@@ -326,6 +341,31 @@ def on_reply(
     # no_commitment / unclear / low confidence on anything else
     return _clarify_or_escalate(
         chase, config, reason=f"reply did not resolve to a clear commitment (intent={parsed.intent})", now=now
+    )
+
+
+def _on_out_of_office(
+    chase: Dict[str, Any], parsed: ParsedReply, config: ChaseConfig, now: Optional[datetime] = None
+) -> Decision:
+    """An autoresponder, not the person actually answering -- reschedule
+    around their return date if one was given, and critically do NOT
+    touch nudge_count/clarify_count/postpone_count or send any message.
+    Emailing back into an autoresponder wastes a touch and this isn't
+    evasion, so it must never count against any budget (spec §6.12: 'not
+    the person answering, should never count as evasion')."""
+    if parsed.return_date:
+        return_dt = datetime.fromisoformat(parsed.return_date)
+        if return_dt.date() < _now(now).date():
+            next_action_at = _iso(_now(now) + timedelta(days=config.nudge_interval_days))
+        else:
+            next_action_at = _iso(return_dt + timedelta(days=1))
+    else:
+        next_action_at = _iso(_now(now) + timedelta(days=config.nudge_interval_days))
+
+    return Decision(
+        updates={"next_action_at": next_action_at},
+        actions=[],
+        events=[("out_of_office_detected", {"target": chase["target"], "return_date": parsed.return_date})],
     )
 
 

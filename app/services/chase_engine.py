@@ -596,7 +596,14 @@ async def advance_chase_with_reply(
     )
     await chase_store.increment_tokens(chase["id"], parsed.tokens_used)
 
-    await chase_store.add_event(chase["id"], "reply_received", {"target": chase.get("target"), "text": reply_text})
+    await chase_store.add_event(chase["id"], "reply_received", {
+        "target": chase.get("target"), "text": reply_text,
+        # Surfaced regardless of intent (spec §6.12) -- an angry/hostile
+        # reply that doesn't happen to trigger a dispute/escalation branch
+        # would otherwise be invisible in the timeline even though a human
+        # should probably still glance at it.
+        "sentiment": parsed.sentiment, "requires_human_review": parsed.requires_human_review,
+    })
 
     resolved_contact_email = None
     if parsed.intent == "handoff_to_contact" and parsed.contact_role and chase.get("project_number"):
