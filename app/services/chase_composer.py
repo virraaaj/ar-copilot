@@ -34,6 +34,8 @@ import re
 from datetime import date
 from typing import Any, Dict, Optional, Tuple
 
+from app.services.chase_evaluator import EvaluationResult, evaluate_message
+
 logger = logging.getLogger(__name__)
 
 _MAX_COMPOSED_LENGTH = 700  # generous for a ~60-word message; guards against a malformed/runaway completion
@@ -134,3 +136,46 @@ async def compose_message(llm: Any, kind: str, chase: Dict[str, Any], template_t
         return template_text, tokens
 
     return composed, tokens
+
+
+async def compose_and_evaluate(
+    llm: Any, kind: str, chase: Dict[str, Any], template_text: str
+) -> Tuple[str, int, Optional[EvaluationResult], bool]:
+    """compose_message() + chase_evaluator.evaluate_message(), with the
+    spec's §6.14 policy: "if evaluation fails, regenerate once. If it
+    still fails, require human review." Returns (final_text,
+    total_tokens, evaluation, requires_human_review).
+
+    final_text is always safe to send -- it falls back to template_text
+    (never evaluated; the template is trusted by construction) if both
+    the first attempt and the regeneration fail evaluation. The caller
+    still gets `requires_human_review=True` in that case so the send
+    isn't silently swept under the rug -- the message that actually goes
+    out is safe, but a human should know the AI composer struggled here."""
+    composed_text, tokens = await compose_message(llm, kind, chase, template_text)
+    total_tokens = tokens
+    if composed_text == template_text:
+        # compose_message already fell back internally (LLM error, empty
+        # output, unexplained date, ...) -- nothing AI-generated to
+        # evaluate, and the template itself is trusted by construction.
+        return composed_text, total_tokens, None, False
+
+    evaluation = evaluate_message(composed_text, chase)
+    if evaluation.passed:
+        return composed_text, total_tokens, evaluation, False
+
+    logger.info("chase_composer: composed message failed evaluation (%s), regenerating once", evaluation.failures)
+    retry_text, retry_tokens = await compose_message(llm, kind, chase, template_text)
+    total_tokens += retry_tokens
+    if retry_text == template_text:
+        return retry_text, total_tokens, None, False
+
+    retry_evaluation = evaluate_message(retry_text, chase)
+    if retry_evaluation.passed:
+        return retry_text, total_tokens, retry_evaluation, False
+
+    logger.warning(
+        "chase_composer: composed message failed evaluation again after regenerating (%s) -- "
+        "falling back to template and flagging for human review", retry_evaluation.failures,
+    )
+    return template_text, total_tokens, retry_evaluation, True

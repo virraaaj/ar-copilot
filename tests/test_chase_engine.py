@@ -1198,12 +1198,14 @@ async def test_composer_rewrites_outreach_and_charges_tokens_when_enabled(
     respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
     chase_id = await chase_store.create("case-1", project_number="PN-1", invoice_no="INV-1", next_action_at=past_iso())
 
-    llm = QueueLLM([(SimpleNamespace(content="Hey! Just checking in on this one -- any update?"), 73)])
+    # Must mention the invoice number to pass chase_evaluator's checklist
+    # (added 2026-07-28) -- "Hey! Just checking in" alone doesn't.
+    llm = QueueLLM([(SimpleNamespace(content="Hey! Just checking in on invoice INV-1 -- any update?"), 73)])
     settings = make_settings(CHASE_DRY_RUN=False, CHASE_COMPOSER_ENABLED=True)
 
     await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings, llm)
 
-    assert email_sender.sent[0].html_body == "<p>Hey! Just checking in on this one -- any update?</p>"
+    assert email_sender.sent[0].html_body == "<p>Hey! Just checking in on invoice INV-1 -- any update?</p>"
     chase = await chase_store.get(chase_id)
     assert chase["total_tokens_used"] == 73
     events = await chase_store.list_events(chase_id)

@@ -31,7 +31,7 @@ from app.channels.teams.messenger import TeamsMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services import chase_machine
 from app.services.backend_client import BackendClient
-from app.services.chase_composer import compose_message
+from app.services.chase_composer import compose_and_evaluate
 from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMessage
 from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
 from app.services.chase_guardrails import check_blackout_date, check_high_dollar_threshold, check_message_language
@@ -192,11 +192,17 @@ async def _send_message(
     # AI-composed text too, not just the deterministic template).
     text = action.text
     composed = False
+    requires_human_review = False
+    evaluation_failures: List[str] = []
     if getattr(settings, "CHASE_COMPOSER_ENABLED", False) and llm is not None:
-        composed_text, tokens = await compose_message(llm, action.kind, chase, action.text)
+        composed_text, tokens, evaluation, requires_human_review = await compose_and_evaluate(
+            llm, action.kind, chase, action.text
+        )
         await chase_store.increment_tokens(chase["id"], tokens)
         if composed_text != action.text:
             composed = True
+        if evaluation is not None:
+            evaluation_failures = evaluation.failures
         text = composed_text
 
     # ---- Policy and Guardrail Engine (spec §6.15) -----------------------
@@ -255,7 +261,8 @@ async def _send_message(
         await chase_store.add_event(
             chase["id"], "dry_run_send",
             {"target": action.target, "kind": action.kind, "text": text, "composed": composed,
-             "would_use_channel": "teams" if conversation_id else "email"},
+             "would_use_channel": "teams" if conversation_id else "email",
+             "requires_human_review": requires_human_review, "evaluation_failures": evaluation_failures},
         )
         return
 
@@ -298,7 +305,9 @@ async def _send_message(
 
     await chase_store.add_event(
         chase["id"], "outreach_sent",
-        {"target": action.target, "kind": action.kind, "text": text, "channel": channel, "error": error, "composed": composed},
+        {"target": action.target, "kind": action.kind, "text": text, "channel": channel, "error": error,
+         "composed": composed, "requires_human_review": requires_human_review,
+         "evaluation_failures": evaluation_failures},
     )
 
     if channel not in ("teams", "email"):

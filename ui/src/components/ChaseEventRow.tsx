@@ -216,7 +216,8 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
   const channel = isOutreach ? CHANNEL_LABELS[String(event.detail?.channel ?? "")] : null;
   const bodyText = event.detail?.text ? String(event.detail.text) : event.detail?.reason ? String(event.detail.reason) : null;
   const sentiment = event.kind === "reply_received" ? (event.detail?.sentiment as string | undefined) : undefined;
-  const needsReview = event.kind === "reply_received" && event.detail?.requires_human_review === true;
+  const needsReview =
+    (event.kind === "reply_received" || isOutreach) && event.detail?.requires_human_review === true;
 
   return (
     <EventShell kind={event.kind} at={event.at} explanation={event.explanation}>

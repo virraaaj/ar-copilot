@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.chase_composer import compose_message
+from app.services.chase_composer import compose_and_evaluate, compose_message
 
 
 class ScriptedLLM:
@@ -123,3 +123,69 @@ async def test_handles_llm_that_ignores_return_usage_and_returns_bare_message():
 
     assert text == "a bare message with no usage tuple"
     assert tokens == 0
+
+
+# ---- compose_and_evaluate (added 2026-07-28, spec §6.14) -------------------
+
+
+class QueueLLM:
+    """Returns pre-scripted (content, tokens) responses in call order."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    async def chat(self, messages, tools=None, tool_choice="auto", return_usage=False):
+        self.calls.append(messages)
+        content, tokens = self._responses.pop(0)
+        return SimpleNamespace(content=content), tokens
+
+
+@pytest.mark.asyncio
+async def test_compose_and_evaluate_passes_a_good_message_on_first_try():
+    llm = QueueLLM([("Hi -- checking in on invoice INV-1, any update on payment?", 50)])
+
+    text, tokens, evaluation, needs_review = await compose_and_evaluate(
+        llm, "outreach", base_chase(), "Invoice INV-1 is now overdue."
+    )
+
+    assert text == "Hi -- checking in on invoice INV-1, any update on payment?"
+    assert tokens == 50
+    assert evaluation is not None and evaluation.passed is True
+    assert needs_review is False
+    assert len(llm.calls) == 1  # no regeneration needed
+
+
+@pytest.mark.asyncio
+async def test_compose_and_evaluate_regenerates_once_when_evaluation_fails():
+    llm = QueueLLM([
+        ("Just checking in, any update?", 30),  # fails: no invoice reference
+        ("Hi -- any update on invoice INV-1?", 40),  # passes on retry
+    ])
+
+    text, tokens, evaluation, needs_review = await compose_and_evaluate(
+        llm, "outreach", base_chase(), "Invoice INV-1 is now overdue."
+    )
+
+    assert text == "Hi -- any update on invoice INV-1?"
+    assert tokens == 70  # both attempts charged
+    assert evaluation is not None and evaluation.passed is True
+    assert needs_review is False
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_compose_and_evaluate_falls_back_to_template_and_flags_review_after_two_failures():
+    llm = QueueLLM([
+        ("Just checking in, any update?", 30),
+        ("Still following up, anything new?", 20),
+    ])
+    template = "Invoice INV-1 is now overdue."
+
+    text, tokens, evaluation, needs_review = await compose_and_evaluate(llm, "outreach", base_chase(), template)
+
+    assert text == template  # safe fallback, never the twice-failed AI text
+    assert tokens == 50
+    assert needs_review is True
+    assert evaluation is not None and evaluation.passed is False
+    assert len(llm.calls) == 2  # never a third attempt
