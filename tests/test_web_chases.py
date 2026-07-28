@@ -489,6 +489,22 @@ def test_outbox_reflects_sent_messages_with_recipient_resolved(client: TestClien
     assert body[0]["dry_run"] is False
 
 
+# ---- policy documents / RAG layer (added 2026-07-28, spec §6.9) -----------
+
+
+def test_policy_documents_requires_session(client: TestClient) -> None:
+    assert client.get("/api/policy-documents").status_code == 401
+
+
+def test_policy_documents_returns_all_six(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.get("/api/policy-documents", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 6
+    assert {d["category"] for d in body} == {"collections", "escalation", "tone", "dispute", "patterns", "frequency"}
+
+
 # ---- temporal knowledge graph (added 2026-07-25) ---------------------------
 
 

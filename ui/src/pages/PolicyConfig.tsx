@@ -4,7 +4,7 @@
 // from what the agent is actually enforcing.
 import { useEffect, useState } from "react";
 import { useSession } from "../context/SessionContext";
-import { getPolicyConfig, type PolicyConfig } from "../api";
+import { getPolicyConfig, getPolicyDocuments, type PolicyConfig, type PolicyDocument } from "../api";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -35,11 +35,13 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 export default function PolicyConfig() {
   const { token } = useSession();
   const [data, setData] = useState<PolicyConfig | null>(null);
+  const [docs, setDocs] = useState<PolicyDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
     getPolicyConfig(token).then(setData).catch((e) => setError(String(e)));
+    getPolicyDocuments(token).then(setDocs).catch((e) => setError(String(e)));
   }, [token]);
 
   if (error) return <p className="px-6 py-8 text-[13px] text-rose-600">{error}</p>;
@@ -92,6 +94,23 @@ export default function PolicyConfig() {
           ))}
         </div>
       </Card>
+
+      {docs && (
+        <div className="sm:col-span-2 rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h3 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Policy documents</h3>
+          <p className="mb-3 text-[12px] text-zinc-400">
+            The library the AI composer references when drafting messages (keyword-matched to what it's writing).
+          </p>
+          <div className="space-y-3">
+            {docs.map((d) => (
+              <div key={d.id} className="border-t border-zinc-100 pt-3 first:border-0 first:pt-0">
+                <p className="mb-0.5 text-[13px] font-medium text-zinc-800">{d.title}</p>
+                <p className="text-[12.5px] text-zinc-500">{d.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

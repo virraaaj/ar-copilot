@@ -1002,6 +1002,22 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
     }
 
 
+@router.get("/policy-documents")
+async def get_policy_documents_endpoint(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
+    """Static Knowledge/RAG layer (spec §6.9) -- the fixed policy library
+    chase_composer.py retrieves from when drafting messages, exposed
+    read-only so an operator can see exactly what "policy" the agent is
+    grounding its tone/behavior in."""
+    from app.services.chase_engine import _config_from_settings
+    from app.services.policy_knowledge import list_documents
+
+    config = _config_from_settings(get_settings())
+    return [
+        {"id": d.id, "title": d.title, "category": d.category, "text": d.text}
+        for d in list_documents(config)
+    ]
+
+
 @router.get("/outbox")
 async def get_outbox_endpoint(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
     """Outbox screen (spec §6.18) -- every message the agent has generated

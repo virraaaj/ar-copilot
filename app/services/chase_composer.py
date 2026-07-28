@@ -35,6 +35,8 @@ from datetime import date
 from typing import Any, Dict, Optional, Tuple
 
 from app.services.chase_evaluator import EvaluationResult, evaluate_message
+from app.services.chase_machine import ChaseConfig
+from app.services.policy_knowledge import retrieve as retrieve_policy_docs
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,16 @@ def _build_prompt(kind: str, chase: Dict[str, Any], template_text: str) -> list:
         "Never mention amounts not already in the substance. Keep it under 60 words. "
         "Output ONLY the message body text -- no subject line, no greeting salutation formatting, no signature."
     )
+
+    # Static knowledge/RAG layer (spec §6.9) -- grounds the composer in
+    # written policy, not just the hardcoded rules above. Keyword-matched
+    # against the message kind + template so only relevant documents are
+    # pulled in (a "confirm" message doesn't need the dispute SOP).
+    docs = retrieve_policy_docs(f"{kind} {template_text}", ChaseConfig(), top_k=2)
+    if docs:
+        policy_context = "\n\n".join(f"{d.title}: {d.text}" for d in docs)
+        system += f"\n\nRelevant company policy:\n{policy_context}"
+
     return [{"role": "system", "content": system}, {"role": "user", "content": "Write the message."}]
 
 

@@ -605,6 +605,17 @@ export async function getPolicyConfig(token: string): Promise<PolicyConfig> {
   return request(`/policy-config`, token);
 }
 
+export interface PolicyDocument {
+  id: string;
+  title: string;
+  category: string;
+  text: string;
+}
+
+export async function getPolicyDocuments(token: string): Promise<PolicyDocument[]> {
+  return request(`/policy-documents`, token);
+}
+
 export interface OutboxEntry {
   id: string;
   chase_id: string;
