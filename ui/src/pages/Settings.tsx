@@ -29,7 +29,7 @@ export default function Settings() {
               onClick={() => setTab(t.id)}
               className={`-mb-px border-b-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors ${
                 tab === t.id
-                  ? "border-zinc-900 text-zinc-900"
+                  ? "border-green-700 text-green-700"
                   : "border-transparent text-zinc-500 hover:text-zinc-800"
               }`}
             >

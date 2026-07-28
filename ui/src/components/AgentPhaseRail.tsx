@@ -46,7 +46,7 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
                   done || (isDone && i === STEPS.length - 1)
                     ? "bg-emerald-500"
                     : current
-                      ? "bg-zinc-900 animate-pulse"
+                      ? "bg-green-700 animate-pulse"
                       : "bg-zinc-200"
                 }`}
               />
@@ -74,7 +74,7 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
                   className={
                     "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold " +
                     (current
-                      ? "bg-zinc-900 text-white ring-4 ring-zinc-900/10 animate-pulse"
+                      ? "bg-green-700 text-white ring-4 ring-green-700/10 animate-pulse"
                       : filled
                         ? "bg-emerald-500 text-white"
                         : "bg-zinc-100 text-zinc-400")

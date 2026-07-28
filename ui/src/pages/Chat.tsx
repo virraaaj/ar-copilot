@@ -172,7 +172,7 @@ export default function Chat() {
             <span
               className={`inline-block max-w-[85%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed ${
                 m.role === "user"
-                  ? "bg-zinc-900 text-white"
+                  ? "bg-green-700 text-white"
                   : m.role === "progress"
                     ? "flex items-center gap-2 italic text-zinc-400"
                     : "bg-zinc-100 text-zinc-800"
@@ -203,7 +203,7 @@ export default function Chat() {
         <button
           type="submit"
           disabled={sending || !input.trim()}
-          className="rounded-xl bg-zinc-900 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-40"
+          className="rounded-xl bg-green-700 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-green-800 disabled:opacity-40"
         >
           Send
         </button>

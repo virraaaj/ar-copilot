@@ -107,7 +107,7 @@ function SnoozeModal({
           <button
             onClick={() => onConfirm(reason, resumeDate)}
             disabled={submitting || !reason.trim()}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? "Snoozing..." : "Confirm snooze"}
           </button>
@@ -180,7 +180,7 @@ function FollowUpModal({
           <button
             onClick={() => onConfirm(email.trim(), cadence, endDate)}
             disabled={submitting || !canSubmit}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? "Starting..." : "Start follow-ups"}
           </button>
@@ -442,7 +442,7 @@ export default function InvoiceDetail() {
             )}
             <button
               onClick={askAboutThis}
-              className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
+              className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800"
             >
               Ask about this
             </button>
@@ -530,7 +530,7 @@ export default function InvoiceDetail() {
           <button
             onClick={submitComment}
             disabled={posting || !commentText.trim()}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {posting ? "Posting..." : "Post"}
           </button>

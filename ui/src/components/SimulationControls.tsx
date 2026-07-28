@@ -102,7 +102,7 @@ export function SimulationControls({ onRan }: { onRan?: () => void }) {
           )}
           <button
             disabled={busy}
-            className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() =>
               run(
                 () => runChaseTick(token!),

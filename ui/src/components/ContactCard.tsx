@@ -169,7 +169,7 @@ export function ContactFormModal({
           <button
             onClick={() => onSubmit(values)}
             disabled={submitting}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? "Saving..." : "Save"}
           </button>

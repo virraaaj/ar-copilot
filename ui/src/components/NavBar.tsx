@@ -3,7 +3,7 @@ import { useSession } from "../context/SessionContext";
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
-    isActive ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+    isActive ? "bg-green-700 text-white" : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
   }`;
 
 export default function NavBar() {

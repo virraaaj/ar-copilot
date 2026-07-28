@@ -173,7 +173,7 @@ export default function Dashboard() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {uploading ? "Uploading..." : "Upload aging Excel"}
           </button>
@@ -362,7 +362,7 @@ export default function Dashboard() {
                           <td className="px-5 py-3 text-right">
                             <button
                               onClick={() => askAboutInvoice(inv)}
-                              className="rounded-full px-3 py-1 text-[12px] font-medium text-zinc-400 opacity-0 transition-all hover:bg-zinc-900 hover:text-white group-hover:opacity-100"
+                              className="rounded-full px-3 py-1 text-[12px] font-medium text-zinc-400 opacity-0 transition-all hover:bg-green-700 hover:text-white group-hover:opacity-100"
                             >
                               Ask about this
                             </button>

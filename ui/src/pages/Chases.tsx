@@ -282,7 +282,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
                   setShowSimulate(false);
                 })
               }
-              className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
             >
               Inject reply
             </button>
@@ -313,7 +313,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy || !newDate}
             onClick={() => run(async () => { await editChaseCommitment(token!, chase.id, newDate); setShowEditDate(false); })}
-            className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+            className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
           >
             Save
           </button>
@@ -332,7 +332,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy || !closeReason.trim()}
             onClick={() => run(async () => { await closeChase(token!, chase.id, closeReason); setShowClose(false); })}
-            className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+            className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
           >
             Close
           </button>
@@ -437,7 +437,7 @@ export default function Chases() {
             key={f}
             onClick={() => setFilter(f)}
             className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium capitalize transition-colors ${
-              filter === f ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+              filter === f ? "bg-green-700 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
             }`}
           >
             {f}
@@ -489,7 +489,7 @@ export default function Chases() {
                         key={c.id}
                         onClick={() => setSelectedId(c.id)}
                         className={`block w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                          selectedId === c.id ? "border-zinc-900 bg-zinc-50" : "border-transparent hover:bg-zinc-50"
+                          selectedId === c.id ? "border-green-700 bg-zinc-50" : "border-transparent hover:bg-zinc-50"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">

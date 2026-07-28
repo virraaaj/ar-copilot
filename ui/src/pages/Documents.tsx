@@ -200,7 +200,7 @@ function ProjectDocuments({
               setCurrentProject({ project_number: projectNumber, project_name: projectName });
               navigate("/chat");
             }}
-            className="shrink-0 rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-zinc-800"
+            className="shrink-0 rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800"
           >
             Chat about this project
           </button>
@@ -243,7 +243,7 @@ function ProjectDocuments({
         />
         <button
           type="submit"
-          className="rounded-xl bg-zinc-900 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-zinc-800"
+          className="rounded-xl bg-green-700 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-green-800"
         >
           Search
         </button>
