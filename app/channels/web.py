@@ -974,3 +974,54 @@ async def run_chase_tick_endpoint(
         backend, get_messenger(), get_email_sender(), ChaseStore(), ProjectConversationStore(), s, get_llm()
     )
     return {"processed": processed}
+
+
+class InjectReplyRequest(BaseModel):
+    text: str
+
+
+@router.post("/chases/{chase_id}/inject-reply")
+async def inject_reply_endpoint(
+    chase_id: str,
+    body: InjectReplyRequest,
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Simulation Control Panel's "inject customer reply" (spec §6.17/
+    §11.3) -- runs the injected text through the exact same real
+    interpretation pipeline (parse_chase_reply, chase_machine.on_reply)
+    as a genuine inbound Teams/email reply. Not a mock: this is the real
+    LLM classifying real (operator-typed) text, just skipping the actual
+    email/Teams transport."""
+    from app.services.chase_engine import advance_chase_with_reply
+
+    store = ChaseStore()
+    chase = await store.get(chase_id)
+    if not chase:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    s = get_settings()
+    parsed = await advance_chase_with_reply(
+        chase, body.text, get_llm(), backend, get_messenger(), get_email_sender(),
+        store, ProjectConversationStore(), s,
+    )
+    updated = await store.get(chase_id)
+    return {"intent": parsed.intent, "confidence": parsed.confidence, "chase": updated}
+
+
+@router.post("/chases/{chase_id}/simulate-payment")
+async def simulate_payment_endpoint(
+    chase_id: str,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """Simulation Control Panel's "post payment" (spec §6.17/§11.5) --
+    closes the chase as paid directly, without a real backend check
+    (deliberately the one exception to "never trust a message as proof
+    of payment": here the human operator IS the source of truth)."""
+    from app.services.chase_engine import simulate_payment
+
+    store = ChaseStore()
+    try:
+        await simulate_payment(store, chase_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Chase not found.")
+    return await store.get(chase_id)

@@ -558,6 +558,24 @@ export async function restartChase(token: string, chaseId: string): Promise<void
   await request(`/chases/${encodeURIComponent(chaseId)}/restart`, token, { method: "POST" });
 }
 
+// Simulation Control Panel: inject a customer/PM reply and post a simulated
+// payment (spec §6.17/§11.3/§11.5), added 2026-07-28.
+export async function injectChaseReply(
+  token: string,
+  chaseId: string,
+  text: string
+): Promise<{ intent: string; confidence: string; chase: Chase }> {
+  return request(`/chases/${encodeURIComponent(chaseId)}/inject-reply`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function simulateChasePayment(token: string, chaseId: string): Promise<Chase> {
+  return request(`/chases/${encodeURIComponent(chaseId)}/simulate-payment`, token, { method: "POST" });
+}
+
 export async function editChaseCommitment(token: string, chaseId: string, promisedDate: string): Promise<void> {
   await request(`/chases/${encodeURIComponent(chaseId)}/commitment`, token, {
     method: "PATCH",

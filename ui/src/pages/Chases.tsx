@@ -16,6 +16,8 @@ import {
   closeChase,
   restartChase,
   editChaseCommitment,
+  injectChaseReply,
+  simulateChasePayment,
   type Chase,
   type ChaseEvent,
 } from "../api";
@@ -83,6 +85,8 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
   const [showEditDate, setShowEditDate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSimulate, setShowSimulate] = useState(false);
+  const [replyText, setReplyText] = useState("");
 
   useEffect(() => {
     if (!token) return;
@@ -209,7 +213,58 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
             Close manually
           </button>
         )}
+        {chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
+          <button
+            disabled={busy}
+            onClick={() => setShowSimulate((s) => !s)}
+            className="rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-[12.5px] font-medium text-zinc-500 hover:bg-zinc-50 disabled:opacity-40"
+          >
+            Simulate...
+          </button>
+        )}
       </div>
+
+      {showSimulate && chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
+        <div className="mb-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/60 p-3">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+            Simulation controls (for demo/testing -- not a real reply or payment)
+          </p>
+          <div className="mb-2 flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Type a reply as if from the PM/customer..."
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px]"
+            />
+            <button
+              disabled={busy || !replyText.trim()}
+              onClick={() =>
+                run(async () => {
+                  await injectChaseReply(token!, chase.id, replyText);
+                  setReplyText("");
+                  setShowSimulate(false);
+                })
+              }
+              className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+            >
+              Inject reply
+            </button>
+          </div>
+          <button
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                await simulateChasePayment(token!, chase.id);
+                setShowSimulate(false);
+              })
+            }
+            className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+          >
+            Post simulated payment
+          </button>
+        </div>
+      )}
 
       {showEditDate && (
         <div className="mb-4 flex items-center gap-2">

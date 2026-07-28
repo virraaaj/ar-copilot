@@ -360,6 +360,77 @@ def test_run_chase_tick_endpoint_processes_and_returns_a_count(client: TestClien
     assert resp.json() == {"processed": 0}
 
 
+# ---- simulated tools (added 2026-07-28, spec §6.17/§11.3/§11.5) -----------
+
+
+def test_simulate_payment_endpoint_requires_session(client: TestClient) -> None:
+    assert client.post("/api/chases/chase-1/simulate-payment").status_code == 401
+
+
+def test_simulate_payment_endpoint_404_for_unknown_chase(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.post("/api/chases/unknown-id/simulate-payment", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 404
+
+
+def test_simulate_payment_endpoint_closes_the_chase(client: TestClient) -> None:
+    import asyncio
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.update(chase_id, state="awaiting_customer", target="customer"))
+
+    resp = client.post(f"/api/chases/{chase_id}/simulate-payment", headers={"Authorization": f"Bearer {token}"})
+
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "closed_paid"
+
+
+def test_inject_reply_endpoint_requires_session(client: TestClient) -> None:
+    assert client.post("/api/chases/chase-1/inject-reply", json={"text": "paid"}).status_code == 401
+
+
+def test_inject_reply_endpoint_404_for_unknown_chase(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.post(
+        "/api/chases/unknown-id/inject-reply", json={"text": "paid"}, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 404
+
+
+def test_inject_reply_endpoint_parses_and_advances_the_chase(client: TestClient, monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.services.chase_parser import ParsedReply
+
+    token = _login(client)
+    store = ChaseStore(db_path=client.chase_db_path)
+    chase_id = asyncio.run(store.create("case-1", invoice_no="INV-1"))
+    asyncio.run(store.update(chase_id, state="awaiting_customer", target="customer"))
+
+    async def fake_advance_chase_with_reply(chase, reply_text, llm, backend, messenger, email_sender, chase_store, project_conversation_store, settings):
+        await chase_store.update(chase["id"], state="commitment_tracked")
+        return ParsedReply(
+            intent="commitment", confidence="high", sentiment="cooperative", requires_human_review=False,
+        )
+
+    import app.services.chase_engine as chase_engine_module
+    monkeypatch.setattr(chase_engine_module, "advance_chase_with_reply", fake_advance_chase_with_reply)
+
+    resp = client.post(
+        f"/api/chases/{chase_id}/inject-reply",
+        json={"text": "We'll pay next week"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["intent"] == "commitment"
+    assert body["chase"]["state"] == "commitment_tracked"
+
+
 # ---- temporal knowledge graph (added 2026-07-25) ---------------------------
 
 

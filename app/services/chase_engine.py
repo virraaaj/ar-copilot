@@ -679,6 +679,27 @@ async def advance_chase_with_reply(
     return parsed
 
 
+async def simulate_payment(chase_store: ChaseStore, chase_id: str) -> None:
+    """Operator-triggered simulated payment (spec §6.17 tool executor /
+    §11.5 demo walkthrough) -- closes the chase as paid WITHOUT going
+    through the real backend. Every other "paid" transition in this
+    engine deliberately checks the real backend first and never trusts a
+    message as proof of payment (see on_commitment_due/
+    on_verify_payment_timeout's own docstrings) -- this is the one
+    intentional exception, reserved for the Simulation Control Panel
+    where a human operator is directly asserting the fact, not an
+    automated inference from a reply."""
+    chase = await chase_store.get(chase_id)
+    if not chase:
+        raise ValueError(f"Chase {chase_id} not found")
+    decision = Decision(
+        updates={"state": "closed_paid", "next_action_at": None},
+        actions=[],
+        events=[("closed", {"reason": "paid", "source": "simulated_payment"})],
+    )
+    await _apply_decision(chase_store, chase, decision)
+
+
 async def run_chase_tick(
     backend: BackendClient,
     messenger: TeamsMessenger,

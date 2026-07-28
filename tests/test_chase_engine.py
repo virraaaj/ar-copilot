@@ -26,6 +26,7 @@ from app.services.chase_engine import (
     poll_chase_mailbox,
     process_due_chases,
     run_chase_tick,
+    simulate_payment,
 )
 from app.services.chase_store import ChaseStore
 from app.services.email_sender import FakeEmailSender
@@ -388,6 +389,33 @@ async def test_send_budget_defers_extra_sends_to_next_tick(backend, chase_store,
 
 
 # ---- allowlist ---------------------------------------------------------------
+
+
+# ---- simulated tools (added 2026-07-28, spec §6.17/§11.5) -----------------
+
+
+@pytest.mark.asyncio
+async def test_simulate_payment_closes_the_chase_without_touching_the_backend(backend, chase_store):
+    """No respx mocks registered for any backend call -- if simulate_payment
+    tried to check the real backend the way on_commitment_due/
+    on_verify_payment_timeout do, this test would fail with an unmocked
+    request error. It must not."""
+    chase_id = await chase_store.create("case-1", invoice_no="INV-1")
+    await chase_store.update(chase_id, state="awaiting_customer", target="customer")
+
+    await simulate_payment(chase_store, chase_id)
+
+    chase = await chase_store.get(chase_id)
+    assert chase["state"] == "closed_paid"
+    assert chase["next_action_at"] is None
+    events = await chase_store.list_events(chase_id)
+    assert any(e["kind"] == "closed" and e["detail"]["source"] == "simulated_payment" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_simulate_payment_raises_for_unknown_chase(chase_store):
+    with pytest.raises(ValueError):
+        await simulate_payment(chase_store, "does-not-exist")
 
 
 # ---- Policy and Guardrail Engine (added 2026-07-28, spec §6.15) -----------
