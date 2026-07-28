@@ -487,7 +487,11 @@ async def test_guardrail_blocks_outreach_on_a_configured_blackout_date(backend, 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_guardrail_escalates_high_dollar_invoice_before_first_outreach(backend, chase_store, project_store, messenger, email_sender):
+async def test_high_dollar_invoice_sends_outreach_automatically_without_human_approval(
+    backend, chase_store, project_store, messenger, email_sender
+):
+    """The high-dollar human-approval gate was removed (2026-07-28) --
+    chasing is fully automatic regardless of invoice amount now."""
     _mock_login()
     respx.get(f"{BASE}/api/v2/dunning/cases").mock(
         return_value=httpx.Response(200, json={"items": [_case_json(due_days_ago=5)]})
@@ -507,10 +511,8 @@ async def test_guardrail_escalates_high_dollar_invoice_before_first_outreach(bac
     await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
 
     chase = await chase_store.get(chase["id"])
-    assert chase["state"] == "escalated"
-    assert email_sender.sent == []
-    events = await chase_store.list_events(chase["id"])
-    assert any(e["kind"] == "escalated" and e["detail"]["reason"] == "human_approval_required" for e in events)
+    assert chase["state"] != "escalated"
+    assert len(email_sender.sent) == 1
     await backend.close()
 
 

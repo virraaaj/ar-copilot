@@ -28,7 +28,6 @@ _ESCALATION_REASONS = {
     "missed_commitment_budget_exhausted": "too many promised payment dates were missed",
     "commitment_too_far_out": "the promised payment date was further out than policy allows",
     "payment_claim_unverified": "a claimed payment was never confirmed on our end",
-    "human_approval_required": "the invoice requires human approval before any automated outreach",
 }
 
 

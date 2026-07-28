@@ -5,9 +5,7 @@ from datetime import date
 
 from app.services.chase_guardrails import (
     BLACKOUT_DATES,
-    HIGH_DOLLAR_THRESHOLD,
     check_blackout_date,
-    check_high_dollar_threshold,
     check_message_language,
 )
 
@@ -22,23 +20,6 @@ def test_blackout_date_blocks_configured_date(monkeypatch):
     result = check_blackout_date(date(2026, 12, 25))
     assert result.allowed is False
     assert "blackout" in result.reason.lower()
-
-
-def test_high_dollar_threshold_allows_small_invoice():
-    result = check_high_dollar_threshold(5000.0)
-    assert result.allowed is True
-    assert result.requires_human_approval is False
-
-
-def test_high_dollar_threshold_requires_approval_above_threshold():
-    result = check_high_dollar_threshold(HIGH_DOLLAR_THRESHOLD + 1)
-    assert result.allowed is True
-    assert result.requires_human_approval is True
-
-
-def test_high_dollar_threshold_requires_approval_for_strategic_account_regardless_of_amount():
-    result = check_high_dollar_threshold(500.0, is_strategic=True)
-    assert result.requires_human_approval is True
 
 
 def test_message_language_allows_normal_text():

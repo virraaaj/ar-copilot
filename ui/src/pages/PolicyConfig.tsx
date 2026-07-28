@@ -1,10 +1,13 @@
-// Policy/Configuration Viewer (spec §6.18, added 2026-07-28) -- read-only
-// window onto GET /api/policy-config, which itself reads straight from
+// Policy/Configuration Viewer (spec §6.18, added 2026-07-28) -- window
+// onto GET /api/policy-config, which itself reads straight from
 // ChaseConfig/chase_guardrails.py/config.py so this view can never drift
-// from what the agent is actually enforcing.
+// from what the agent is actually enforcing. Two rows (AI composer, smart
+// escalation) are live toggles backed by runtime_flags.py -- the only
+// two CHASE_* flags an operator can flip without editing .env and
+// restarting; everything else here stays read-only by design.
 import { useEffect, useState } from "react";
 import { useSession } from "../context/SessionContext";
-import { getPolicyConfig, getPolicyDocuments, type PolicyConfig, type PolicyDocument } from "../api";
+import { getPolicyConfig, getPolicyDocuments, setRuntimeFlag, type PolicyConfig, type PolicyDocument } from "../api";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -23,6 +26,20 @@ function Bool({ value }: { value: boolean }) {
   );
 }
 
+function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boolean; onToggle: () => void }) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onToggle}
+      className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-50 ${
+        value ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+      }`}
+    >
+      {value ? "On" : "Off"}
+    </button>
+  );
+}
+
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
@@ -37,12 +54,29 @@ export default function PolicyConfig() {
   const [data, setData] = useState<PolicyConfig | null>(null);
   const [docs, setDocs] = useState<PolicyDocument[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busyFlag, setBusyFlag] = useState<string | null>(null);
 
-  useEffect(() => {
+  function load() {
     if (!token) return;
     getPolicyConfig(token).then(setData).catch((e) => setError(String(e)));
     getPolicyDocuments(token).then(setDocs).catch((e) => setError(String(e)));
-  }, [token]);
+  }
+
+  useEffect(load, [token]);
+
+  async function toggle(flag: string, current: boolean) {
+    if (!token) return;
+    setBusyFlag(flag);
+    setError(null);
+    try {
+      await setRuntimeFlag(token, flag, !current);
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyFlag(null);
+    }
+  }
 
   if (error) return <p className="px-6 py-8 text-[13px] text-rose-600">{error}</p>;
   if (!data) return <p className="px-6 py-8 text-[13px] text-zinc-400">Loading...</p>;
@@ -63,10 +97,6 @@ export default function PolicyConfig() {
         <Row label="Max clarifications" value={data.escalation_rules.max_clarifications} />
         <Row label="Max postponements" value={data.escalation_rules.max_postponements} />
         <Row
-          label="High-dollar approval threshold"
-          value={`$${data.escalation_rules.high_dollar_approval_threshold.toLocaleString()}`}
-        />
-        <Row
           label="Blackout dates"
           value={data.escalation_rules.blackout_dates.length ? data.escalation_rules.blackout_dates.join(", ") : "None"}
         />
@@ -76,8 +106,28 @@ export default function PolicyConfig() {
         <Row label="Chase engine enabled" value={<Bool value={data.channel_configuration.chase_enabled} />} />
         <Row label="Dry run" value={<Bool value={data.channel_configuration.dry_run} />} />
         <Row label="Mail polling enabled" value={<Bool value={data.channel_configuration.mail_poll_enabled} />} />
-        <Row label="AI composer enabled" value={<Bool value={data.channel_configuration.composer_enabled} />} />
-        <Row label="Smart escalation enabled" value={<Bool value={data.channel_configuration.smart_escalation_enabled} />} />
+        <Row
+          label="AI composer enabled"
+          value={
+            <Toggle
+              value={data.channel_configuration.composer_enabled}
+              disabled={busyFlag === "CHASE_COMPOSER_ENABLED"}
+              onToggle={() => toggle("CHASE_COMPOSER_ENABLED", data.channel_configuration.composer_enabled)}
+            />
+          }
+        />
+        <Row
+          label="Smart escalation enabled"
+          value={
+            <Toggle
+              value={data.channel_configuration.smart_escalation_enabled}
+              disabled={busyFlag === "CHASE_SMART_ESCALATION_ENABLED"}
+              onToggle={() =>
+                toggle("CHASE_SMART_ESCALATION_ENABLED", data.channel_configuration.smart_escalation_enabled)
+              }
+            />
+          }
+        />
         <Row label="Max sends per tick" value={data.channel_configuration.max_sends_per_tick} />
         <Row
           label="To-address allowlist"

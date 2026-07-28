@@ -586,7 +586,6 @@ export interface PolicyConfig {
     payment_verify_days: number;
     max_clarifications: number;
     max_postponements: number;
-    high_dollar_approval_threshold: number;
     blackout_dates: string[];
   };
   allowed_actions: string[];
@@ -603,6 +602,14 @@ export interface PolicyConfig {
 
 export async function getPolicyConfig(token: string): Promise<PolicyConfig> {
   return request(`/policy-config`, token);
+}
+
+export async function setRuntimeFlag(token: string, flag: string, enabled: boolean): Promise<void> {
+  await request(`/runtime-flags/${encodeURIComponent(flag)}`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export interface PolicyDocument {

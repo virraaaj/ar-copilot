@@ -34,10 +34,11 @@ from app.services.backend_client import BackendClient
 from app.services.chase_composer import compose_and_evaluate
 from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMessage
 from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
-from app.services.chase_guardrails import check_blackout_date, check_high_dollar_threshold, check_message_language
+from app.services.chase_guardrails import check_blackout_date, check_message_language
 from app.services.chase_store import ChaseStore
 from app.services.chase_trajectory import assess_chase_trajectory
 from app.services.graph_store import GraphStore
+from app.services import runtime_flags
 from app.services import sim_clock
 from app.services.email_sender import EmailSender
 
@@ -194,7 +195,7 @@ async def _send_message(
     composed = False
     requires_human_review = False
     evaluation_failures: List[str] = []
-    if getattr(settings, "CHASE_COMPOSER_ENABLED", False) and llm is not None:
+    if await runtime_flags.effective("CHASE_COMPOSER_ENABLED", settings, chase_store.db_path) and llm is not None:
         composed_text, tokens, evaluation, requires_human_review = await compose_and_evaluate(
             llm, action.kind, chase, action.text
         )
@@ -230,20 +231,6 @@ async def _send_message(
              "error": language.reason, "composed": composed},
         )
         return
-
-    if action.kind == "outreach":
-        # Only gated on the very first touch of a chase -- once escalated
-        # for approval the chase leaves the normal tick loop entirely
-        # (escalated isn't dispatched by process_due_chases/the mail
-        # poller), so this can never re-fire for the same chase.
-        approval = check_high_dollar_threshold(chase.get("amount"))
-        if approval.requires_human_approval:
-            logger.info("Chase %s: escalated for human approval before first outreach (%s)", chase["id"], approval.reason)
-            await chase_store.update(chase["id"], state="escalated", next_action_at=None)
-            await chase_store.add_event(
-                chase["id"], "escalated", {"reason": "human_approval_required", "detail": approval.reason}
-            )
-            return
 
     channel = "none"
     error: Optional[str] = None
@@ -460,7 +447,7 @@ async def _maybe_smart_escalate(
     short of the hard cap -- otherwise None, deferring to the normal
     deterministic chase_machine path. Disabled or llm-less runs always
     return None, so this is purely additive over today's behavior."""
-    if not getattr(settings, "CHASE_SMART_ESCALATION_ENABLED", False) or llm is None:
+    if not await runtime_flags.effective("CHASE_SMART_ESCALATION_ENABLED", settings, chase_store.db_path) or llm is None:
         return None
 
     events = await chase_store.list_events(chase["id"])

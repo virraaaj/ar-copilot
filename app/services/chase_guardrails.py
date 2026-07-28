@@ -52,34 +52,15 @@ _BANNED_PATTERNS = [
 # reads this same list to display it.
 BLACKOUT_DATES: List[str] = []
 
-# High-dollar invoices require a human to approve before the agent's
-# first automated touch -- not a hard block, an approval gate (spec:
-# "require human approval for invoices above configured high-dollar
-# threshold").
-HIGH_DOLLAR_THRESHOLD = 100000.0
-
-
 @dataclass(frozen=True)
 class GuardrailResult:
     allowed: bool
     reason: Optional[str] = None
-    requires_human_approval: bool = False
 
 
 def check_blackout_date(today: date) -> GuardrailResult:
     if today.isoformat() in BLACKOUT_DATES:
         return GuardrailResult(allowed=False, reason=f"{today.isoformat()} is a configured blackout date")
-    return GuardrailResult(allowed=True)
-
-
-def check_high_dollar_threshold(amount: Optional[float], is_strategic: bool = False) -> GuardrailResult:
-    if amount is not None and amount >= HIGH_DOLLAR_THRESHOLD:
-        return GuardrailResult(
-            allowed=True, requires_human_approval=True,
-            reason=f"${amount:,.0f} is at/above the ${HIGH_DOLLAR_THRESHOLD:,.0f} human-approval threshold",
-        )
-    if is_strategic:
-        return GuardrailResult(allowed=True, requires_human_approval=True, reason="strategic account")
     return GuardrailResult(allowed=True)
 
 

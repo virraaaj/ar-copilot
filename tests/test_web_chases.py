@@ -449,7 +449,6 @@ def test_policy_config_reflects_real_settings(client: TestClient, monkeypatch) -
     assert resp.status_code == 200
     body = resp.json()
     assert body["contact_frequency"]["max_nudges"] == 5
-    assert "high_dollar_approval_threshold" in body["escalation_rules"]
     assert "outreach" in body["allowed_actions"]
     assert "chase_enabled" in body["channel_configuration"]
 
@@ -487,6 +486,37 @@ def test_outbox_reflects_sent_messages_with_recipient_resolved(client: TestClien
     assert body[0]["subject"] == "[TOK] Re: invoice INV-1"
     assert body[0]["channel"] == "email"
     assert body[0]["dry_run"] is False
+
+
+# ---- runtime-togglable flags (added 2026-07-28) ---------------------------
+
+
+def test_set_runtime_flag_requires_session(client: TestClient) -> None:
+    resp = client.post("/api/runtime-flags/CHASE_COMPOSER_ENABLED", json={"enabled": True})
+    assert resp.status_code == 401
+
+
+def test_set_runtime_flag_rejects_non_whitelisted_flag(client: TestClient) -> None:
+    token = _login(client)
+    resp = client.post(
+        "/api/runtime-flags/CHASE_DRY_RUN", json={"enabled": True}, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 404
+
+
+def test_set_runtime_flag_updates_policy_config(client: TestClient) -> None:
+    token = _login(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    before = client.get("/api/policy-config", headers=headers).json()
+    assert before["channel_configuration"]["composer_enabled"] is False
+
+    resp = client.post("/api/runtime-flags/CHASE_COMPOSER_ENABLED", json={"enabled": True}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"flag": "CHASE_COMPOSER_ENABLED", "enabled": True}
+
+    after = client.get("/api/policy-config", headers=headers).json()
+    assert after["channel_configuration"]["composer_enabled"] is True
 
 
 # ---- policy documents / RAG layer (added 2026-07-28, spec §6.9) -----------

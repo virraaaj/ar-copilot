@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, List
 
-from app.services.chase_guardrails import _BANNED_PATTERNS, BLACKOUT_DATES, HIGH_DOLLAR_THRESHOLD
+from app.services.chase_guardrails import _BANNED_PATTERNS, BLACKOUT_DATES
 
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "was", "were", "to", "of", "and", "or", "in", "on",
@@ -74,13 +74,11 @@ def _build_documents(config: Any) -> List[PolicyDocument]:
             title="Escalation Policy",
             category="escalation",
             text=(
-                f"Escalate to a human when: a customer disputes the invoice; a customer "
-                f"reports a blocker with no resolution date after repeated check-ins; "
+                f"Escalate to a human when: a customer disputes the invoice, or a customer "
+                f"reports a blocker with no resolution date after repeated check-ins, or "
                 f"{config.max_missed_commitments} or more payment commitments have been "
-                f"missed; or an invoice's open amount is at or above "
-                f"${HIGH_DOLLAR_THRESHOLD:,.0f}, which requires human approval before the "
-                f"very first automated outreach. Escalated chases are never re-contacted "
-                f"automatically -- a human must resume or close them."
+                f"missed. Escalated chases are never re-contacted automatically -- a human "
+                f"must resume or close them."
             ),
         ),
         PolicyDocument(

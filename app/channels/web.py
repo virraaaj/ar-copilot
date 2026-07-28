@@ -966,10 +966,13 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
     from the same objects chase_engine.py/chase_machine.py actually use,
     so this can never drift from what the agent is really doing."""
     from app.services.chase_engine import _config_from_settings
-    from app.services.chase_guardrails import BLACKOUT_DATES, HIGH_DOLLAR_THRESHOLD
+    from app.services.chase_guardrails import BLACKOUT_DATES
+    from app.services import runtime_flags
 
     s = get_settings()
     config = _config_from_settings(s)
+    composer_enabled = await runtime_flags.effective("CHASE_COMPOSER_ENABLED", s)
+    smart_escalation_enabled = await runtime_flags.effective("CHASE_SMART_ESCALATION_ENABLED", s)
     return {
         "contact_frequency": {
             "nudge_interval_days": config.nudge_interval_days,
@@ -983,7 +986,6 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
             "payment_verify_days": config.payment_verify_days,
             "max_clarifications": config.max_clarifications,
             "max_postponements": config.max_postponements,
-            "high_dollar_approval_threshold": HIGH_DOLLAR_THRESHOLD,
             "blackout_dates": sorted(str(d) for d in BLACKOUT_DATES),
         },
         "allowed_actions": [
@@ -994,12 +996,33 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
             "chase_enabled": s.CHASE_ENABLED,
             "dry_run": s.CHASE_DRY_RUN,
             "mail_poll_enabled": s.CHASE_MAIL_POLL_ENABLED,
-            "composer_enabled": s.CHASE_COMPOSER_ENABLED,
-            "smart_escalation_enabled": s.CHASE_SMART_ESCALATION_ENABLED,
+            "composer_enabled": composer_enabled,
+            "smart_escalation_enabled": smart_escalation_enabled,
             "to_address_allowlist": s.chase_to_address_allowlist,
             "max_sends_per_tick": s.CHASE_MAX_SENDS_PER_TICK,
         },
     }
+
+
+class SetRuntimeFlagRequest(BaseModel):
+    enabled: bool
+
+
+@router.post("/runtime-flags/{flag}")
+async def set_runtime_flag_endpoint(
+    flag: str,
+    body: SetRuntimeFlagRequest,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    """Agent Policy tab's live On/Off toggles for the two runtime-safe
+    flags (AI composer, smart escalation) -- see runtime_flags.py for why
+    only these two are toggleable here and not the rest of CHASE_*."""
+    from app.services import runtime_flags
+
+    if flag not in runtime_flags.OVERRIDABLE_FLAGS:
+        raise HTTPException(status_code=404, detail=f"{flag} is not a runtime-togglable flag.")
+    await runtime_flags.set_override(flag, body.enabled)
+    return {"flag": flag, "enabled": body.enabled}
 
 
 @router.get("/policy-documents")
