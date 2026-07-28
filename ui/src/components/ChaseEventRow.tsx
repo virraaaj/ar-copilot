@@ -37,6 +37,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   email: "via email",
   email_failed: "via email (failed)",
   dry_run: "dry run",
+  blocked: "blocked by policy",
 };
 
 // Per-kind icon/color/label -- added 2026-07-24 (was a flat wall of text

@@ -34,6 +34,7 @@ from app.services.backend_client import BackendClient
 from app.services.chase_composer import compose_message
 from app.services.chase_machine import ChaseConfig, Decision, Escalate, SendMessage
 from app.services.chase_parser import ParsedReply, parse_chase_reply, strip_quoted_reply
+from app.services.chase_guardrails import check_blackout_date, check_high_dollar_threshold, check_message_language
 from app.services.chase_store import ChaseStore
 from app.services.chase_trajectory import assess_chase_trajectory
 from app.services.graph_store import GraphStore
@@ -108,6 +109,7 @@ async def find_and_create_new_chases(backend: BackendClient, chase_store: ChaseS
             case_key=case.get("case_key"),
             invoice_no=case.get("primary_invoice_id"),
             project_number=case.get("project_number"),
+            amount=case.get("primary_invoice_open_amount"),
         )
         created += 1
 
@@ -196,6 +198,46 @@ async def _send_message(
         if composed_text != action.text:
             composed = True
         text = composed_text
+
+    # ---- Policy and Guardrail Engine (spec §6.15) -----------------------
+    # Checked here, not in chase_machine.py -- these can override what the
+    # (already-decided) action would otherwise do, which is exactly the
+    # "decide vs. execute" split every other guardrail in this engine
+    # already respects (chase_machine.py decides WHAT to do; this module
+    # decides whether the resulting action is actually allowed to happen).
+    sim_now = await sim_clock.now(chase_store.db_path)
+    blackout = check_blackout_date(sim_now.date())
+    if not blackout.allowed:
+        await chase_store.add_event(
+            chase["id"], "outreach_sent",
+            {"target": action.target, "kind": action.kind, "text": text, "channel": "blocked",
+             "error": blackout.reason, "composed": composed},
+        )
+        return
+
+    language = check_message_language(text)
+    if not language.allowed:
+        logger.warning("Chase %s: outreach blocked by language guardrail: %s", chase["id"], language.reason)
+        await chase_store.add_event(
+            chase["id"], "outreach_sent",
+            {"target": action.target, "kind": action.kind, "text": text, "channel": "blocked",
+             "error": language.reason, "composed": composed},
+        )
+        return
+
+    if action.kind == "outreach":
+        # Only gated on the very first touch of a chase -- once escalated
+        # for approval the chase leaves the normal tick loop entirely
+        # (escalated isn't dispatched by process_due_chases/the mail
+        # poller), so this can never re-fire for the same chase.
+        approval = check_high_dollar_threshold(chase.get("amount"))
+        if approval.requires_human_approval:
+            logger.info("Chase %s: escalated for human approval before first outreach (%s)", chase["id"], approval.reason)
+            await chase_store.update(chase["id"], state="escalated", next_action_at=None)
+            await chase_store.add_event(
+                chase["id"], "escalated", {"reason": "human_approval_required", "detail": approval.reason}
+            )
+            return
 
     channel = "none"
     error: Optional[str] = None

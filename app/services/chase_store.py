@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS chases (
     total_tokens_used INTEGER NOT NULL DEFAULT 0,
     prompt_tokens_used INTEGER NOT NULL DEFAULT 0,
     completion_tokens_used INTEGER NOT NULL DEFAULT 0,
+    amount REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -182,6 +183,16 @@ class ChaseStore:
                 except aiosqlite.OperationalError as exc:
                     if "duplicate column" not in str(exc).lower():
                         raise
+            # Migration for the invoice amount (added 2026-07-28, spec
+            # §6.15's high-dollar approval threshold) -- captured once at
+            # chase creation so the guardrail check doesn't need an extra
+            # backend round trip on every send.
+            try:
+                await db.execute("ALTER TABLE chases ADD COLUMN amount REAL")
+                await db.commit()
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
             await db.commit()
         self._initialized = True
 
@@ -192,6 +203,7 @@ class ChaseStore:
         invoice_no: Optional[str] = None,
         project_number: Optional[str] = None,
         next_action_at: Optional[str] = None,
+        amount: Optional[float] = None,
     ) -> str:
         await self._ensure_schema()
         if await self.get_open_for_case(case_id):
@@ -203,10 +215,10 @@ class ChaseStore:
             await db.execute(
                 "INSERT INTO chases "
                 "(id, case_id, case_key, invoice_no, project_number, subject_token, state, "
-                " next_action_at, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+                " next_action_at, amount, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
                 (chase_id, case_id, case_key, invoice_no, project_number, _new_subject_token(),
-                 next_action_at or now, now, now),
+                 next_action_at or now, amount, now, now),
             )
             await db.commit()
         await self.add_event(chase_id, "created", {"case_id": case_id, "case_key": case_key})

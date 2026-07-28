@@ -390,6 +390,102 @@ async def test_send_budget_defers_extra_sends_to_next_tick(backend, chase_store,
 # ---- allowlist ---------------------------------------------------------------
 
 
+# ---- Policy and Guardrail Engine (added 2026-07-28, spec §6.15) -----------
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_guardrail_blocks_message_containing_banned_language(backend, chase_store, project_store, messenger, email_sender):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai", nudge_count=0)
+
+    # Force the deterministic template itself to contain banned language by
+    # monkeypatching chase_machine's on_nudge_check output would be brittle;
+    # instead verify the guardrail directly blocks via the composer path is
+    # covered by chase_guardrails unit tests. Here we confirm the engine
+    # actually calls the check and blocks -- easiest lever is DRY_RUN off
+    # with a chase whose target text we control via a manual SendMessage.
+    from app.services.chase_engine import _send_message
+    from app.services.chase_machine import SendMessage
+
+    chase = await chase_store.get(chase_id)
+    settings = make_settings(CHASE_DRY_RUN=False)
+    action = SendMessage(target="pm", kind="nudge", text="We will pursue legal action if this isn't paid.")
+
+    await _send_message(action, chase, backend, messenger, email_sender, project_store, chase_store, settings)
+
+    assert email_sender.sent == []
+    events = await chase_store.list_events(chase_id)
+    outreach = [e for e in events if e["kind"] == "outreach_sent"][0]
+    assert outreach["detail"]["channel"] == "blocked"
+    assert "legal action" in outreach["detail"]["error"].lower()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_guardrail_blocks_outreach_on_a_configured_blackout_date(backend, chase_store, project_store, messenger, email_sender):
+    from app.services import chase_guardrails
+    from app.services.chase_engine import _send_message
+    from app.services.chase_machine import SendMessage
+    from app.services import sim_clock
+
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    chase_id = await chase_store.create("case-1", next_action_at=past_iso())
+    await chase_store.update(chase_id, state="awaiting_pm", target="pm", pm_email="pm@corehelix.ai")
+    chase = await chase_store.get(chase_id)
+
+    today = (await sim_clock.now(chase_store.db_path)).date().isoformat()
+    original = list(chase_guardrails.BLACKOUT_DATES)
+    chase_guardrails.BLACKOUT_DATES.append(today)
+    try:
+        settings = make_settings(CHASE_DRY_RUN=False)
+        action = SendMessage(target="pm", kind="nudge", text="Just checking in on this invoice.")
+        await _send_message(action, chase, backend, messenger, email_sender, project_store, chase_store, settings)
+    finally:
+        chase_guardrails.BLACKOUT_DATES[:] = original
+
+    assert email_sender.sent == []
+    events = await chase_store.list_events(chase_id)
+    outreach = [e for e in events if e["kind"] == "outreach_sent"][0]
+    assert outreach["detail"]["channel"] == "blocked"
+    assert "blackout" in outreach["detail"]["error"].lower()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_guardrail_escalates_high_dollar_invoice_before_first_outreach(backend, chase_store, project_store, messenger, email_sender):
+    _mock_login()
+    respx.get(f"{BASE}/api/v2/dunning/cases").mock(
+        return_value=httpx.Response(200, json={"items": [_case_json(due_days_ago=5)]})
+    )
+    respx.get(f"{BASE}/api/v2/dunning/cases/case-1").mock(return_value=httpx.Response(200, json=_case_json()))
+    respx.get(f"{BASE}/api/v1/dunning/projects/PN-1/contacts").mock(
+        return_value=httpx.Response(200, json={"contacts": [{"contact_type": "pm", "email": "pm@corehelix.ai"}]})
+    )
+    respx.post(f"{BASE}/api/v2/dunning/response-events").mock(return_value=httpx.Response(200, json={"ok": True}))
+
+    created = await find_and_create_new_chases(backend, chase_store)
+    assert created == 1
+    chase = await chase_store.get_open_for_case("case-1")
+    await chase_store.update(chase["id"], amount=150000.0)
+
+    settings = make_settings(CHASE_DRY_RUN=False)
+    await process_due_chases(backend, messenger, email_sender, chase_store, project_store, settings)
+
+    chase = await chase_store.get(chase["id"])
+    assert chase["state"] == "escalated"
+    assert email_sender.sent == []
+    events = await chase_store.list_events(chase["id"])
+    assert any(e["kind"] == "escalated" and e["detail"]["reason"] == "human_approval_required" for e in events)
+    await backend.close()
+
+
 @pytest.mark.asyncio
 @respx.mock
 async def test_allowlist_blocks_non_listed_customer_email(backend, chase_store, project_store, messenger, email_sender):
