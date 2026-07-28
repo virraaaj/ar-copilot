@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (added 2026-07-28) -- `dark:` variants only apply
+   under a `.dark` class on <html> (set by ThemeContext.tsx), not
+   automatically from the OS's prefers-color-scheme. Tailwind v4 needs
+   this custom-variant declared explicitly to get that behavior. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
@@ -17,6 +23,11 @@ body {
   color: #18181b;
 }
 
+html.dark body {
+  background: #09090b;
+  color: #f4f4f5;
+}
+
 /* Rely on the OS scrollbar, but keep it unobtrusive on webkit. */
 ::-webkit-scrollbar {
   width: 10px;
@@ -29,4 +40,22 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #d4d4d8;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-color: #09090b;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Native date-picker calendar icon is near-black by default, invisible
+   against a dark input -- same fix as Lummus's dev-sachin branch. */
+html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.65;
+  cursor: pointer;
+}
+html.dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
 }

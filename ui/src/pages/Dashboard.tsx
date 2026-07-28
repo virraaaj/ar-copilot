@@ -16,15 +16,15 @@ function money(n: number | null): string {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700",
-  closed_paid: "bg-zinc-100 text-zinc-500",
-  closed_other: "bg-zinc-100 text-zinc-500",
-  snoozed: "bg-amber-50 text-amber-700",
+  active: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  closed_paid: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+  closed_other: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+  snoozed: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
 };
 
 function Pill({ label, styleMap }: { label: string | null; styleMap: Record<string, string> }) {
-  if (!label) return <span className="text-zinc-300">--</span>;
-  const cls = styleMap[label] ?? "bg-zinc-100 text-zinc-600";
+  if (!label) return <span className="text-zinc-300 dark:text-zinc-600">--</span>;
+  const cls = styleMap[label] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300";
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-medium capitalize ${cls}`}>
       {label.replace(/_/g, " ")}
@@ -150,14 +150,14 @@ export default function Dashboard() {
   }
 
   const selectClass =
-    "rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px] text-zinc-600 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5";
+    "rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10";
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">Aging Overview</h1>
-          <p className="mt-1 text-[14px] text-zinc-400">A live snapshot of open invoices across every project.</p>
+          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Aging Overview</h1>
+          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">A live snapshot of open invoices across every project.</p>
         </div>
         <div className="shrink-0 text-right">
           <input
@@ -180,23 +180,23 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
       {uploadMessage && (
-        <p className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-[13px] text-emerald-700">{uploadMessage}</p>
+        <p className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">{uploadMessage}</p>
       )}
-      {uploadError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{uploadError}</p>}
+      {uploadError && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{uploadError}</p>}
 
       {summary && (
         <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">Total Open</p>
-            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900">
+          <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Total Open</p>
+            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
               {money(summary.total_open_amount)}
             </p>
           </div>
-          <div className="rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">Invoices</p>
-            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900">
+          <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Invoices</p>
+            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
               {summary.total_invoices}
             </p>
           </div>
@@ -205,13 +205,13 @@ export default function Dashboard() {
             .map(([stage, s]) => (
               <div
                 key={stage}
-                className="rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+                className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
               >
-                <p className="truncate text-[12px] font-medium uppercase tracking-wide text-zinc-400">
+                <p className="truncate text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                   {stage.replace(/_/g, " ")}
                 </p>
-                <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900">
-                  {s.count} <span className="text-[14px] font-normal text-zinc-400">· {money(s.open_amount)}</span>
+                <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+                  {s.count} <span className="text-[14px] font-normal text-zinc-400 dark:text-zinc-500">· {money(s.open_amount)}</span>
                 </p>
               </div>
             ))}
@@ -221,29 +221,29 @@ export default function Dashboard() {
       <SimulationControls onRan={() => setRefreshKey((k) => k + 1)} />
 
       {commitmentMetric && commitmentMetric.total_open > 0 && (
-        <div className="mb-8 rounded-2xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <div className="mb-8 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">
+              <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                 Known next commitment
               </p>
               <p className="mt-1 flex items-baseline gap-2">
-                <span className="font-display text-[22px] font-semibold tabular-nums text-zinc-900">
+                <span className="font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                   {commitmentMetric.known_pct}%
                 </span>
-                <span className="text-[13px] text-zinc-400">
+                <span className="text-[13px] text-zinc-400 dark:text-zinc-500">
                   {commitmentMetric.known} of {commitmentMetric.total_open} open invoices have a payment date,
                   agreed follow-up date, or an assigned owner
                 </span>
               </p>
             </div>
             {commitmentMetric.unknown > 0 && (
-              <span className="shrink-0 rounded-full bg-amber-50 px-3 py-1 text-[12px] font-medium text-amber-700">
+              <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-3 py-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">
                 {commitmentMetric.unknown} unresolved
               </span>
             )}
           </div>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
             <div
               className="h-full rounded-full bg-emerald-500 transition-all"
               style={{ width: `${commitmentMetric.known_pct}%` }}
@@ -262,7 +262,7 @@ export default function Dashboard() {
       </div>
 
       {invoices.length === 0 && (
-        <div className="rounded-2xl border border-zinc-200/70 bg-white px-5 py-12 text-center text-[13px] text-zinc-400 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-12 text-center text-[13px] text-zinc-400 dark:text-zinc-500 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
           No invoices match these filters.
         </div>
       )}
@@ -278,42 +278,42 @@ export default function Dashboard() {
           return (
             <div
               key={key}
-              className="overflow-hidden rounded-2xl border border-zinc-200/70 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+              className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
             >
               <button
                 onClick={() => toggleExpanded(key)}
-                className="flex w-full items-center gap-3 border-b border-zinc-100 bg-zinc-50/60 px-5 py-3.5 text-left transition-colors hover:bg-zinc-100/60"
+                className="flex w-full items-center gap-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-5 py-3.5 text-left transition-colors hover:bg-zinc-100/60 dark:hover:bg-zinc-800"
               >
                 <span
-                  className={`shrink-0 text-zinc-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                  className={`shrink-0 text-zinc-400 dark:text-zinc-500 transition-transform ${isOpen ? "rotate-90" : ""}`}
                   aria-hidden
                 >
                   &#9656;
                 </span>
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[12px] font-semibold text-white">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 dark:bg-zinc-700 text-[12px] font-semibold text-white">
                   {(group.project_name ?? group.project_number ?? "?").slice(0, 1).toUpperCase()}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-[14px] font-medium text-zinc-900">
+                  <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">
                     {group.project_name ?? group.project_number ?? "Unknown project"}
                   </p>
-                  {group.project_number && <p className="text-[12px] text-zinc-400">{group.project_number}</p>}
+                  {group.project_number && <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
                 </div>
                 <span className="ml-auto flex shrink-0 items-center gap-2">
                   {projectChases.length > 0 && (
                     <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
                         escalatedCount > 0
-                          ? "bg-rose-50 text-rose-700"
+                          ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
                           : activeChases.length > 0
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-zinc-100 text-zinc-500"
+                            ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+                            : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
                       }`}
                     >
                       {activeChases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
                     </span>
                   )}
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                     {group.invoices.length} invoice{group.invoices.length === 1 ? "" : "s"}
                   </span>
                 </span>
@@ -322,11 +322,11 @@ export default function Dashboard() {
               {isOpen && (
                 <>
                   {activeChases.length > 0 && (
-                    <div className="space-y-2 border-b border-zinc-100 bg-zinc-50/40 px-5 py-3.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Agent activity</p>
+                    <div className="space-y-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-800/40 px-5 py-3.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Agent activity</p>
                       {activeChases.map((c) => (
                         <div key={c.id} className="flex items-center gap-3 text-[12px]">
-                          <span className="w-28 shrink-0 truncate text-zinc-600">
+                          <span className="w-28 shrink-0 truncate text-zinc-600 dark:text-zinc-300">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </span>
                           <AgentPhaseRail state={c.state} compact />
@@ -336,7 +336,7 @@ export default function Dashboard() {
                   )}
                   <table className="w-full border-collapse text-[13px]">
                     <thead>
-                      <tr className="border-b border-zinc-100 text-left text-[12px] font-medium uppercase tracking-wide text-zinc-400">
+                      <tr className="border-b border-zinc-100 dark:border-zinc-800 text-left text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                         <th className="px-5 py-2.5 font-medium">Invoice #</th>
                         <th className="px-5 py-2.5 font-medium">Status</th>
                         <th className="px-5 py-2.5 font-medium">Due</th>
@@ -346,23 +346,23 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {group.invoices.map((inv) => (
-                        <tr key={inv.invoice_id} className="group border-b border-zinc-50 last:border-0 hover:bg-zinc-50/70">
+                        <tr key={inv.invoice_id} className="group border-b border-zinc-50 dark:border-zinc-800 last:border-0 hover:bg-zinc-50/70 dark:hover:bg-zinc-800/60">
                           <td className="px-5 py-3">
-                            <Link to={`/invoices/${inv.invoice_id}`} className="font-medium text-zinc-800 hover:text-zinc-950">
+                            <Link to={`/invoices/${inv.invoice_id}`} className="font-medium text-zinc-800 dark:text-zinc-200 hover:text-zinc-950 dark:hover:text-zinc-50">
                               {inv.invoice_no ?? inv.case_key ?? "--"}
                             </Link>
                           </td>
                           <td className="px-5 py-3">
                             <Pill label={inv.status} styleMap={STATUS_STYLES} />
                           </td>
-                          <td className="px-5 py-3 text-zinc-500">{inv.due_date ?? "--"}</td>
-                          <td className="px-5 py-3 text-right font-medium tabular-nums text-zinc-800">
+                          <td className="px-5 py-3 text-zinc-500 dark:text-zinc-400">{inv.due_date ?? "--"}</td>
+                          <td className="px-5 py-3 text-right font-medium tabular-nums text-zinc-800 dark:text-zinc-200">
                             {money(inv.open_amount)}
                           </td>
                           <td className="px-5 py-3 text-right">
                             <button
                               onClick={() => askAboutInvoice(inv)}
-                              className="rounded-full px-3 py-1 text-[12px] font-medium text-zinc-400 opacity-0 transition-all hover:bg-green-700 hover:text-white group-hover:opacity-100"
+                              className="rounded-full px-3 py-1 text-[12px] font-medium text-zinc-400 dark:text-zinc-500 opacity-0 transition-all hover:bg-green-700 hover:text-white group-hover:opacity-100"
                             >
                               Ask about this
                             </button>

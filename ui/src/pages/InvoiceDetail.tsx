@@ -77,32 +77,32 @@ function SnoozeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
+        className="w-full max-w-md rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Snooze a follow-up</h2>
-        <p className="mt-1 text-[12px] text-zinc-400">Pauses dunning outreach on this invoice until you resume it.</p>
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Snooze a follow-up</h2>
+        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">Pauses dunning outreach on this invoice until you resume it.</p>
 
-        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Reason</label>
+        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Reason</label>
         <input
           autoFocus
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder="e.g. customer disputing amount"
-          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Resume on (optional)</label>
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Resume on (optional)</label>
         <input
           type="date"
           value={resumeDate}
           onChange={(e) => setResumeDate(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
-        {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+        {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
         <div className="flex gap-2">
           <button
             onClick={() => onConfirm(reason, resumeDate)}
@@ -113,7 +113,7 @@ function SnoozeModal({
           </button>
           <button
             onClick={onClose}
-            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
+            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
           >
             Cancel
           </button>
@@ -141,41 +141,41 @@ function FollowUpModal({
   const canSubmit = email.trim().length > 0 && Number.isFinite(cadence) && cadence >= 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
+        className="w-full max-w-md rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Follow up with the customer</h2>
-        <p className="mt-1 text-[12px] text-zinc-400">
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Follow up with the customer</h2>
+        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
           Sends a follow-up email now, then repeats on the schedule below until you cancel it or the end date passes.
         </p>
 
-        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600">Customer email</label>
+        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Customer email</label>
         <input
           autoFocus
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="customer@example.com"
-          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Every how many days</label>
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Every how many days</label>
         <input
           type="number"
           min={1}
           value={cadenceDays}
           onChange={(e) => setCadenceDays(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Until (optional)</label>
+        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Until (optional)</label>
         <input
           type="date"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
-        {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+        {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
         <div className="flex gap-2">
           <button
             onClick={() => onConfirm(email.trim(), cadence, endDate)}
@@ -186,7 +186,7 @@ function FollowUpModal({
           </button>
           <button
             onClick={onClose}
-            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50"
+            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
           >
             Cancel
           </button>
@@ -365,13 +365,13 @@ export default function InvoiceDetail() {
   if (error)
     return (
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
+        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
       </div>
     );
   if (!invoice)
     return (
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400">Loading...</p>
+        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
       </div>
     );
 
@@ -406,13 +406,13 @@ export default function InvoiceDetail() {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <Link to="/" className="text-[13px] font-medium text-zinc-400 transition-colors hover:text-zinc-900">
+      <Link to="/" className="text-[13px] font-medium text-zinc-400 dark:text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">
         &larr; Back to dashboard
       </Link>
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="font-display text-[20px] font-semibold tracking-tight text-zinc-900">
+          <h1 className="font-display text-[20px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             {invoice.project_name ?? invoice.project_number ?? "Invoice"}
           </h1>
           <div className="flex gap-2">
@@ -420,14 +420,14 @@ export default function InvoiceDetail() {
               <button
                 onClick={handleResume}
                 disabled={resuming}
-                className="rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-[13px] font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-2 text-[13px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {resuming ? "Resuming..." : "Resume"}
               </button>
             ) : (
               <button
                 onClick={() => setShowSnoozeModal(true)}
-                className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+                className="rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
               >
                 Snooze
               </button>
@@ -435,7 +435,7 @@ export default function InvoiceDetail() {
             {!activeCampaign && (
               <button
                 onClick={() => setShowFollowUpModal(true)}
-                className="rounded-full border border-zinc-200 px-4 py-2 text-[13px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+                className="rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
               >
                 Follow up
               </button>
@@ -451,17 +451,17 @@ export default function InvoiceDetail() {
         <dl className="grid grid-cols-2 gap-y-4 text-[14px]">
           {fields.map(([label, value]) => (
             <div key={label} className="contents">
-              <dt className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">{label}</dt>
-              <dd className="text-right font-medium text-zinc-800">{value ?? "--"}</dd>
+              <dt className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{label}</dt>
+              <dd className="text-right font-medium text-zinc-800 dark:text-zinc-200">{value ?? "--"}</dd>
             </div>
           ))}
         </dl>
         {isSnoozed && (
-          <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-amber-700">
+          <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
             Snoozed &mdash; reminders are paused until this is resumed.
           </div>
         )}
-        {resumeError && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{resumeError}</p>}
+        {resumeError && <p className="mt-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{resumeError}</p>}
 
         {activeCampaign && (
           <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-3 py-2 text-[13px] text-blue-700">
@@ -501,18 +501,18 @@ export default function InvoiceDetail() {
       )}
 
       {chase && (
-        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Chase agent</h2>
-          <p className="mt-1 text-[12px] text-zinc-400">What the agentic chase engine is doing on this invoice.</p>
+        <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chase agent</h2>
+          <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">What the agentic chase engine is doing on this invoice.</p>
           <div className="mt-6">
             <AgentPhaseRail state={chase.state} />
           </div>
         </div>
       )}
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Comments</h2>
-        <p className="mt-1 text-[12px] text-zinc-400">
+      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Comments</h2>
+        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
           Comments posted from Teams and the web -- both land in the same timeline.
         </p>
 
@@ -525,7 +525,7 @@ export default function InvoiceDetail() {
               if (e.key === "Enter" && !posting) submitComment();
             }}
             placeholder="Add a comment..."
-            className="flex-1 rounded-full border border-zinc-200 bg-zinc-50 px-4 py-2 text-[13px] text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white"
+            className="flex-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/40 px-4 py-2 text-[13px] text-zinc-800 dark:text-zinc-200 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-300 dark:focus:border-zinc-500 focus:bg-white"
           />
           <button
             onClick={submitComment}
@@ -535,62 +535,62 @@ export default function InvoiceDetail() {
             {posting ? "Posting..." : "Post"}
           </button>
         </div>
-        {commentError && <p className="mt-2 text-[12px] text-rose-600">{commentError}</p>}
+        {commentError && <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400">{commentError}</p>}
 
         <ul className="mt-6 space-y-4">
-          {timelineLoading && <li className="text-[13px] text-zinc-400">Loading...</li>}
+          {timelineLoading && <li className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</li>}
           {!timelineLoading && comments.length === 0 && (
-            <li className="text-[13px] text-zinc-400">No comments yet.</li>
+            <li className="text-[13px] text-zinc-400 dark:text-zinc-500">No comments yet.</li>
           )}
           {!timelineLoading &&
             comments.map((event, i) => {
               const { author, body } = parseCommentAuthor(event.summary ?? event.title);
               return (
-                <li key={i} className="border-l-2 border-zinc-100 pl-4">
+                <li key={i} className="border-l-2 border-zinc-100 dark:border-zinc-800 pl-4">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-semibold text-zinc-700">{author ?? "Unknown user"}</span>
-                    <span className="text-[11px] text-zinc-400">{when(event.at)}</span>
+                    <span className="text-[12px] font-semibold text-zinc-700 dark:text-zinc-300">{author ?? "Unknown user"}</span>
+                    <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{when(event.at)}</span>
                   </div>
-                  <p className="mt-1 text-[13px] text-zinc-800">{body}</p>
+                  <p className="mt-1 text-[13px] text-zinc-800 dark:text-zinc-200">{body}</p>
                 </li>
               );
             })}
         </ul>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Activity</h2>
-        <p className="mt-1 text-[12px] text-zinc-400">Stage changes, outreach sent, and other system events.</p>
+      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Activity</h2>
+        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">Stage changes, outreach sent, and other system events.</p>
 
         <ul className="mt-6 space-y-4">
-          {timelineLoading && <li className="text-[13px] text-zinc-400">Loading...</li>}
+          {timelineLoading && <li className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</li>}
           {!timelineLoading && activity.length === 0 && (
-            <li className="text-[13px] text-zinc-400">No activity yet.</li>
+            <li className="text-[13px] text-zinc-400 dark:text-zinc-500">No activity yet.</li>
           )}
           {!timelineLoading &&
             activity.map((event, i) => (
-              <li key={i} className="border-l-2 border-zinc-100 pl-4">
+              <li key={i} className="border-l-2 border-zinc-100 dark:border-zinc-800 pl-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">
+                  <span className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
                     {humanizeEventType(event.event_type)}
                   </span>
-                  <span className="text-[11px] text-zinc-300">{when(event.at)}</span>
+                  <span className="text-[11px] text-zinc-300 dark:text-zinc-600">{when(event.at)}</span>
                 </div>
-                <p className="mt-1 text-[13px] text-zinc-800">{event.summary ?? event.title ?? "--"}</p>
+                <p className="mt-1 text-[13px] text-zinc-800 dark:text-zinc-200">{event.summary ?? event.title ?? "--"}</p>
               </li>
             ))}
         </ul>
       </div>
 
       {chase && (
-        <div className="mt-4 rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900">Agent communication</h2>
-          <p className="mt-1 text-[12px] text-zinc-400">
+        <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Agent communication</h2>
+          <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
             Outreach, replies, and commitments tracked by the chase agent -- who sent what to whom, and what it decided.
           </p>
           <div className="mt-6 space-y-2">
-            {chaseEvents === null && <p className="text-[13px] text-zinc-400">Loading...</p>}
-            {chaseEvents && chaseEvents.length === 0 && <p className="text-[13px] text-zinc-400">No agent activity yet.</p>}
+            {chaseEvents === null && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
+            {chaseEvents && chaseEvents.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No agent activity yet.</p>}
             {chaseEvents?.map((e) => (
               <ChaseEventRow key={e.id} chase={chase} event={e} />
             ))}

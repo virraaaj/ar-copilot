@@ -22,7 +22,7 @@ export default function Settings() {
   return (
     <div>
       <div className="mx-auto max-w-4xl px-6 pt-8">
-        <div className="mb-2 flex gap-1 border-b border-zinc-200/70">
+        <div className="mb-2 flex gap-1 border-b border-zinc-200/70 dark:border-zinc-700">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -30,7 +30,7 @@ export default function Settings() {
               className={`-mb-px border-b-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors ${
                 tab === t.id
                   ? "border-green-700 text-green-700"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800"
+                  : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
               }`}
             >
               {t.label}

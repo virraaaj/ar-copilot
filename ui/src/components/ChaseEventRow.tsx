@@ -14,9 +14,9 @@ function formatWhen(iso: string | null): string {
 }
 
 const TRAJECTORY_VERDICT_STYLES: Record<string, string> = {
-  progressing: "bg-emerald-50 text-emerald-700",
-  stalling: "bg-amber-50 text-amber-700",
-  concerning: "bg-rose-50 text-rose-700",
+  progressing: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  stalling: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  concerning: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
 };
 
 function humanizeRole(role: string): string {
@@ -49,26 +49,26 @@ type KindMeta = { icon: string; color: string; ring: string; label: string };
 const KIND_META: Record<string, KindMeta> = {
   created: { icon: "🚀", color: "bg-slate-100 text-slate-600", ring: "ring-slate-200", label: "Started" },
   action_decided: { icon: "🧠", color: "bg-slate-100 text-slate-600", ring: "ring-slate-200", label: "Decided" },
-  outreach_sent: { icon: "📤", color: "bg-sky-50 text-sky-700", ring: "ring-sky-200", label: "Outreach sent" },
-  dry_run_send: { icon: "📤", color: "bg-sky-50 text-sky-700", ring: "ring-sky-200", label: "Outreach (dry run)" },
-  reply_received: { icon: "💬", color: "bg-zinc-100 text-zinc-700", ring: "ring-zinc-200", label: "Reply received" },
-  reply_parsed: { icon: "🔍", color: "bg-zinc-100 text-zinc-700", ring: "ring-zinc-200", label: "Reply parsed" },
-  clarify_requested: { icon: "❓", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Clarifying" },
-  commitment_tracked: { icon: "📅", color: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-200", label: "Payment date tracked" },
-  commitment_missed: { icon: "⏰", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Commitment missed" },
-  handoff_to_customer: { icon: "🔀", color: "bg-violet-50 text-violet-700", ring: "ring-violet-200", label: "Handed off to customer" },
-  handoff_to_contact: { icon: "🔀", color: "bg-violet-50 text-violet-700", ring: "ring-violet-200", label: "Handed off" },
-  checkback_scheduled: { icon: "🕒", color: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-200", label: "Checking back later" },
-  blocker_reported: { icon: "🚧", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Blocker reported" },
-  blocker_check_in: { icon: "🚧", color: "bg-amber-50 text-amber-700", ring: "ring-amber-200", label: "Blocker check-in" },
-  escalated: { icon: "⚠️", color: "bg-rose-50 text-rose-700", ring: "ring-rose-200", label: "Escalated" },
-  closed: { icon: "✅", color: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-200", label: "Closed" },
-  human_action: { icon: "🖐️", color: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-200", label: "Human action" },
-  out_of_office_detected: { icon: "🌴", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "Out of office" },
-  suppressed: { icon: "🔕", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "Unsubscribed" },
+  outreach_sent: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", ring: "ring-sky-200 dark:ring-sky-800", label: "Outreach sent" },
+  dry_run_send: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", ring: "ring-sky-200 dark:ring-sky-800", label: "Outreach (dry run)" },
+  reply_received: { icon: "💬", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Reply received" },
+  reply_parsed: { icon: "🔍", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Reply parsed" },
+  clarify_requested: { icon: "❓", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Clarifying" },
+  commitment_tracked: { icon: "📅", color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-200 dark:ring-emerald-800", label: "Payment date tracked" },
+  commitment_missed: { icon: "⏰", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Commitment missed" },
+  handoff_to_customer: { icon: "🔀", color: "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", ring: "ring-violet-200 dark:ring-violet-800", label: "Handed off to customer" },
+  handoff_to_contact: { icon: "🔀", color: "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", ring: "ring-violet-200 dark:ring-violet-800", label: "Handed off" },
+  checkback_scheduled: { icon: "🕒", color: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300", ring: "ring-indigo-200 dark:ring-indigo-800", label: "Checking back later" },
+  blocker_reported: { icon: "🚧", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Blocker reported" },
+  blocker_check_in: { icon: "🚧", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Blocker check-in" },
+  escalated: { icon: "⚠️", color: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300", ring: "ring-rose-200 dark:ring-rose-800", label: "Escalated" },
+  closed: { icon: "✅", color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-200 dark:ring-emerald-800", label: "Closed" },
+  human_action: { icon: "🖐️", color: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300", ring: "ring-indigo-200 dark:ring-indigo-800", label: "Human action" },
+  out_of_office_detected: { icon: "🌴", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Out of office" },
+  suppressed: { icon: "🔕", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Unsubscribed" },
 };
 
-const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 text-zinc-600", ring: "ring-zinc-200", label: "" };
+const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "" };
 
 function metaFor(kind: string): KindMeta {
   const found = KIND_META[kind];
@@ -87,14 +87,14 @@ function MessageBubble({ text, tone = "zinc" }: { text: string; tone?: "zinc" | 
   const isLong = text.length > COLLAPSE_THRESHOLD;
   const shown = expanded || !isLong ? text : text.slice(0, COLLAPSE_THRESHOLD).trimEnd() + "…";
   const toneClass =
-    tone === "sky" ? "bg-sky-50/60 border-sky-100" : tone === "violet" ? "bg-violet-50/60 border-violet-100" : "bg-zinc-50 border-zinc-100";
+    tone === "sky" ? "bg-sky-50/60 dark:bg-sky-950/40 border-sky-100 dark:border-sky-800" : tone === "violet" ? "bg-violet-50/60 dark:bg-violet-950/40 border-violet-100 dark:border-violet-800" : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800";
   return (
-    <div className={`mt-1.5 rounded-lg border px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-700 ${toneClass}`}>
+    <div className={`mt-1.5 rounded-lg border px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-700 dark:text-zinc-300 ${toneClass}`}>
       {shown}
       {isLong && (
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="ml-1.5 text-[11px] font-medium text-zinc-400 underline decoration-dotted hover:text-zinc-600"
+          className="ml-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 underline decoration-dotted hover:text-zinc-600 dark:hover:text-zinc-300"
         >
           {expanded ? "show less" : "show more"}
         </button>
@@ -109,11 +109,11 @@ function WhyExplanation({ text }: { text: string }) {
     <div className="mt-1">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="text-[11px] font-medium text-zinc-400 underline decoration-dotted hover:text-zinc-600"
+        className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 underline decoration-dotted hover:text-zinc-600 dark:hover:text-zinc-300"
       >
         {open ? "hide why" : "why?"}
       </button>
-      {open && <p className="mt-1 text-[12px] italic leading-relaxed text-zinc-500">{text}</p>}
+      {open && <p className="mt-1 text-[12px] italic leading-relaxed text-zinc-500 dark:text-zinc-400">{text}</p>}
     </div>
   );
 }
@@ -130,14 +130,14 @@ function EventShell({
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] ring-4 ${meta.color} ${meta.ring}`}>
           {meta.icon}
         </span>
-        <span className="mt-1 w-px flex-1 bg-zinc-100" />
+        <span className="mt-1 w-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
       </div>
       <div className="min-w-0 flex-1 pb-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.color}`}>
             {meta.label}
           </span>
-          <span className="text-[11px] text-zinc-400">{formatWhen(at)}</span>
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{formatWhen(at)}</span>
         </div>
         {children}
         {explanation && <WhyExplanation text={explanation} />}
@@ -152,10 +152,10 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
     return (
       <EventShell kind="trajectory_assessed" at={event.at} explanation={event.explanation}>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-[12px] text-zinc-500">🧭 AI trajectory check:</span>
+          <span className="text-[12px] text-zinc-500 dark:text-zinc-400">🧭 AI trajectory check:</span>
           <span
             className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-              TRAJECTORY_VERDICT_STYLES[verdict] ?? "bg-zinc-100 text-zinc-600"
+              TRAJECTORY_VERDICT_STYLES[verdict] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
             }`}
           >
             {verdict || "unknown"}
@@ -171,16 +171,16 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
     const postponeCount = event.detail?.postpone_count;
     return (
       <EventShell kind="checkback_scheduled" at={event.at} explanation={event.explanation}>
-        <p className="mt-1 text-[12px] text-zinc-600">
+        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">
           {followupDate ? (
             <>
-              Following up again on <span className="font-medium text-zinc-700">{followupDate}</span>
+              Following up again on <span className="font-medium text-zinc-700 dark:text-zinc-300">{followupDate}</span>
             </>
           ) : (
             "Asked when a good time to follow up would be"
           )}
           {typeof postponeCount === "number" && (
-            <span className="ml-1.5 text-zinc-400">
+            <span className="ml-1.5 text-zinc-400 dark:text-zinc-500">
               ({postponeCount} check-in{postponeCount === 1 ? "" : "s"} so far)
             </span>
           )}
@@ -195,11 +195,11 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
     const resolutionDate = event.detail?.blocker_resolution_date ? String(event.detail.blocker_resolution_date) : null;
     return (
       <EventShell kind="blocker_reported" at={event.at} explanation={event.explanation}>
-        <p className="mt-1 text-[12px] text-zinc-600">
-          <span className="font-medium capitalize text-zinc-700">{blockerType}</span>
+        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">
+          <span className="font-medium capitalize text-zinc-700 dark:text-zinc-300">{blockerType}</span>
           {resolutionDate ? (
             <>
-              {" "}-- expected to clear <span className="font-medium text-zinc-700">{resolutionDate}</span>
+              {" "}-- expected to clear <span className="font-medium text-zinc-700 dark:text-zinc-300">{resolutionDate}</span>
             </>
           ) : (
             " -- no resolution date yet"
@@ -222,25 +222,25 @@ export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEven
   return (
     <EventShell kind={event.kind} at={event.at} explanation={event.explanation}>
       {(who || channel || composed || sentiment || needsReview) && (
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
           {who && (
-            <span className="font-medium text-zinc-700">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
               &rarr; {who}
             </span>
           )}
-          {channel && <span className="text-zinc-400">{channel}</span>}
+          {channel && <span className="text-zinc-400 dark:text-zinc-500">{channel}</span>}
           {composed && (
-            <span className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+            <span className="rounded-full bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
               ✨ AI-composed
             </span>
           )}
           {sentiment && (sentiment === "angry" || sentiment === "frustrated") && (
-            <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-700">
+            <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-700 dark:text-amber-300">
               {sentiment}
             </span>
           )}
           {needsReview && (
-            <span className="rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
+            <span className="rounded-full bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:text-rose-300">
               ⚑ needs review
             </span>
           )}

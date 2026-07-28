@@ -10,10 +10,10 @@ import { useSession } from "../context/SessionContext";
 
 const NODE_TYPE_STYLES: Record<string, string> = {
   Customer: "bg-slate-100 text-slate-600",
-  Invoice: "bg-sky-50 text-sky-700",
-  Blocker: "bg-amber-50 text-amber-700",
-  Commitment: "bg-emerald-50 text-emerald-700",
-  Dispute: "bg-rose-50 text-rose-700",
+  Invoice: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
+  Blocker: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  Commitment: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  Dispute: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
 };
 
 function relationshipLabel(rel: string): string {
@@ -33,7 +33,7 @@ export function MemoryGraphPanel({ chaseId }: { chaseId: string }) {
 
   return (
     <div className="mt-4">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
         Relationships
       </p>
       <div className="space-y-1.5">
@@ -42,15 +42,15 @@ export function MemoryGraphPanel({ chaseId }: { chaseId: string }) {
           const to = graph.nodes[edge.to_node_id];
           return (
             <div key={edge.id} className="flex flex-wrap items-center gap-1.5 text-[12px]">
-              <span className={`rounded-full px-2 py-0.5 font-medium ${NODE_TYPE_STYLES[from?.type ?? ""] ?? "bg-zinc-100 text-zinc-600"}`}>
+              <span className={`rounded-full px-2 py-0.5 font-medium ${NODE_TYPE_STYLES[from?.type ?? ""] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"}`}>
                 {from?.label ?? edge.from_node_id}
               </span>
-              <span className="text-zinc-400">{relationshipLabel(edge.relationship)}</span>
-              <span className={`rounded-full px-2 py-0.5 font-medium ${NODE_TYPE_STYLES[to?.type ?? ""] ?? "bg-zinc-100 text-zinc-600"}`}>
+              <span className="text-zinc-400 dark:text-zinc-500">{relationshipLabel(edge.relationship)}</span>
+              <span className={`rounded-full px-2 py-0.5 font-medium ${NODE_TYPE_STYLES[to?.type ?? ""] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"}`}>
                 {to?.label ?? edge.to_node_id}
               </span>
               {to?.attributes?.expected_resolution_date ? (
-                <span className="text-zinc-400">-- expected {String(to.attributes.expected_resolution_date)}</span>
+                <span className="text-zinc-400 dark:text-zinc-500">-- expected {String(to.attributes.expected_resolution_date)}</span>
               ) : null}
             </div>
           );

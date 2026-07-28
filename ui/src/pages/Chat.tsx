@@ -15,9 +15,9 @@ interface DisplayMessage {
 function ThinkingDots() {
   return (
     <span className="inline-flex items-center gap-1">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.3s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 [animation-delay:-0.15s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
     </span>
   );
 }
@@ -119,26 +119,26 @@ export default function Chat() {
   return (
     <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900">Chat</h1>
+        <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chat</h1>
         <button
           onClick={changeProject}
-          className="rounded-full border border-zinc-200 px-3 py-1 text-[12px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+          className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1 text-[12px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
         >
           Change project
         </button>
       </div>
-      <p className="-mt-2 mb-4 text-[13px] text-zinc-400">
-        Chatting about <span className="font-medium text-zinc-700">{currentProject.project_name ?? currentProject.project_number}</span>
+      <p className="-mt-2 mb-4 text-[13px] text-zinc-400 dark:text-zinc-500">
+        Chatting about <span className="font-medium text-zinc-700 dark:text-zinc-300">{currentProject.project_name ?? currentProject.project_number}</span>
       </p>
 
       {pinnedInvoice && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-zinc-200/70 bg-white px-4 py-2.5 text-[13px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <span className="text-zinc-500">
-            Re: <span className="font-medium text-zinc-900">{pinnedInvoice.label}</span>
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[13px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <span className="text-zinc-500 dark:text-zinc-400">
+            Re: <span className="font-medium text-zinc-900 dark:text-zinc-100">{pinnedInvoice.label}</span>
           </span>
           <button
             onClick={() => setPinnedInvoice(null)}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+            className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 dark:text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300"
           >
             &times;
           </button>
@@ -151,7 +151,7 @@ export default function Chat() {
             <button
               key={q}
               onClick={() => sendQuestion(q)}
-              className="rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900"
+              className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
             >
               {q}
             </button>
@@ -159,9 +159,9 @@ export default function Chat() {
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         {messages.length === 0 && (
-          <p className="text-[13px] text-zinc-400">
+          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">
             {pinnedInvoice
               ? "Pick a question above, or ask your own."
               : 'Ask about invoices, documents, or aging — e.g. "which invoices are overdue past 60 days?"'}
@@ -174,8 +174,8 @@ export default function Chat() {
                 m.role === "user"
                   ? "bg-green-700 text-white"
                   : m.role === "progress"
-                    ? "flex items-center gap-2 italic text-zinc-400"
-                    : "bg-zinc-100 text-zinc-800"
+                    ? "flex items-center gap-2 italic text-zinc-400 dark:text-zinc-500"
+                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
               }`}
             >
               {m.role === "progress" ? (
@@ -198,7 +198,7 @@ export default function Chat() {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question..."
           disabled={sending}
-          className="flex-1 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 disabled:opacity-50"
+          className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10 disabled:opacity-50"
         />
         <button
           type="submit"
@@ -227,29 +227,29 @@ function ProjectPicker({ onPick }: { onPick: (project: Project) => void }) {
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="mb-1 font-display text-[22px] font-semibold tracking-tight text-zinc-900">Chat</h1>
-      <p className="mb-6 text-[14px] text-zinc-400">Pick a project to chat about — invoices and documents both come from it.</p>
+      <h1 className="mb-1 font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chat</h1>
+      <p className="mb-6 text-[14px] text-zinc-400 dark:text-zinc-500">Pick a project to chat about — invoices and documents both come from it.</p>
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
-      {!projects && !error && <p className="text-[13px] text-zinc-400">Loading projects...</p>}
+      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
+      {!projects && !error && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading projects...</p>}
 
       <div className="space-y-2">
         {projects?.map((p) => (
           <button
             key={p.project_number}
             onClick={() => onPick(p)}
-            className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200/70 bg-white p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50"
+            className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-[13px] font-semibold text-white">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-700 text-[13px] font-semibold text-white">
               {(p.project_name ?? p.project_number).slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-[14px] font-medium text-zinc-900">{p.project_name ?? p.project_number}</p>
-              <p className="text-[12px] text-zinc-400">{p.project_number}</p>
+              <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{p.project_name ?? p.project_number}</p>
+              <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{p.project_number}</p>
             </div>
           </button>
         ))}
-        {projects && projects.length === 0 && <p className="text-[13px] text-zinc-400">No projects found.</p>}
+        {projects && projects.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>}
       </div>
     </div>
   );

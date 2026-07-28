@@ -71,14 +71,14 @@ export default function ProjectContacts() {
   if (error) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
+        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
       </div>
     );
   }
   if (!groups) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400">Loading...</p>
+        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -86,10 +86,10 @@ export default function ProjectContacts() {
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">Project Contacts</h1>
-        <p className="mt-1 text-[14px] text-zinc-400">
+        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Project Contacts</h1>
+        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
           Who to reach for each project -- one contact per role. New projects start from the{" "}
-          <a href="/settings" className="font-medium text-zinc-600 underline underline-offset-2">
+          <a href="/settings" className="font-medium text-zinc-600 dark:text-zinc-300 underline underline-offset-2">
             default contacts
           </a>{" "}
           template (Settings tab).
@@ -101,25 +101,25 @@ export default function ProjectContacts() {
           const usedRoles = group.contacts.map((c) => c.contact_type);
           const hasUnassignedRole = usedRoles.length < CONTACT_TYPES.length;
           return (
-            <div key={group.project_number} className="overflow-hidden rounded-2xl border border-zinc-200/70 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-              <div className="flex items-center justify-between gap-3 border-b border-zinc-100 bg-zinc-50/60 px-5 py-3.5">
+            <div key={group.project_number} className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+              <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-5 py-3.5">
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[12px] font-semibold text-white">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 dark:bg-zinc-700 text-[12px] font-semibold text-white">
                     {(group.project_name ?? group.project_number).slice(0, 1).toUpperCase()}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-[14px] font-medium text-zinc-900">{group.project_name ?? group.project_number}</p>
-                    <p className="text-[12px] text-zinc-400">{group.project_number}</p>
+                    <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{group.project_name ?? group.project_number}</p>
+                    <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                     {group.contacts.length} contact{group.contacts.length === 1 ? "" : "s"}
                   </span>
                   {hasUnassignedRole && (
                     <button
                       onClick={() => setModal({ projectNumber: group.project_number, contact: null })}
-                      className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12px] font-medium text-zinc-700 transition-colors hover:bg-white"
+                      className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-white dark:hover:bg-zinc-800"
                     >
                       Add contact
                     </button>
@@ -150,7 +150,7 @@ export default function ProjectContacts() {
             </div>
           );
         })}
-        {groups.length === 0 && <p className="text-[13px] text-zinc-400">No projects found.</p>}
+        {groups.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>}
       </div>
 
       {modal && (

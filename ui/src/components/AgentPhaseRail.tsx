@@ -32,7 +32,7 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
       <div className="flex items-center gap-1.5">
         {isAlert ? (
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${state === "escalated" ? "bg-rose-500" : "bg-zinc-400"}`}
+            className={`h-2 w-2 shrink-0 rounded-full ${state === "escalated" ? "bg-rose-500" : "bg-zinc-400 dark:bg-zinc-500"}`}
           />
         ) : (
           STEPS.map((step, i) => {
@@ -47,13 +47,13 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
                     ? "bg-emerald-500"
                     : current
                       ? "bg-green-700 animate-pulse"
-                      : "bg-zinc-200"
+                      : "bg-zinc-200 dark:bg-zinc-700"
                 }`}
               />
             );
           })
         )}
-        <span className={`text-[11px] font-medium ${isAlert ? (state === "escalated" ? "text-rose-600" : "text-zinc-500") : "text-zinc-500"}`}>
+        <span className={`text-[11px] font-medium ${isAlert ? (state === "escalated" ? "text-rose-600 dark:text-rose-400" : "text-zinc-500 dark:text-zinc-400") : "text-zinc-500 dark:text-zinc-400"}`}>
           {isAlert ? (state === "escalated" ? "Escalated" : "Paused") : STEPS[currentIndex]?.label ?? state}
         </span>
       </div>
@@ -77,17 +77,17 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
                       ? "bg-green-700 text-white ring-4 ring-green-700/10 animate-pulse"
                       : filled
                         ? "bg-emerald-500 text-white"
-                        : "bg-zinc-100 text-zinc-400")
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500")
                   }
                 >
                   {filled ? "✓" : i + 1}
                 </div>
                 {i < STEPS.length - 1 && (
-                  <div className={"h-0.5 flex-1 transition-colors " + (filled ? "bg-emerald-500" : "bg-zinc-100")} />
+                  <div className={"h-0.5 flex-1 transition-colors " + (filled ? "bg-emerald-500" : "bg-zinc-100 dark:bg-zinc-800")} />
                 )}
               </div>
               <div className="mt-2 max-w-[100px] text-center text-[11px] leading-tight">
-                <span className={current ? "font-semibold text-zinc-900" : "text-zinc-400"}>{step.label}</span>
+                <span className={current ? "font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-400 dark:text-zinc-500"}>{step.label}</span>
               </div>
             </div>
           );
@@ -96,7 +96,7 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
       {isAlert && (
         <div
           className={`mt-4 rounded-lg px-3 py-2 text-[12.5px] font-medium ${
-            state === "escalated" ? "bg-rose-50 text-rose-700" : "bg-zinc-100 text-zinc-600"
+            state === "escalated" ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
           }`}
         >
           {state === "escalated" ? "⚠ Escalated for human review" : "⏸ Paused"}

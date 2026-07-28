@@ -27,17 +27,17 @@ import { AgentPhaseRail } from "../components/AgentPhaseRail";
 import { MemoryGraphPanel } from "../components/MemoryGraphPanel";
 
 const STATE_STYLES: Record<string, string> = {
-  pending: "bg-zinc-100 text-zinc-600",
-  awaiting_pm: "bg-sky-50 text-sky-700",
-  awaiting_customer: "bg-sky-50 text-sky-700",
-  awaiting_contact: "bg-sky-50 text-sky-700",
-  blocked: "bg-amber-50 text-amber-700",
-  commitment_tracked: "bg-emerald-50 text-emerald-700",
-  verifying_payment: "bg-amber-50 text-amber-700",
-  escalated: "bg-rose-50 text-rose-700",
-  paused: "bg-zinc-100 text-zinc-500",
-  closed_paid: "bg-emerald-50 text-emerald-700",
-  closed_manual: "bg-zinc-100 text-zinc-500",
+  pending: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300",
+  awaiting_pm: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
+  awaiting_customer: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
+  awaiting_contact: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
+  blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  commitment_tracked: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  verifying_payment: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  escalated: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
+  paused: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+  closed_paid: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  closed_manual: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
 };
 
 const STATE_LABELS: Record<string, string> = {
@@ -126,23 +126,23 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-200/70 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+    <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <p className="font-display text-[16px] font-semibold text-zinc-900">
+          <p className="font-display text-[16px] font-semibold text-zinc-900 dark:text-zinc-100">
             {chase.invoice_no ?? chase.case_key ?? chase.case_id}
           </p>
-          <p className="mt-0.5 text-[12px] text-zinc-400">{chase.project_number ?? "No project"}</p>
+          <p className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">{chase.project_number ?? "No project"}</p>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATE_STYLES[chase.state] ?? "bg-zinc-100 text-zinc-600"}`}>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATE_STYLES[chase.state] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"}`}>
           {stateLabel(chase.state)}
         </span>
       </div>
 
       <dl className="mb-4 grid grid-cols-2 gap-3 text-[12px]">
         <div>
-          <dt className="text-zinc-400">Target</dt>
-          <dd className="text-zinc-700">
+          <dt className="text-zinc-400 dark:text-zinc-500">Target</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">
             {chase.target === "pm"
               ? "PM"
               : chase.target === "customer"
@@ -153,45 +153,45 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           </dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Promised date</dt>
-          <dd className="text-zinc-700">{chase.promised_date ?? "--"}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Promised date</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">{chase.promised_date ?? "--"}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Missed commitments</dt>
-          <dd className="text-zinc-700">{chase.missed_count}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Missed commitments</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">{chase.missed_count}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Nudges sent</dt>
-          <dd className="text-zinc-700">{chase.nudge_count}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Nudges sent</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">{chase.nudge_count}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Last outreach</dt>
-          <dd className="text-zinc-700">{formatWhen(chase.last_outreach_at)}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Last outreach</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">{formatWhen(chase.last_outreach_at)}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Next action</dt>
-          <dd className="text-zinc-700">{formatWhen(chase.next_action_at)}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Next action</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">{formatWhen(chase.next_action_at)}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400">Tokens used</dt>
-          <dd className="text-zinc-700 tabular-nums" title={`${chase.total_tokens_used.toLocaleString()} tokens`}>
+          <dt className="text-zinc-400 dark:text-zinc-500">Tokens used</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums" title={`${chase.total_tokens_used.toLocaleString()} tokens`}>
             {formatTokens(chase.total_tokens_used)}
           </dd>
         </div>
         {chase.total_tokens_used > 0 && (
           <>
             <div>
-              <dt className="text-zinc-400">Token split (in / out)</dt>
+              <dt className="text-zinc-400 dark:text-zinc-500">Token split (in / out)</dt>
               <dd
-                className="text-zinc-700 tabular-nums"
+                className="text-zinc-700 dark:text-zinc-300 tabular-nums"
                 title={`${chase.prompt_tokens_used.toLocaleString()} prompt / ${chase.completion_tokens_used.toLocaleString()} completion tokens`}
               >
                 {formatTokens(chase.prompt_tokens_used)} / {formatTokens(chase.completion_tokens_used)}
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-400">Est. cost (gpt-5-mini)</dt>
-              <dd className="text-zinc-700 tabular-nums">
+              <dt className="text-zinc-400 dark:text-zinc-500">Est. cost (gpt-5-mini)</dt>
+              <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums">
                 {formatCost(estimateCost(chase.prompt_tokens_used, chase.completion_tokens_used))}
               </dd>
             </div>
@@ -201,14 +201,14 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
 
       <MemoryGraphPanel chaseId={chase.id} />
 
-      {error && <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-[12.5px] text-rose-600">{error}</p>}
+      {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">{error}</p>}
 
       <div className="mb-4 flex flex-wrap gap-2">
         {OPEN_STATES.has(chase.state) && chase.state !== "pending" && (
           <button
             disabled={busy}
             onClick={() => run(() => pauseChase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Pause
           </button>
@@ -217,7 +217,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy}
             onClick={() => run(() => resumeChase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Resume
           </button>
@@ -226,7 +226,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy}
             onClick={() => run(() => restartChase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Restart from scratch
           </button>
@@ -235,7 +235,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy}
             onClick={() => setShowEditDate((s) => !s)}
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Set payment date
           </button>
@@ -244,7 +244,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy}
             onClick={() => setShowClose((s) => !s)}
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Close manually
           </button>
@@ -253,7 +253,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <button
             disabled={busy}
             onClick={() => setShowSimulate((s) => !s)}
-            className="rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-[12.5px] font-medium text-zinc-500 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Simulate...
           </button>
@@ -261,8 +261,8 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
       </div>
 
       {showSimulate && chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
-        <div className="mb-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50/60 p-3">
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+        <div className="mb-4 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50/60 dark:bg-zinc-800/40 p-3">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
             Simulation controls (for demo/testing -- not a real reply or payment)
           </p>
           <div className="mb-2 flex items-center gap-2">
@@ -271,7 +271,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
               placeholder="Type a reply as if from the PM/customer..."
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px]"
+              className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px]"
             />
             <button
               disabled={busy || !replyText.trim()}
@@ -295,7 +295,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
                 setShowSimulate(false);
               })
             }
-            className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+            className="rounded-full border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Post simulated payment
           </button>
@@ -308,7 +308,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
             type="date"
             value={newDate}
             onChange={(e) => setNewDate(e.target.value)}
-            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-[13px]"
+            className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[13px]"
           />
           <button
             disabled={busy || !newDate}
@@ -327,7 +327,7 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
             placeholder="Reason for closing"
             value={closeReason}
             onChange={(e) => setCloseReason(e.target.value)}
-            className="flex-1 rounded-lg border border-zinc-200 px-3 py-1.5 text-[13px]"
+            className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[13px]"
           />
           <button
             disabled={busy || !closeReason.trim()}
@@ -340,9 +340,9 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
       )}
 
       <div>
-        <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">History</h3>
-        {!events && <p className="text-[13px] text-zinc-400">Loading...</p>}
-        {events && events.length === 0 && <p className="text-[13px] text-zinc-400">No events yet.</p>}
+        <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">History</h3>
+        {!events && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
+        {events && events.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No events yet.</p>}
         <div className="space-y-2">
           {events?.map((e) => (
             <ChaseEventRow key={e.id} chase={chase} event={e} />
@@ -417,7 +417,7 @@ export default function Chases() {
   if (error) {
     return (
       <div className="mx-auto max-w-5xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
+        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
       </div>
     );
   }
@@ -425,8 +425,8 @@ export default function Chases() {
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">Chases</h1>
-        <p className="mt-1 text-[14px] text-zinc-400">
+        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chases</h1>
+        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
           Every invoice the agentic chase engine is actively pursuing, or has escalated for review.
         </p>
       </div>
@@ -437,7 +437,7 @@ export default function Chases() {
             key={f}
             onClick={() => setFilter(f)}
             className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium capitalize transition-colors ${
-              filter === f ? "bg-green-700 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+              filter === f ? "bg-green-700 text-white" : "border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
             }`}
           >
             {f}
@@ -445,8 +445,8 @@ export default function Chases() {
         ))}
       </div>
 
-      {!chases && <p className="text-[13px] text-zinc-400">Loading...</p>}
-      {chases && visible.length === 0 && <p className="text-[13px] text-zinc-400">No chases here.</p>}
+      {!chases && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
+      {chases && visible.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No chases here.</p>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.3fr]">
         <div className="space-y-2">
@@ -456,48 +456,48 @@ export default function Chases() {
             const escalatedCount = group.chases.filter((c) => c.state === "escalated").length;
 
             return (
-              <div key={key} className="overflow-hidden rounded-xl border border-zinc-200/70 bg-white">
+              <div key={key} className="overflow-hidden rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900">
                 <button
                   onClick={() => toggleExpanded(key)}
-                  className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-zinc-50"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                 >
-                  <span className={`shrink-0 text-zinc-400 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden>
+                  <span className={`shrink-0 text-zinc-400 dark:text-zinc-500 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden>
                     &#9656;
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium text-zinc-800">
+                    <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
                       {group.project_number ? projectNames.get(group.project_number) ?? group.project_number : "No project"}
                     </p>
-                    {group.project_number && <p className="text-[11px] text-zinc-400">{group.project_number}</p>}
+                    {group.project_number && <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
                   </div>
                   <span className="ml-auto flex shrink-0 items-center gap-1.5">
                     {escalatedCount > 0 && (
-                      <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+                      <span className="rounded-full bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
                         {escalatedCount} escalated
                       </span>
                     )}
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                       {group.chases.length}
                     </span>
                   </span>
                 </button>
 
                 {isOpen && (
-                  <div className="space-y-1 border-t border-zinc-100 p-2">
+                  <div className="space-y-1 border-t border-zinc-100 dark:border-zinc-800 p-2">
                     {group.chases.map((c) => (
                       <button
                         key={c.id}
                         onClick={() => setSelectedId(c.id)}
                         className={`block w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                          selectedId === c.id ? "border-green-700 bg-zinc-50" : "border-transparent hover:bg-zinc-50"
+                          selectedId === c.id ? "border-green-700 bg-zinc-50 dark:bg-zinc-800/40" : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-[13px] font-medium text-zinc-800">
+                          <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </p>
                           {c.total_tokens_used > 0 && (
-                            <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">{formatTokens(c.total_tokens_used)} tok</span>
+                            <span className="shrink-0 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">{formatTokens(c.total_tokens_used)} tok</span>
                           )}
                         </div>
                         <div className="mt-1">
@@ -516,7 +516,7 @@ export default function Chases() {
           {selected ? (
             <ChaseDetail chase={selected} onChanged={refresh} />
           ) : (
-            <p className="text-[13px] text-zinc-400">Select a chase to see its details.</p>
+            <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Select a chase to see its details.</p>
           )}
         </div>
       </div>

@@ -27,38 +27,38 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] dark:bg-zinc-950 px-4">
       <div className="w-full max-w-[380px]">
         <div className="mb-8 flex flex-col items-center">
-          <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-[13px] font-bold text-white shadow-sm">
+          <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-700 text-[13px] font-bold text-white shadow-sm">
             AR
           </span>
-          <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900">AR Copilot</h1>
-          <p className="mt-1 text-[13px] text-zinc-400">Sign in with your Lummus account</p>
+          <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">AR Copilot</h1>
+          <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">Sign in with your Lummus account</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-zinc-200/70 bg-white p-7 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]"
+          className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.08)]"
         >
-          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Email</label>
+          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mb-4 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+            className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
             required
           />
-          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600">Password</label>
+          <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Password</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mb-5 w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-[14px] text-zinc-900 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+            className="mb-5 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
             required
           />
           {error && (
-            <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
+            <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
           )}
           <button
             type="submit"

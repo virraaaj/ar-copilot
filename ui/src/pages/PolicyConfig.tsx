@@ -11,16 +11,16 @@ import { getPolicyConfig, getPolicyDocuments, setRuntimeFlag, type PolicyConfig,
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-zinc-100 py-2 text-[13px] last:border-0">
-      <span className="text-zinc-500">{label}</span>
-      <span className="font-medium text-zinc-800">{value}</span>
+    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 py-2 text-[13px] last:border-0">
+      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span className="font-medium text-zinc-800 dark:text-zinc-200">{value}</span>
     </div>
   );
 }
 
 function Bool({ value }: { value: boolean }) {
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${value ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-500"}`}>
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${value ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"}`}>
       {value ? "On" : "Off"}
     </span>
   );
@@ -32,7 +32,7 @@ function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boole
       disabled={disabled}
       onClick={onToggle}
       className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-50 ${
-        value ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+        value ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
       }`}
     >
       {value ? "On" : "Off"}
@@ -42,8 +42,8 @@ function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boole
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">{title}</h3>
+    <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{title}</h3>
       {children}
     </div>
   );
@@ -78,8 +78,8 @@ export default function PolicyConfig() {
     }
   }
 
-  if (error) return <p className="px-6 py-8 text-[13px] text-rose-600">{error}</p>;
-  if (!data) return <p className="px-6 py-8 text-[13px] text-zinc-400">Loading...</p>;
+  if (error) return <p className="px-6 py-8 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>;
+  if (!data) return <p className="px-6 py-8 text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>;
 
   return (
     <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 px-6 py-8 sm:grid-cols-2">
@@ -138,7 +138,7 @@ export default function PolicyConfig() {
       <Card title="Allowed actions">
         <div className="flex flex-wrap gap-1.5">
           {data.allowed_actions.map((a) => (
-            <span key={a} className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11.5px] font-medium text-zinc-600">
+            <span key={a} className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11.5px] font-medium text-zinc-600 dark:text-zinc-300">
               {a.replace(/_/g, " ")}
             </span>
           ))}
@@ -146,16 +146,16 @@ export default function PolicyConfig() {
       </Card>
 
       {docs && (
-        <div className="sm:col-span-2 rounded-2xl border border-zinc-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h3 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Policy documents</h3>
-          <p className="mb-3 text-[12px] text-zinc-400">
+        <div className="sm:col-span-2 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+          <h3 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Policy documents</h3>
+          <p className="mb-3 text-[12px] text-zinc-400 dark:text-zinc-500">
             The library the AI composer references when drafting messages (keyword-matched to what it's writing).
           </p>
           <div className="space-y-3">
             {docs.map((d) => (
-              <div key={d.id} className="border-t border-zinc-100 pt-3 first:border-0 first:pt-0">
-                <p className="mb-0.5 text-[13px] font-medium text-zinc-800">{d.title}</p>
-                <p className="text-[12.5px] text-zinc-500">{d.text}</p>
+              <div key={d.id} className="border-t border-zinc-100 dark:border-zinc-800 pt-3 first:border-0 first:pt-0">
+                <p className="mb-0.5 text-[13px] font-medium text-zinc-800 dark:text-zinc-200">{d.title}</p>
+                <p className="text-[12.5px] text-zinc-500 dark:text-zinc-400">{d.text}</p>
               </div>
             ))}
           </div>

@@ -20,7 +20,7 @@ import { useSession } from "../context/SessionContext";
 const DOC_TYPES = ["vendor_certification", "customer_manual", "quote", "terms_and_conditions", "equipment_manual"];
 
 const selectClass =
-  "rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-[13px] text-zinc-600 outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5";
+  "rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10";
 
 const UNFILED = "_unfiled";
 
@@ -40,7 +40,7 @@ export default function Documents() {
   if (error) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
+        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
       </div>
     );
   }
@@ -61,7 +61,7 @@ export default function Documents() {
   if (!projects) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400">Loading...</p>
+        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
       </div>
     );
   }
@@ -72,8 +72,8 @@ export default function Documents() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
       <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">Documents</h1>
-        <p className="mt-1 text-[14px] text-zinc-400">Certifications, manuals, quotes, and T&amp;Cs — organized by project.</p>
+        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Documents</h1>
+        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">Certifications, manuals, quotes, and T&amp;Cs — organized by project.</p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -83,16 +83,16 @@ export default function Documents() {
             <button
               key={p.project_number}
               onClick={() => setOpenFolder(p)}
-              className="flex items-center gap-3 rounded-2xl border border-zinc-200/70 bg-white p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50"
+              className="flex items-center gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-[13px] font-semibold text-white">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-700 text-[13px] font-semibold text-white">
                 {(p.project_name ?? p.project_number).slice(0, 1).toUpperCase()}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-medium text-zinc-900">{p.project_name ?? p.project_number}</p>
-                <p className="text-[12px] text-zinc-400">{p.project_number}</p>
+                <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{p.project_name ?? p.project_number}</p>
+                <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{p.project_number}</p>
               </div>
-              <span className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+              <span className="shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                 {count} doc{count === 1 ? "" : "s"}
               </span>
             </button>
@@ -102,23 +102,23 @@ export default function Documents() {
         {unfiledCount > 0 && (
           <button
             onClick={() => setOpenFolder({ project_number: UNFILED, project_name: "Unfiled" })}
-            className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 bg-white p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50"
+            className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-300 text-[13px] font-semibold text-white">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-300 dark:bg-zinc-600 text-[13px] font-semibold text-white">
               ?
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-medium text-zinc-900">Unfiled</p>
-              <p className="text-[12px] text-zinc-400">Uploaded before project folders existed</p>
+              <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">Unfiled</p>
+              <p className="text-[12px] text-zinc-400 dark:text-zinc-500">Uploaded before project folders existed</p>
             </div>
-            <span className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+            <span className="shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
               {unfiledCount} doc{unfiledCount === 1 ? "" : "s"}
             </span>
           </button>
         )}
 
         {projects.length === 0 && unfiledCount === 0 && (
-          <p className="text-[13px] text-zinc-400">No projects found.</p>
+          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>
         )}
       </div>
     </div>
@@ -180,17 +180,17 @@ function ProjectDocuments({
     <div className="mx-auto max-w-3xl px-6 py-10">
       <button
         onClick={onBack}
-        className="mb-4 text-[13px] font-medium text-zinc-500 transition-colors hover:text-zinc-900"
+        className="mb-4 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
       >
         ← All projects
       </button>
 
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900">
+          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             {projectName ?? projectNumber}
           </h1>
-          <p className="mt-1 text-[14px] text-zinc-400">
+          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
             {isUnfiled ? "Documents uploaded before project folders existed." : `Documents for project ${projectNumber}.`}
           </p>
         </div>
@@ -207,7 +207,7 @@ function ProjectDocuments({
         )}
       </div>
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>}
+      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
 
       <div className="mb-4 flex items-center gap-2">
         <select
@@ -227,7 +227,7 @@ function ProjectDocuments({
         </select>
 
         {!isUnfiled && (
-          <label className="cursor-pointer rounded-lg border border-zinc-200 bg-white px-3.5 py-1.5 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50">
+          <label className="cursor-pointer rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-[13px] font-medium text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
             {uploading ? "Uploading..." : "Upload PDF"}
             <input type="file" accept="application/pdf" onChange={handleUpload} disabled={uploading} className="hidden" />
           </label>
@@ -239,7 +239,7 @@ function ProjectDocuments({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search document content..."
-          className="flex-1 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5"
+          className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
         />
         <button
           type="submit"
@@ -251,36 +251,36 @@ function ProjectDocuments({
 
       {results && (
         <div className="mb-8 space-y-2">
-          <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400">{results.length} result(s)</p>
+          <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{results.length} result(s)</p>
           {results.map((r, i) => (
             <div
               key={i}
-              className="rounded-xl border border-zinc-200/70 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+              className="rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
             >
-              <p className="text-[13px] font-medium text-zinc-900">
-                {r.filename} <span className="font-normal text-zinc-400">· page {r.page}</span>
+              <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">
+                {r.filename} <span className="font-normal text-zinc-400 dark:text-zinc-500">· page {r.page}</span>
               </p>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-zinc-500">{r.excerpt}</p>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">{r.excerpt}</p>
             </div>
           ))}
         </div>
       )}
 
-      <p className="mb-2 text-[12px] font-medium uppercase tracking-wide text-zinc-400">Documents in this folder</p>
-      <div className="overflow-hidden rounded-2xl border border-zinc-200/70 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <p className="mb-2 text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Documents in this folder</p>
+      <div className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
         {docs.map((d) => (
           <div
             key={d.filename}
-            className="flex items-center justify-between border-b border-zinc-50 px-5 py-3 text-[13px] last:border-0"
+            className="flex items-center justify-between border-b border-zinc-50 dark:border-zinc-800 px-5 py-3 text-[13px] last:border-0"
           >
-            <span className="font-medium text-zinc-800">{d.filename}</span>
-            <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-[12px] font-medium capitalize text-zinc-500">
+            <span className="font-medium text-zinc-800 dark:text-zinc-200">{d.filename}</span>
+            <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-[12px] font-medium capitalize text-zinc-500 dark:text-zinc-400">
               {d.doc_type?.replace(/_/g, " ") ?? "untyped"}
             </span>
           </div>
         ))}
         {docs.length === 0 && (
-          <div className="px-5 py-12 text-center text-[13px] text-zinc-400">No documents yet.</div>
+          <div className="px-5 py-12 text-center text-[13px] text-zinc-400 dark:text-zinc-500">No documents yet.</div>
         )}
       </div>
     </div>

@@ -31,17 +31,17 @@ export default function MagicLink() {
   }, []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] dark:bg-zinc-950 px-4">
       <div className="w-full max-w-[380px] text-center">
         {error ? (
           <>
-            <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-600">{error}</p>
-            <a href="/login" className="text-[13px] font-medium text-zinc-500 hover:text-zinc-900">
+            <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+            <a href="/login" className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
               Go to sign in
             </a>
           </>
         ) : (
-          <p className="text-[13px] text-zinc-400">Signing you in...</p>
+          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Signing you in...</p>
         )}
       </div>
     </div>
