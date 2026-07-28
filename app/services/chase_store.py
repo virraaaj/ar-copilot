@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS chases (
     last_outreach_at TEXT,
     next_action_at TEXT,
     total_tokens_used INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens_used INTEGER NOT NULL DEFAULT 0,
+    completion_tokens_used INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -165,6 +167,17 @@ class ChaseStore:
             for col in ("blocker_type", "blocker_description", "blocker_resolution_date"):
                 try:
                     await db.execute(f"ALTER TABLE chases ADD COLUMN {col} TEXT")
+                    await db.commit()
+                except aiosqlite.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+            # Migration for the prompt/completion token split (added
+            # 2026-07-28) -- total_tokens_used already existed; these two
+            # let the split be queried later without changing what's
+            # displayed (still just the total).
+            for col in ("prompt_tokens_used", "completion_tokens_used"):
+                try:
+                    await db.execute(f"ALTER TABLE chases ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
                     await db.commit()
                 except aiosqlite.OperationalError as exc:
                     if "duplicate column" not in str(exc).lower():
@@ -316,14 +329,28 @@ class ChaseStore:
         LLM call made in service of this chase (reply parsing, message
         composition, trajectory assessment), added 2026-07-22 for the
         Chases UI's per-invoice token display. A no-op for tokens<=0 so a
-        fallback path (0 tokens charged) never issues a pointless write."""
+        fallback path (0 tokens charged) never issues a pointless write.
+
+        `tokens` is typically an azure_openai.TokenUsage (added
+        2026-07-28) -- a plain int (still accumulated into
+        total_tokens_used exactly as before, so the UI's displayed number
+        doesn't change) that also carries .prompt/.completion, which get
+        accumulated into their own columns for anyone who wants the split
+        later. A bare int (e.g. a test double, or a 0 fallback) has
+        neither attribute, so getattr defaults both to 0 -- harmless,
+        just means this call's split isn't attributable."""
         if tokens <= 0:
             return
+        prompt_tokens = getattr(tokens, "prompt", 0)
+        completion_tokens = getattr(tokens, "completion", 0)
         await self._ensure_schema()
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
-                "UPDATE chases SET total_tokens_used = total_tokens_used + ?, updated_at = ? WHERE id = ?",
-                (tokens, _now_iso(), chase_id),
+                "UPDATE chases SET total_tokens_used = total_tokens_used + ?, "
+                "prompt_tokens_used = prompt_tokens_used + ?, "
+                "completion_tokens_used = completion_tokens_used + ?, "
+                "updated_at = ? WHERE id = ?",
+                (int(tokens), prompt_tokens, completion_tokens, _now_iso(), chase_id),
             )
             await db.commit()
 

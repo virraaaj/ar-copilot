@@ -95,7 +95,7 @@ async def test_chat_return_usage_true_returns_message_and_token_count(real_setti
 
     fake_response = SimpleNamespace(
         choices=[SimpleNamespace(message="the message")],
-        usage=SimpleNamespace(total_tokens=456),
+        usage=SimpleNamespace(total_tokens=456, prompt_tokens=300, completion_tokens=156),
     )
     service._client.chat.completions.create = AsyncMock(return_value=fake_response)
 
@@ -103,6 +103,11 @@ async def test_chat_return_usage_true_returns_message_and_token_count(real_setti
 
     assert message == "the message"
     assert tokens == 456
+    # TokenUsage (added 2026-07-28) -- the returned total is unchanged
+    # (backward compatible with every existing int-treating call site),
+    # but it also carries the prompt/completion split.
+    assert tokens.prompt == 300
+    assert tokens.completion == 156
 
 
 @pytest.mark.asyncio

@@ -202,6 +202,40 @@ async def test_increment_tokens_zero_or_negative_is_a_noop(store: ChaseStore) ->
 
 
 @pytest.mark.asyncio
+async def test_increment_tokens_accumulates_the_prompt_completion_split(store: ChaseStore) -> None:
+    """Added 2026-07-28: total_tokens_used is unchanged (still the sum,
+    same number the UI displays), but a TokenUsage-shaped `tokens` (an
+    int subclass carrying .prompt/.completion) also accumulates into two
+    dedicated columns."""
+    from app.services.azure_openai import TokenUsage
+
+    chase_id = await store.create("case-1")
+
+    await store.increment_tokens(chase_id, TokenUsage(100, prompt=70, completion=30))
+    await store.increment_tokens(chase_id, TokenUsage(50, prompt=20, completion=30))
+
+    chase = await store.get(chase_id)
+    assert chase["total_tokens_used"] == 150
+    assert chase["prompt_tokens_used"] == 90
+    assert chase["completion_tokens_used"] == 60
+
+
+@pytest.mark.asyncio
+async def test_increment_tokens_with_a_bare_int_leaves_split_at_zero(store: ChaseStore) -> None:
+    """A plain int (a test double, or any caller that hasn't been updated
+    to pass a TokenUsage) has no .prompt/.completion -- must not crash,
+    just contribute nothing to the split columns."""
+    chase_id = await store.create("case-1")
+
+    await store.increment_tokens(chase_id, 100)
+
+    chase = await store.get(chase_id)
+    assert chase["total_tokens_used"] == 100
+    assert chase["prompt_tokens_used"] == 0
+    assert chase["completion_tokens_used"] == 0
+
+
+@pytest.mark.asyncio
 async def test_migration_adds_column_to_a_pre_existing_db_without_it(tmp_path) -> None:
     """Regression test for the total_tokens_used migration: a DB whose
     chases table was created before this column existed must not break

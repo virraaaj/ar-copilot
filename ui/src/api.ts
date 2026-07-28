@@ -424,6 +424,11 @@ export interface Chase {
   last_outreach_at: string | null;
   next_action_at: string | null;
   total_tokens_used: number;
+  // Split tracked as of 2026-07-28 (per the boss's question about input
+  // vs. output token usage) -- not surfaced in the UI, which still shows
+  // only the total, but available here if that changes later.
+  prompt_tokens_used: number;
+  completion_tokens_used: number;
   created_at: string;
   updated_at: string;
 }
