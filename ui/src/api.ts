@@ -145,7 +145,10 @@ async function request<T>(path: string, token: string | null, init?: RequestInit
   return resp.json();
 }
 
-export async function login(email: string, password: string): Promise<{ session_token: string; email: string }> {
+export async function login(
+  email: string,
+  password: string
+): Promise<{ session_token: string; email: string; demo_mode?: boolean }> {
   return request("/auth/login", null, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -699,6 +702,106 @@ export async function* streamChat(
       }
     }
   }
+}
+
+// ---- Outcome Agent API (app/outcome_agent) ----
+
+export interface AgentCase {
+  id: string;
+  case_id: string;
+  invoice_no: string | null;
+  case_key: string | null;
+  project_number: string | null;
+  customer_name: string | null;
+  state: string;
+  amount: number | null;
+  world: Record<string, unknown>;
+  dialogue: Record<string, unknown>;
+  budget: Record<string, unknown>;
+  goals: Record<string, unknown>;
+  commitments: Array<Record<string, unknown>>;
+  blockers: Array<Record<string, unknown>>;
+  failed_asks: Array<Record<string, unknown>>;
+  escalation: Record<string, unknown> | null;
+  last_decision: Record<string, unknown> | null;
+  next_action_at: string | null;
+  subject_token: string;
+}
+
+export async function listAgentCases(token: string, state?: string): Promise<AgentCase[]> {
+  const qs = state ? `?state=${encodeURIComponent(state)}` : "";
+  return request(`/agent/cases${qs}`, token);
+}
+
+export async function getAgentCase(token: string, id: string): Promise<AgentCase> {
+  return request(`/agent/cases/${encodeURIComponent(id)}`, token);
+}
+
+export async function getAgentCaseEvents(token: string, id: string): Promise<Array<Record<string, unknown>>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/events`, token);
+}
+
+export async function getAgentDecisionTraces(token: string, id: string): Promise<Array<Record<string, unknown>>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/decision-traces`, token);
+}
+
+export async function getAgentMemory(token: string, id: string): Promise<{
+  memory_facts: Array<Record<string, unknown>>;
+  context_packet: Record<string, unknown>;
+}> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/memory`, token);
+}
+
+export async function resetAgentDemo(token: string): Promise<Record<string, unknown>> {
+  return request(`/agent/demo/reset`, token, { method: "POST" });
+}
+
+export async function listAgentScenarios(token: string): Promise<Array<Record<string, unknown>>> {
+  return request(`/agent/demo/scenarios`, token);
+}
+
+export async function runAgentScenario(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/demo/scenarios/${encodeURIComponent(id)}/run`, token, { method: "POST" });
+}
+
+export async function runAgentTick(token: string): Promise<Record<string, unknown>> {
+  return request(`/agent/run-tick`, token, { method: "POST" });
+}
+
+export async function injectAgentReply(token: string, id: string, text: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/inject-reply`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function simulateAgentPayment(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/simulate-payment`, token, { method: "POST" });
+}
+
+export async function createAgentDispute(token: string, id: string, note = ""): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/create-dispute`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+}
+
+export async function jumpSimClock(token: string, date: string): Promise<Record<string, unknown>> {
+  return request(`/sim-clock/jump`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date }),
+  });
+}
+
+export async function getAgentLearningSummary(token: string): Promise<Record<string, unknown>> {
+  return request(`/agent/learning/summary`, token);
+}
+
+export async function getAgentCommitmentMetric(token: string): Promise<Record<string, unknown>> {
+  return request(`/agent/commitment-metric`, token);
 }
 
 export { ApiError };

@@ -18,7 +18,7 @@ import datetime
 from typing import Any, Dict, List, Optional
 
 from app.services.backend_client import BackendClient, BackendError
-from app.services.chase_store import ChaseStore
+from app.outcome_agent.store.case_store import CaseStore
 
 # ---------------------------------------------------------------------------
 # Handlers — each takes the shared BackendClient plus its own kwargs.
@@ -243,26 +243,27 @@ async def aging_summary(client: BackendClient, business_unit_id: Optional[str] =
 
 
 async def get_chase_status(client: BackendClient, invoice_id: str) -> Dict[str, Any]:
-    """Status of the agentic chase engine's pursuit of one invoice, if
-    any (PLAN_AGENTIC_CHASE.md) -- state, who's currently being chased,
-    any promised payment date, and how many nudges/missed commitments so
-    far. `client` is unused (chase state lives in ChaseStore, not the
-    Lummus backend) but kept for handler-signature consistency with
-    every other tool (AgentLoop always calls handler(backend, **args))."""
-    store = ChaseStore()
+    """Status of the outcome agent's pursuit of one invoice, if any."""
+    store = CaseStore()
     chase = await store.get_latest_for_case(invoice_id)
+    if not chase:
+        # Also try invoice_no lookup for demo seed ids
+        chase = await store.get_by_invoice(invoice_id)
     if not chase:
         return {"invoice_id": invoice_id, "has_chase": False}
 
+    commitments = chase.get("commitments") or []
+    active = next((c for c in commitments if c.get("status") == "active"), None)
+    budget = chase.get("budget") or {}
     return {
         "invoice_id": invoice_id,
         "has_chase": True,
         "state": chase["state"],
         "target": chase.get("target"),
-        "promised_date": chase.get("promised_date"),
-        "promised_by": chase.get("promised_by"),
-        "missed_count": chase.get("missed_count"),
-        "nudge_count": chase.get("nudge_count"),
+        "promised_date": (active or {}).get("date"),
+        "promised_by": (active or {}).get("owner"),
+        "missed_count": budget.get("misses_used"),
+        "nudge_count": budget.get("unanswered_used"),
         "last_outreach_at": chase.get("last_outreach_at"),
     }
 

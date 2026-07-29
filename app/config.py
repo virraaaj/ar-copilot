@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # to remove the restriction entirely once something better replaces it.
     ALLOWED_EMAIL_DOMAIN: str = "corehelix.ai"
 
+    # Local/offline Outcome Agent demo: skip Lummus credential verify on
+    # /api/auth/login and issue an in-memory session. Never enable outside
+    # localhost. See OUTCOME_AGENT.md "Demo path (offline, no UAT backend)".
+    DEV_AUTH_BYPASS: bool = False
+
     # ---- Bot Framework / Teams (Phase 4) ----
     MICROSOFT_APP_ID: str = ""
     MICROSOFT_APP_PASSWORD: str = ""
@@ -118,6 +123,45 @@ class Settings(BaseSettings):
     @property
     def chase_to_address_allowlist(self) -> List[str]:
         return [a.strip().lower() for a in self.CHASE_TO_ADDRESS_ALLOWLIST.split(",") if a.strip()]
+
+    # ---- Long-Horizon Outcome Agent (replaces chase runtime core) ----
+    # Kill switches default safe: disabled + dry-run. When OUTCOME_AGENT_* is
+    # unset, callers may still fall back to CHASE_* via the migration shim
+    # properties below for one release.
+    OUTCOME_AGENT_ENABLED: bool = False
+    OUTCOME_AGENT_DRY_RUN: bool = True
+    OUTCOME_AGENT_POLL_INTERVAL_SECONDS: int = 900
+    OUTCOME_AGENT_MAX_SENDS_PER_TICK: int = 10
+    OUTCOME_AGENT_MAX_NUDGES: int = 3
+    OUTCOME_AGENT_MAX_MISSED_COMMITMENTS: int = 3
+    OUTCOME_AGENT_MAX_COMMITMENT_DAYS: int = 90
+    OUTCOME_AGENT_GRACE_DAYS: int = 2
+    OUTCOME_AGENT_PAYMENT_VERIFY_DAYS: int = 3
+    OUTCOME_AGENT_NUDGE_INTERVAL_DAYS: int = 3
+    OUTCOME_AGENT_MAX_POSTPONEMENTS: int = 3
+    OUTCOME_AGENT_MIN_HOURS_BETWEEN_TOUCHES: int = 72
+    OUTCOME_AGENT_TO_ADDRESS_ALLOWLIST: str = ""
+    OUTCOME_AGENT_MAIL_POLL_ENABLED: bool = False
+    OUTCOME_AGENT_MAIL_POLL_INTERVAL_SECONDS: int = 300
+    OUTCOME_AGENT_COMPOSER_ENABLED: bool = False
+    OUTCOME_AGENT_SMART_ESCALATION_ENABLED: bool = False
+
+    @property
+    def outcome_agent_to_address_allowlist(self) -> List[str]:
+        raw = self.OUTCOME_AGENT_TO_ADDRESS_ALLOWLIST or self.CHASE_TO_ADDRESS_ALLOWLIST
+        return [a.strip().lower() for a in raw.split(",") if a.strip()]
+
+    @property
+    def outcome_agent_enabled_effective(self) -> bool:
+        """Prefer OUTCOME_AGENT_ENABLED; if False by default, also honor CHASE_ENABLED."""
+        if self.OUTCOME_AGENT_ENABLED:
+            return True
+        return bool(self.CHASE_ENABLED)
+
+    @property
+    def outcome_agent_dry_run_effective(self) -> bool:
+        # Both default True; if either is explicitly False, allow send (still allowlist).
+        return bool(self.OUTCOME_AGENT_DRY_RUN and self.CHASE_DRY_RUN)
 
     # ---- Weekly AR-health digest (added 2026-07-17) ----
     # One digest card per project per ISO week, sent to that project's

@@ -87,8 +87,7 @@ def _now_iso() -> str:
 
 class GraphStore:
     def __init__(self, db_path: Optional[str] = None) -> None:
-        s = get_settings()
-        self._db_path = db_path or s.STATE_DB_PATH
+        self._db_path = db_path if db_path is not None else get_settings().STATE_DB_PATH
         self._initialized = False
 
     @property

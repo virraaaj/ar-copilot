@@ -12,6 +12,10 @@ import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 import Settings from "./pages/Settings";
 import Chases from "./pages/Chases";
 import Outbox from "./pages/Outbox";
+import AgentDashboard from "./pages/agent/AgentDashboard";
+import AgentCockpit from "./pages/agent/AgentCockpit";
+import AgentCaseList from "./pages/agent/AgentCaseList";
+import SeedScenarioRunner from "./pages/agent/SeedScenarioRunner";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -74,6 +78,38 @@ export default function App() {
         element={
           <RequireSession>
             <Chases />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/agent"
+        element={
+          <RequireSession>
+            <AgentDashboard />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/agent/cases"
+        element={
+          <RequireSession>
+            <AgentCaseList />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/agent/cases/:caseId"
+        element={
+          <RequireSession>
+            <AgentCockpit />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/agent/scenarios"
+        element={
+          <RequireSession>
+            <SeedScenarioRunner />
           </RequireSession>
         }
       />

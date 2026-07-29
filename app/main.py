@@ -29,9 +29,9 @@ from app.channels.teams.proactive import ReminderDedup, send_due_reminders
 from app.channels.web import router as web_router
 from app.config import get_settings
 from app.services.backend_client import BackendError, get_backend_client
-from app.services.azure_openai import get_llm
-from app.services.chase_engine import poll_chase_mailbox, run_chase_tick
-from app.services.chase_store import ChaseStore
+from app.outcome_agent.loop.mail_poller import poll_agent_mailbox
+from app.outcome_agent.loop.scheduler import run_agent_tick
+from app.outcome_agent.store.case_store import CaseStore
 from app.services.digest_engine import send_project_digests
 from app.services.digest_store import DigestStore
 from app.services.email_sender import get_email_sender
@@ -77,10 +77,8 @@ async def lifespan(app: FastAPI):
     backend = get_backend_client()
     messenger = get_messenger()
     project_store = ProjectConversationStore()
-    # Always constructed (cheap, lazy schema) so send_due_followups can skip
-    # cases the chase engine already owns even when CHASE_ENABLED is False --
-    # harmless no-op in that case, since no chase rows exist to skip.
-    chase_store = ChaseStore()
+    # CaseStore used so followups skip invoices the outcome agent already owns.
+    case_store = CaseStore()
 
     if s.PROACTIVE_POLL_ENABLED:
         dedup = ReminderDedup()
@@ -94,7 +92,7 @@ async def lifespan(app: FastAPI):
         email_sender = get_email_sender()
 
         async def run_followups() -> int:
-            sent = await send_due_followups(backend, email_sender, followup_store, chase_store)
+            sent = await send_due_followups(backend, email_sender, followup_store, case_store)
             mirrored = await mirror_new_replies_to_teams(backend, followup_store, project_store, messenger)
             return sent + mirrored
 
@@ -108,24 +106,24 @@ async def lifespan(app: FastAPI):
 
         tasks.append(asyncio.create_task(_poll_loop("digests", s.DIGEST_POLL_INTERVAL_SECONDS, run_digests)))
 
-    if s.CHASE_ENABLED:
-        email_sender_for_chases = get_email_sender()
-        chase_llm = get_llm()  # powers the composer/smart-escalation AI features when their flags are on
+    if s.outcome_agent_enabled_effective:
+        async def run_agent() -> int:
+            result = await run_agent_tick(s, db_path=case_store.db_path)
+            return int(result.get("processed") or 0)
 
-        async def run_chase() -> int:
-            return await run_chase_tick(backend, messenger, email_sender_for_chases, chase_store, project_store, s, chase_llm)
+        interval = getattr(s, "OUTCOME_AGENT_POLL_INTERVAL_SECONDS", None) or s.CHASE_POLL_INTERVAL_SECONDS
+        tasks.append(asyncio.create_task(_poll_loop("outcome_agent", interval, run_agent)))
 
-        tasks.append(asyncio.create_task(_poll_loop("chase", s.CHASE_POLL_INTERVAL_SECONDS, run_chase)))
+    mail_poll = bool(getattr(s, "OUTCOME_AGENT_MAIL_POLL_ENABLED", False) or s.CHASE_MAIL_POLL_ENABLED)
+    if mail_poll:
+        async def run_agent_mail() -> int:
+            return await poll_agent_mailbox(get_mailbox_reader(), s, db_path=case_store.db_path)
 
-    if s.CHASE_MAIL_POLL_ENABLED:
-        llm = get_llm()
-
-        async def run_chase_mail() -> int:
-            return await poll_chase_mailbox(
-                get_mailbox_reader(), llm, backend, messenger, get_email_sender(), chase_store, project_store, s
-            )
-
-        tasks.append(asyncio.create_task(_poll_loop("chase_mail", s.CHASE_MAIL_POLL_INTERVAL_SECONDS, run_chase_mail)))
+        mail_interval = (
+            getattr(s, "OUTCOME_AGENT_MAIL_POLL_INTERVAL_SECONDS", None)
+            or s.CHASE_MAIL_POLL_INTERVAL_SECONDS
+        )
+        tasks.append(asyncio.create_task(_poll_loop("outcome_agent_mail", mail_interval, run_agent_mail)))
 
     yield
 
