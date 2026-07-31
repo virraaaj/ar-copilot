@@ -83,9 +83,9 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = ""
     FOLLOWUP_POLL_INTERVAL_SECONDS: int = 300
 
-    # ---- Agentic invoice chase engine (PLAN_AGENTIC_CHASE.md, added 2026-07-20) ----
+    # ---- Outcome Agent (OUTCOME_AGENT.md); CHASE_* names shim to OUTCOME_AGENT_* ----
     # Master kill switch -- the poller doesn't even start without this.
-    # Ships default-off and dry-run-first: see PLAN_AGENTIC_CHASE.md §4.6.
+    # Ships default-off and dry-run-first.
     CHASE_ENABLED: bool = False
     CHASE_POLL_INTERVAL_SECONDS: int = 900
     CHASE_DRY_RUN: bool = True
@@ -145,6 +145,8 @@ class Settings(BaseSettings):
     OUTCOME_AGENT_MAIL_POLL_INTERVAL_SECONDS: int = 300
     OUTCOME_AGENT_COMPOSER_ENABLED: bool = False
     OUTCOME_AGENT_SMART_ESCALATION_ENABLED: bool = False
+    # live = Azure OpenAI forced tools; mock = deterministic/ScriptedLLM (CI)
+    OUTCOME_AGENT_LLM_MODE: str = "live"
 
     @property
     def outcome_agent_to_address_allowlist(self) -> List[str]:

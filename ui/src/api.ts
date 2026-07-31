@@ -401,83 +401,7 @@ export async function uploadDocument(
   return resp.json();
 }
 
-// Agentic chase engine (PLAN_AGENTIC_CHASE.md, added 2026-07-20) -- the
-// Chases tab. Chase state mirrors app/services/chase_store.py's schema.
-export interface Chase {
-  id: string;
-  case_id: string;
-  case_key: string | null;
-  invoice_no: string | null;
-  project_number: string | null;
-  subject_token: string;
-  state: string;
-  target: string | null;
-  pm_email: string | null;
-  customer_email: string | null;
-  contact_email: string | null;
-  promised_date: string | null;
-  promised_by: string | null;
-  missed_count: number;
-  nudge_count: number;
-  clarify_count: number;
-  postpone_count: number;
-  blocker_type: string | null;
-  blocker_description: string | null;
-  blocker_resolution_date: string | null;
-  last_outreach_at: string | null;
-  next_action_at: string | null;
-  total_tokens_used: number;
-  // Split tracked as of 2026-07-28 (per the boss's question about input
-  // vs. output token usage) -- not surfaced in the UI, which still shows
-  // only the total, but available here if that changes later.
-  prompt_tokens_used: number;
-  completion_tokens_used: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ChaseEvent {
-  id: string;
-  chase_id: string;
-  at: string;
-  kind: string;
-  detail: Record<string, unknown> | null;
-  // Plain-English "why" narrative (spec §6.19), computed server-side.
-  // null for event kinds that aren't a narratable decision (e.g. "created").
-  explanation?: string | null;
-}
-
-export async function listChases(token: string, state?: string, caseId?: string): Promise<Chase[]> {
-  const params = new URLSearchParams();
-  if (state) params.set("state", state);
-  if (caseId) params.set("case_id", caseId);
-  const qs = params.toString();
-  return request(`/chases${qs ? `?${qs}` : ""}`, token);
-}
-
-// Outcome-agent north-star metric (added 2026-07-25) -- % of open chases
-// with a known next commitment, per outcome_metrics.py.
-export interface CommitmentMetric {
-  total_open: number;
-  known: number;
-  unknown: number;
-  known_pct: number;
-  unknown_cases: Array<{
-    chase_id: string;
-    case_id: string;
-    invoice_no: string | null;
-    project_number: string | null;
-    state: string;
-    known_commitment: boolean;
-  }>;
-}
-
-export async function getCommitmentMetric(token: string): Promise<CommitmentMetric> {
-  return request(`/chases/commitment-metric`, token);
-}
-
-// Simulation clock (added 2026-07-25) -- lets an operator advance the
-// demo's notion of "today" instead of waiting for real days to pass.
+// Simulation clock — shared by Outcome Agent demo controls.
 export interface SimClockState {
   now: string;
   is_simulated: boolean;
@@ -499,87 +423,7 @@ export async function resetSimClock(token: string): Promise<SimClockState> {
   return request(`/sim-clock/reset`, token, { method: "POST" });
 }
 
-export async function runChaseTick(token: string): Promise<{ processed: number }> {
-  return request(`/chases/run-tick`, token, { method: "POST" });
-}
-
-// Temporal knowledge graph (added 2026-07-25) -- entities/relationships
-// for a chase's invoice, per graph_store.py.
-export interface GraphNode {
-  id: string;
-  type: string;
-  label: string | null;
-  attributes: Record<string, unknown> | null;
-}
-
-export interface GraphEdge {
-  id: string;
-  from_node_id: string;
-  relationship: string;
-  to_node_id: string;
-  valid_from: string;
-  valid_to: string | null;
-  observed_at: string;
-  source_event_id: string | null;
-  confidence: number;
-}
-
-export interface ChaseGraph {
-  nodes: Record<string, GraphNode>;
-  edges: GraphEdge[];
-}
-
-export async function getChaseGraph(token: string, chaseId: string): Promise<ChaseGraph> {
-  return request(`/chases/${encodeURIComponent(chaseId)}/graph`, token);
-}
-
-export async function getChase(token: string, chaseId: string): Promise<Chase> {
-  return request(`/chases/${encodeURIComponent(chaseId)}`, token);
-}
-
-export async function listChaseEvents(token: string, chaseId: string): Promise<ChaseEvent[]> {
-  return request(`/chases/${encodeURIComponent(chaseId)}/events`, token);
-}
-
-export async function pauseChase(token: string, chaseId: string): Promise<void> {
-  await request(`/chases/${encodeURIComponent(chaseId)}/pause`, token, { method: "POST" });
-}
-
-export async function resumeChase(token: string, chaseId: string): Promise<void> {
-  await request(`/chases/${encodeURIComponent(chaseId)}/resume`, token, { method: "POST" });
-}
-
-export async function closeChase(token: string, chaseId: string, reason: string): Promise<void> {
-  await request(`/chases/${encodeURIComponent(chaseId)}/close`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reason }),
-  });
-}
-
-export async function restartChase(token: string, chaseId: string): Promise<void> {
-  await request(`/chases/${encodeURIComponent(chaseId)}/restart`, token, { method: "POST" });
-}
-
-// Simulation Control Panel: inject a customer/PM reply and post a simulated
-// payment (spec §6.17/§11.3/§11.5), added 2026-07-28.
-export async function injectChaseReply(
-  token: string,
-  chaseId: string,
-  text: string
-): Promise<{ intent: string; confidence: string; chase: Chase }> {
-  return request(`/chases/${encodeURIComponent(chaseId)}/inject-reply`, token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-}
-
-export async function simulateChasePayment(token: string, chaseId: string): Promise<Chase> {
-  return request(`/chases/${encodeURIComponent(chaseId)}/simulate-payment`, token, { method: "POST" });
-}
-
-// Policy/Configuration Viewer + Outbox screen (spec §6.18, added 2026-07-28).
+// Policy/Configuration Viewer + Outbox screen.
 export interface PolicyConfig {
   contact_frequency: { nudge_interval_days: number; max_nudges: number; min_hours_between_touches: number };
   escalation_rules: {
@@ -649,14 +493,6 @@ export interface OutboxEntry {
 
 export async function getOutbox(token: string): Promise<OutboxEntry[]> {
   return request(`/outbox`, token);
-}
-
-export async function editChaseCommitment(token: string, chaseId: string, promisedDate: string): Promise<void> {
-  await request(`/chases/${encodeURIComponent(chaseId)}/commitment`, token, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ promised_date: promisedDate }),
-  });
 }
 
 export interface ChatHistoryMessage {
@@ -802,6 +638,41 @@ export async function getAgentLearningSummary(token: string): Promise<Record<str
 
 export async function getAgentCommitmentMetric(token: string): Promise<Record<string, unknown>> {
   return request(`/agent/commitment-metric`, token);
+}
+
+export async function runAgentFollowUp(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/run-follow-up`, token, { method: "POST" });
+}
+
+export async function listAgentTraces(token: string, id: string): Promise<Array<Record<string, unknown>>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/traces`, token);
+}
+
+export async function getAgentTraceRun(token: string, runId: string): Promise<Record<string, unknown>> {
+  return request(`/agent/traces/${encodeURIComponent(runId)}`, token);
+}
+
+export async function listMailbox(
+  token: string,
+  opts?: { direction?: string; caseId?: string }
+): Promise<Array<Record<string, unknown>>> {
+  const params = new URLSearchParams();
+  if (opts?.direction) params.set("direction", opts.direction);
+  if (opts?.caseId) params.set("case_id", opts.caseId);
+  const qs = params.toString();
+  return request(`/agent/mailbox${qs ? `?${qs}` : ""}`, token);
+}
+
+export async function submitMailboxReply(
+  token: string,
+  caseId: string,
+  text: string
+): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(caseId)}/mailbox-reply`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
 }
 
 export { ApiError };

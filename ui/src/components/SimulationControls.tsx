@@ -1,13 +1,7 @@
-// Simulation Control Panel (added 2026-07-25, long-horizon outcome agent
-// spec §6.18/§11.4) -- lets an operator advance the demo's simulated
-// clock ("what day is it, as far as the chase engine is concerned") and
-// manually trigger a chase-engine pass, so a multi-week collections
-// workflow can be demonstrated in minutes. Advancing the clock alone does
-// nothing by itself -- it only changes what "today" means for the next
-// run, same as the real poller tick would use real time. "Run Agent"
-// mirrors that tick on demand.
+// Simulation Control Panel — advance the Outcome Agent demo clock and
+// trigger run_agent_tick on demand.
 import { useEffect, useState } from "react";
-import { advanceSimClock, getSimClock, resetSimClock, runChaseTick, type SimClockState } from "../api";
+import { advanceSimClock, getSimClock, resetSimClock, runAgentTick, type SimClockState } from "../api";
 import { useSession } from "../context/SessionContext";
 
 function formatSimDate(iso: string): string {
@@ -105,7 +99,7 @@ export function SimulationControls({ onRan }: { onRan?: () => void }) {
             className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() =>
               run(
-                () => runChaseTick(token!),
+                () => runAgentTick(token!).then((r) => ({ processed: Number((r as { processed?: number }).processed ?? 0) })),
                 (result) => {
                   setMessage(`Agent run complete -- ${result.processed} chase${result.processed === 1 ? "" : "s"} processed.`);
                   onRan?.();

@@ -33,6 +33,13 @@ async def reset_demo(db_path: Optional[str] = None) -> Dict[str, Any]:
     await store.wipe_all()
     await ledger.wipe_all()
     await learning.wipe_all()
+    from app.outcome_agent.mailbox.store import MailboxStore
+    from app.outcome_agent.store.semantic_store import SemanticStore
+    from app.outcome_agent.store.trace_store import TraceStore
+
+    await MailboxStore(db_path=store.db_path).wipe_all()
+    await TraceStore(db_path=store.db_path).wipe_all()
+    await SemanticStore(db_path=store.db_path).wipe_all()
     graph = None
     try:
         from app.services.graph_store import GraphStore

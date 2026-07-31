@@ -1,21 +1,16 @@
-// Chase-engine phase indicator (added 2026-07-23). Deliberately a
-// separate rail from InvoiceDetail's StageRail: StageRail reflects the
-// dunning/escalation policy's stage config, this reflects the agentic
-// chase engine's own state machine (chase_store.py's `state` column).
-// No animation library exists in this app (ui/package.json has none) --
-// the "in progress" affordance is a plain Tailwind animate-pulse dot.
+// Outcome Agent phase indicator — mirrors CaseState from app/outcome_agent.
 type Step = { key: string; label: string; states: string[] };
 
-// Linear happy-path steps. escalated/paused are handled separately below
-// as an off-rail alert state instead of being forced onto this line --
-// forcing them into a numbered step would misrepresent what actually
-// happened (an escalation isn't step 5 of a plan, it's a detour from it).
 const STEPS: Step[] = [
-  { key: "pending", label: "Starting", states: ["pending"] },
-  { key: "outreach", label: "Outreach sent, waiting for reply", states: ["awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked"] },
-  { key: "commitment", label: "Commitment tracked", states: ["commitment_tracked"] },
-  { key: "verifying", label: "Verifying payment", states: ["verifying_payment"] },
-  { key: "done", label: "Done", states: ["closed_paid", "closed_manual"] },
+  { key: "start", label: "Due / ready", states: ["not_due", "due", "overdue", "outreach_ready"] },
+  {
+    key: "waiting",
+    label: "Waiting on customer",
+    states: ["waiting_for_customer", "customer_responded", "blocked", "follow_up_scheduled"],
+  },
+  { key: "commitment", label: "Commitment tracked", states: ["promise_to_pay"] },
+  { key: "missed", label: "Promise missed", states: ["promise_missed"] },
+  { key: "done", label: "Done", states: ["paid", "closed"] },
 ];
 
 function stepIndex(state: string): number {
@@ -23,17 +18,28 @@ function stepIndex(state: string): number {
 }
 
 export function AgentPhaseRail({ state, compact = false }: { state: string; compact?: boolean }) {
-  const isAlert = state === "escalated" || state === "paused";
+  const isAlert =
+    state === "escalated_to_human" ||
+    state === "escalation_required" ||
+    state === "disputed" ||
+    state === "suppressed";
   const currentIndex = isAlert ? -1 : stepIndex(state);
-  const isDone = state === "closed_paid" || state === "closed_manual";
+  const isDone = state === "paid" || state === "closed";
+
+  const alertLabel =
+    state === "escalated_to_human" || state === "escalation_required"
+      ? "Escalated"
+      : state === "disputed"
+        ? "Disputed"
+        : state === "suppressed"
+          ? "Suppressed"
+          : state;
 
   if (compact) {
     return (
       <div className="flex items-center gap-1.5">
         {isAlert ? (
-          <span
-            className={`h-2 w-2 shrink-0 rounded-full ${state === "escalated" ? "bg-rose-500" : "bg-zinc-400 dark:bg-zinc-500"}`}
-          />
+          <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500" />
         ) : (
           STEPS.map((step, i) => {
             const done = currentIndex !== -1 && i < currentIndex;
@@ -53,55 +59,51 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
             );
           })
         )}
-        <span className={`text-[11px] font-medium ${isAlert ? (state === "escalated" ? "text-rose-600 dark:text-rose-400" : "text-zinc-500 dark:text-zinc-400") : "text-zinc-500 dark:text-zinc-400"}`}>
-          {isAlert ? (state === "escalated" ? "Escalated" : "Paused") : STEPS[currentIndex]?.label ?? state}
+        <span
+          className={`text-[11px] font-medium ${
+            isAlert ? "text-rose-600 dark:text-rose-400" : "text-zinc-500 dark:text-zinc-400"
+          }`}
+        >
+          {isAlert ? alertLabel : STEPS[currentIndex]?.label ?? state}
         </span>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="flex items-start">
+    <div className="space-y-2">
+      {isAlert && (
+        <p className="text-[12px] font-medium text-rose-600 dark:text-rose-400">{alertLabel}</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
         {STEPS.map((step, i) => {
-          const done = currentIndex !== -1 && i < currentIndex;
-          const current = i === currentIndex && !isDone;
-          const filled = done || isDone;
+          const done = !isAlert && currentIndex !== -1 && i < currentIndex;
+          const current = !isAlert && i === currentIndex;
           return (
-            <div key={step.key} className="flex flex-1 flex-col items-center last:flex-none last:items-end">
-              <div className="flex w-full items-center">
-                <div
-                  className={
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold " +
-                    (current
-                      ? "bg-green-700 text-white ring-4 ring-green-700/10 animate-pulse"
-                      : filled
-                        ? "bg-emerald-500 text-white"
-                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500")
-                  }
-                >
-                  {filled ? "✓" : i + 1}
-                </div>
-                {i < STEPS.length - 1 && (
-                  <div className={"h-0.5 flex-1 transition-colors " + (filled ? "bg-emerald-500" : "bg-zinc-100 dark:bg-zinc-800")} />
-                )}
-              </div>
-              <div className="mt-2 max-w-[100px] text-center text-[11px] leading-tight">
-                <span className={current ? "font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-400 dark:text-zinc-500"}>{step.label}</span>
-              </div>
+            <div key={step.key} className="flex items-center gap-2">
+              <span
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+                  done || (isDone && i === STEPS.length - 1)
+                    ? "bg-emerald-500 text-white"
+                    : current
+                      ? "bg-green-700 text-white"
+                      : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <span
+                className={`text-[12px] ${
+                  current ? "font-medium text-zinc-900 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                {step.label}
+              </span>
+              {i < STEPS.length - 1 && <span className="text-zinc-300 dark:text-zinc-600">→</span>}
             </div>
           );
         })}
       </div>
-      {isAlert && (
-        <div
-          className={`mt-4 rounded-lg px-3 py-2 text-[12.5px] font-medium ${
-            state === "escalated" ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
-          }`}
-        >
-          {state === "escalated" ? "⚠ Escalated for human review" : "⏸ Paused"}
-        </div>
-      )}
     </div>
   );
 }

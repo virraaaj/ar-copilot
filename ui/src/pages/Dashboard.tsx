@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  listInvoices, getAgingSummary, uploadAgingExcel, listChases, getCommitmentMetric,
-  type Invoice, type AgingSummary, type Chase, type CommitmentMetric,
+  listInvoices, getAgingSummary, uploadAgingExcel, listAgentCases, getAgentCommitmentMetric,
+  type Invoice, type AgingSummary, type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
 import { SimulationControls } from "../components/SimulationControls";
 
-const OPEN_CHASE_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
+const OPEN_AGENT_STATES = new Set([
+  "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer", "customer_responded",
+  "blocked", "follow_up_scheduled", "promise_to_pay", "promise_missed", "escalation_required",
+]);
+
+type CommitmentMetricView = {
+  total_open: number;
+  known: number;
+  unknown: number;
+  known_pct: number;
+};
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -43,8 +53,8 @@ export default function Dashboard() {
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [chases, setChases] = useState<Chase[]>([]);
-  const [commitmentMetric, setCommitmentMetric] = useState<CommitmentMetric | null>(null);
+  const [agentCases, setAgentCases] = useState<AgentCase[]>([]);
+  const [commitmentMetric, setCommitmentMetric] = useState<CommitmentMetricView | null>(null);
   // Collapsed by default (added 2026-07-23) -- with every project always
   // expanded this page was a wall of tables; an accordion makes "click a
   // project to see its invoices" the actual navigation model the boss asked
@@ -59,16 +69,21 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!token) return;
-    listChases(token).then(setChases).catch(() => setChases([]));
+    listAgentCases(token).then(setAgentCases).catch(() => setAgentCases([]));
   }, [token, refreshKey]);
 
-  // North-star metric (added 2026-07-25, per the long-horizon outcome
-  // agent spec): what fraction of open chases have a known next
-  // commitment vs. still an open question mark -- the product's real
-  // success signal, distinct from "how many emails went out."
   useEffect(() => {
     if (!token) return;
-    getCommitmentMetric(token).then(setCommitmentMetric).catch(() => setCommitmentMetric(null));
+    getAgentCommitmentMetric(token)
+      .then((m) =>
+        setCommitmentMetric({
+          total_open: Number(m.total_open ?? 0),
+          known: Number(m.known ?? 0),
+          unknown: Number(m.unknown ?? 0),
+          known_pct: Number(m.known_pct ?? 0),
+        })
+      )
+      .catch(() => setCommitmentMetric(null));
   }, [token, refreshKey]);
 
   function toggleExpanded(key: string) {
@@ -144,9 +159,9 @@ export default function Dashboard() {
     return [...byProject.values()].sort((a, b) => (a.project_name ?? "").localeCompare(b.project_name ?? ""));
   })();
 
-  function chasesForProject(projectNumber: string | null): Chase[] {
+  function casesForProject(projectNumber: string | null): AgentCase[] {
     if (!projectNumber) return [];
-    return chases.filter((c) => c.project_number === projectNumber);
+    return agentCases.filter((c) => c.project_number === projectNumber);
   }
 
   const selectClass =
@@ -271,9 +286,11 @@ export default function Dashboard() {
         {projectGroups.map((group) => {
           const key = group.project_number ?? group.project_name ?? "unknown";
           const isOpen = expanded.has(key);
-          const projectChases = chasesForProject(group.project_number);
-          const activeChases = projectChases.filter((c) => OPEN_CHASE_STATES.has(c.state));
-          const escalatedCount = projectChases.filter((c) => c.state === "escalated").length;
+          const projectCases = casesForProject(group.project_number);
+          const activeCases = projectCases.filter((c) => OPEN_AGENT_STATES.has(c.state));
+          const escalatedCount = projectCases.filter(
+            (c) => c.state === "escalated_to_human" || c.state === "escalation_required"
+          ).length;
 
           return (
             <div
@@ -300,17 +317,17 @@ export default function Dashboard() {
                   {group.project_number && <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
                 </div>
                 <span className="ml-auto flex shrink-0 items-center gap-2">
-                  {projectChases.length > 0 && (
+                  {projectCases.length > 0 && (
                     <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
                         escalatedCount > 0
                           ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
-                          : activeChases.length > 0
+                          : activeCases.length > 0
                             ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                             : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
                       }`}
                     >
-                      {activeChases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
+                      {activeCases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
                     </span>
                   )}
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
@@ -321,16 +338,20 @@ export default function Dashboard() {
 
               {isOpen && (
                 <>
-                  {activeChases.length > 0 && (
+                  {activeCases.length > 0 && (
                     <div className="space-y-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-800/40 px-5 py-3.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Agent activity</p>
-                      {activeChases.map((c) => (
-                        <div key={c.id} className="flex items-center gap-3 text-[12px]">
+                      {activeCases.map((c) => (
+                        <Link
+                          key={c.id}
+                          to={`/agent/cases/${c.id}`}
+                          className="flex items-center gap-3 text-[12px] hover:opacity-80"
+                        >
                           <span className="w-28 shrink-0 truncate text-zinc-600 dark:text-zinc-300">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </span>
                           <AgentPhaseRail state={c.state} compact />
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   )}

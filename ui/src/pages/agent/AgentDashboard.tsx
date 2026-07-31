@@ -41,7 +41,7 @@ export default function AgentDashboard() {
   const atRisk = cases.filter((c) => c.state === "promise_to_pay" || c.state === "promise_missed");
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
+    <main className="lummus-shell mx-auto max-w-5xl px-6 py-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -52,6 +52,9 @@ export default function AgentDashboard() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link to="/agent/mailbox" className="rounded-full border border-zinc-300 px-3 py-1.5 text-[13px] dark:border-zinc-600">
+            Mailbox
+          </Link>
           <Link to="/agent/scenarios" className="rounded-full border border-zinc-300 px-3 py-1.5 text-[13px] dark:border-zinc-600">
             Scenario Runner
           </Link>

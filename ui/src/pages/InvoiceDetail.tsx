@@ -9,17 +9,14 @@ import {
   getFollowUpStatus,
   createFollowUp,
   cancelFollowUp,
-  listChases,
-  listChaseEvents,
+  listAgentCases,
   type Invoice,
   type TimelineEvent,
   type FollowUpStatus,
-  type Chase,
-  type ChaseEvent,
+  type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
-import { ChaseEventRow } from "../components/ChaseEventRow";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -222,8 +219,7 @@ export default function InvoiceDetail() {
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
   const [followUpError, setFollowUpError] = useState<string | null>(null);
   const [cancellingFollowUp, setCancellingFollowUp] = useState(false);
-  const [chase, setChase] = useState<Chase | null>(null);
-  const [chaseEvents, setChaseEvents] = useState<ChaseEvent[] | null>(null);
+  const [agentCase, setAgentCase] = useState<AgentCase | null>(null);
   const commentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -257,24 +253,16 @@ export default function InvoiceDetail() {
 
   useEffect(loadFollowUp, [token, invoiceId]);
 
-  // The agentic chase engine's own event log (separate from the Lummus
-  // case timeline above) -- only ever shown on the standalone Chases tab
-  // before this (added 2026-07-23). At most one open chase per case_id, so
-  // this is a lookup, not a list.
   useEffect(() => {
     if (!token || !invoiceId) return;
-    listChases(token, undefined, invoiceId)
-      .then((cs) => setChase(cs[0] ?? null))
-      .catch(() => setChase(null));
+    listAgentCases(token)
+      .then((cases) =>
+        setAgentCase(
+          cases.find((c) => c.case_id === invoiceId || c.invoice_no === invoiceId) ?? null
+        )
+      )
+      .catch(() => setAgentCase(null));
   }, [token, invoiceId]);
-
-  useEffect(() => {
-    if (!token || !chase) {
-      setChaseEvents(null);
-      return;
-    }
-    listChaseEvents(token, chase.id).then(setChaseEvents).catch(() => setChaseEvents([]));
-  }, [token, chase]);
 
   async function submitFollowUp(email: string, cadenceDays: number, endDate: string) {
     if (!token || !invoiceId) return;
@@ -500,12 +488,26 @@ export default function InvoiceDetail() {
         />
       )}
 
-      {chase && (
+      {agentCase && (
         <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chase agent</h2>
-          <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">What the agentic chase engine is doing on this invoice.</p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                Outcome agent
+              </h2>
+              <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
+                Long-horizon pursuit state for this invoice.
+              </p>
+            </div>
+            <Link
+              to={`/agent/cases/${agentCase.id}`}
+              className="shrink-0 rounded-full bg-green-700 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-green-800"
+            >
+              Open cockpit
+            </Link>
+          </div>
           <div className="mt-6">
-            <AgentPhaseRail state={chase.state} />
+            <AgentPhaseRail state={agentCase.state} />
           </div>
         </div>
       )}
@@ -582,21 +584,6 @@ export default function InvoiceDetail() {
         </ul>
       </div>
 
-      {chase && (
-        <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Agent communication</h2>
-          <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
-            Outreach, replies, and commitments tracked by the chase agent -- who sent what to whom, and what it decided.
-          </p>
-          <div className="mt-6 space-y-2">
-            {chaseEvents === null && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
-            {chaseEvents && chaseEvents.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No agent activity yet.</p>}
-            {chaseEvents?.map((e) => (
-              <ChaseEventRow key={e.id} chase={chase} event={e} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

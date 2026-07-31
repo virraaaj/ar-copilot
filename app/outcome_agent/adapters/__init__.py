@@ -1,1 +1,1 @@
-"""External adapters: backend truth, email, teams."""
+"""External adapters (email outbox, etc.)."""

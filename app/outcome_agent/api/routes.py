@@ -255,6 +255,68 @@ def build_agent_router(require_session) -> APIRouter:
     async def agent_outbox(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
         return await _store().list_outbox()
 
+    @router.post("/agent/cases/{case_row_id}/run-follow-up")
+    async def run_follow_up(case_row_id: str, _user: str = Depends(require_session)) -> Dict[str, Any]:
+        from app.outcome_agent.loop.traced_loop import run_traced_follow_up
+
+        try:
+            return await run_traced_follow_up(case_row_id, trigger="manual_follow_up", settings=get_settings())
+        except ValueError:
+            raise HTTPException(404, "Case not found")
+
+    @router.get("/agent/cases/{case_row_id}/traces")
+    async def list_traces(case_row_id: str, _user: str = Depends(require_session)) -> List[Dict[str, Any]]:
+        from app.outcome_agent.store.trace_store import TraceStore
+
+        store = _store()
+        if not await store.get(case_row_id):
+            raise HTTPException(404, "Case not found")
+        return await TraceStore(db_path=store.db_path).list_runs_for_case(case_row_id)
+
+    @router.get("/agent/traces/{run_id}")
+    async def get_trace(run_id: str, _user: str = Depends(require_session)) -> Dict[str, Any]:
+        from app.outcome_agent.store.trace_store import TraceStore
+
+        run = await TraceStore().get_run(run_id)
+        if not run:
+            raise HTTPException(404, "Trace run not found")
+        return run
+
+    @router.get("/agent/mailbox")
+    async def mailbox_list(
+        direction: Optional[str] = None,
+        case_id: Optional[str] = None,
+        _user: str = Depends(require_session),
+    ) -> List[Dict[str, Any]]:
+        from app.outcome_agent.mailbox.store import MailboxStore
+
+        mb = MailboxStore()
+        if case_id:
+            return await mb.list_for_case(case_id)
+        return await mb.list_all(direction=direction)
+
+    @router.get("/agent/mailbox/{message_id}")
+    async def mailbox_get(message_id: str, _user: str = Depends(require_session)) -> Dict[str, Any]:
+        from app.outcome_agent.mailbox.store import MailboxStore
+
+        msg = await MailboxStore().get(message_id)
+        if not msg:
+            raise HTTPException(404, "Message not found")
+        return msg
+
+    @router.post("/agent/cases/{case_row_id}/mailbox-reply")
+    async def mailbox_reply(
+        case_row_id: str,
+        body: ReplyBody = Body(...),
+        _user: str = Depends(require_session),
+    ) -> Dict[str, Any]:
+        from app.outcome_agent.loop.traced_loop import submit_customer_reply
+
+        try:
+            return await submit_customer_reply(case_row_id, body.text, settings=get_settings())
+        except ValueError:
+            raise HTTPException(404, "Case not found")
+
     @router.get("/agent/outcome-definition")
     async def agent_outcome_def(_user: str = Depends(require_session)) -> Dict[str, Any]:
         return outcome_definition(policy_from_settings(get_settings()))
