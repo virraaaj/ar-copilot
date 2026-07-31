@@ -20,14 +20,27 @@ and a **step-by-step Trace** of every read/write/LLM/mail action.
 | Phase | Meaning |
 |-------|---------|
 | `signal` | Why the run started |
-| `memory.read.*` | Operational / episodic / semantic / document / graph |
+| `memory.read.*` | Operational / episodic / **semantic (case facts)** / **learning (tactic weights)** / document / graph |
+| `llm.*` | Split view: **Sent to model** / **Returned from model** / **input·output·total tokens** |
 | `context.built` | Context packet given to the planner |
 | `llm.plan` / `llm.draft` / `llm.judge` | Forced tool-call payloads + tokens |
 | `mail.send` / `mail.receive` | Local mailbox message |
 | `memory.write` / `graph.write` | Persist facts & edges |
 | `state.transition` / `schedule` | Case state + next wake-up |
 
-Click any step → **Reads / Writes / Call** JSON in the detail panel.
+Click any step → **Reads / Writes** show a **source badge** (Postgres / Cosmos Gremlin / SQLite / Policy index / Runtime).
+
+## Memory store backends
+
+| Layer | SQLite mode | Azure mode (`OUTCOME_STORE_BACKEND=azure`) |
+|-------|-------------|--------------------------------------------|
+| Operational / case / mailbox / traces | SQLite | SQLite (seed/demo + Trace Studio) |
+| Episodic events | SQLite | **Azure Postgres** |
+| Semantic facts / learning | SQLite | **Azure Postgres** |
+| Temporal graph | SQLite | **Cosmos Gremlin** (via outbox) |
+| Document / policy | In-process policy index | same |
+
+Topology API: `GET /api/agent/store-topology`
 
 ## Kill switches
 
@@ -36,6 +49,7 @@ Click any step → **Reads / Writes / Call** JSON in the detail panel.
 | `OUTCOME_AGENT_ENABLED` | `false` | Background poller |
 | `OUTCOME_AGENT_DRY_RUN` | `true` | Still writes local mailbox; no external SMTP |
 | `OUTCOME_AGENT_LLM_MODE` | `live` | `live` = Azure OpenAI; `mock` = deterministic/CI |
+| `OUTCOME_STORE_BACKEND` | `auto` | `sqlite` \| `azure` \| `auto` (azure if `DATABASE_URL` set) |
 
 ## API (new)
 
@@ -44,6 +58,7 @@ Click any step → **Reads / Writes / Call** JSON in the detail panel.
 - `GET /api/agent/cases/{id}/traces`
 - `GET /api/agent/traces/{run_id}`
 - `GET /api/agent/mailbox`
+- `GET /api/agent/store-topology`
 
 ## Tests
 

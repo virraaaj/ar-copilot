@@ -644,6 +644,14 @@ export async function runAgentFollowUp(token: string, id: string): Promise<Recor
   return request(`/agent/cases/${encodeURIComponent(id)}/run-follow-up`, token, { method: "POST" });
 }
 
+export async function getAgentStoreTopology(token: string): Promise<{
+  mode: string;
+  backends: Record<string, string>;
+  db_path?: string;
+}> {
+  return request(`/agent/store-topology`, token);
+}
+
 export async function listAgentTraces(token: string, id: string): Promise<Array<Record<string, unknown>>> {
   return request(`/agent/cases/${encodeURIComponent(id)}/traces`, token);
 }

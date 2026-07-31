@@ -20,6 +20,10 @@ aiosqlite>=0.20.0
 # Direct UAT Postgres access (dev-only reset tooling, added 2026-07-23)
 asyncpg>=0.29.0
 
+# Azure production memory (Postgres + Cosmos Gremlin)
+gremlinpython>=3.7.0
+azure-storage-blob>=12.19.0
+
 # ---- Document Intelligence (Phase 1B) ----
 pypdf>=4.2.0                    # native PDF text extraction
 azure-search-documents>=11.5.0  # hybrid text+vector index (blocked on AZURE_SEARCH_KEY)

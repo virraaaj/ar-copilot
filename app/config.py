@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     # ---- Local state (audit log, conversation refs, proactive dedupe) ----
     STATE_DB_PATH: str = ".state/ar_copilot.db"
 
+    # ---- Azure production memory (Postgres + Cosmos Gremlin) ----
+    # Prefer Key Vault in scripts; env overrides for local smoke tests.
+    # OUTCOME_STORE_BACKEND: sqlite | azure | auto (azure if DATABASE_URL set)
+    OUTCOME_STORE_BACKEND: str = "auto"
+    DATABASE_URL: str = ""
+    COSMOS_GREMLIN_HOST: str = ""
+    COSMOS_GREMLIN_USERNAME: str = ""
+    COSMOS_GREMLIN_PASSWORD: str = ""
+    COSMOS_GREMLIN_PORT: int = 443
+    AZURE_KEY_VAULT_NAME: str = "chxaragentdev-kv"
+    AZURE_STORAGE_CONNECTION_STRING: str = ""
+
     # ---- Proactive engine (Phase 5) ----
     PROACTIVE_POLL_ENABLED: bool = False
     PROACTIVE_POLL_INTERVAL_SECONDS: int = 300

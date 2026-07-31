@@ -23,6 +23,62 @@ def _parse_tool(message: Any, tool_name: str) -> Tuple[Dict[str, Any], Optional[
         return {}, f"invalid tool JSON: {exc}"
 
 
+def _trace_call(
+    *,
+    name: str,
+    mode: str,
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Any = None,
+    args: Optional[Dict[str, Any]] = None,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+    tokens: Any = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Structured LLM trace: request vs response vs token split."""
+    prompt = int(getattr(tokens, "prompt", 0) or 0) if tokens is not None else 0
+    completion = int(getattr(tokens, "completion", 0) or 0) if tokens is not None else 0
+    if tokens is not None and prompt == 0 and completion == 0:
+        # plain int total only
+        try:
+            total = int(tokens)
+        except Exception:
+            total = 0
+    else:
+        total = int(tokens) if tokens is not None else prompt + completion
+    out: Dict[str, Any] = {
+        "kind": "llm",
+        "name": name,
+        "mode": mode,
+        "request": {
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
+        },
+        "response": {
+            "tool_args": args,
+            "result": result if result is not None else args,
+            "error": error,
+        },
+        "tokens": {
+            "input": prompt,
+            "output": completion,
+            "total": total,
+        },
+        # flat aliases (older UI / tests)
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "messages": messages,
+        "args": args,
+        "result": result if result is not None else args,
+        "error": error,
+    }
+    if extra:
+        out.update(extra)
+    return out
+
+
 class ScriptedLLM:
     """Test double: returns canned tool_calls in order."""
 
@@ -127,40 +183,41 @@ async def llm_interpret(
             ),
         },
     ]
+    tool_choice = {"type": "function", "function": {"name": tool_name}}
     if mock or llm is None:
         det = DeterministicReplyInterpreter().interpret(text)
-        call = {
-            "kind": "llm",
-            "name": tool_name,
-            "mode": "mock_deterministic",
-            "args": det.__dict__,
-            "result": det.__dict__,
-            "messages": messages,
-        }
+        call = _trace_call(
+            name=tool_name,
+            mode="mock_deterministic",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=det.__dict__,
+            result=det.__dict__,
+        )
         return det, call
 
     message, tokens = await llm.chat(
         messages,
         tools=[schema],
-        tool_choice={"type": "function", "function": {"name": tool_name}},
+        tool_choice=tool_choice,
         return_usage=True,
     )
     args, err = _parse_tool(message, tool_name)
-    call = {
-        "kind": "llm",
-        "name": tool_name,
-        "mode": "live",
-        "args": args,
-        "error": err,
-        "tokens": int(tokens),
-        "prompt_tokens": getattr(tokens, "prompt", 0),
-        "completion_tokens": getattr(tokens, "completion", 0),
-        "messages": messages,
-    }
     if err:
         det = DeterministicReplyInterpreter().interpret(text)
-        call["fallback"] = "deterministic"
-        call["result"] = det.__dict__
+        call = _trace_call(
+            name=tool_name,
+            mode="live",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=args,
+            result=det.__dict__,
+            error=err,
+            tokens=tokens,
+            extra={"fallback": "deterministic"},
+        )
         return det, call
     interp = InterpretedReply(
         reply_type=args.get("reply_type") or "unknown",
@@ -173,7 +230,16 @@ async def llm_interpret(
         needs_clarification=bool(args.get("needs_clarification")),
         summary=args.get("summary") or "",
     )
-    call["result"] = interp.__dict__
+    call = _trace_call(
+        name=tool_name,
+        mode="live",
+        messages=messages,
+        tools=[schema],
+        tool_choice=tool_choice,
+        args=args,
+        result=interp.__dict__,
+        tokens=tokens,
+    )
     return interp, call
 
 
@@ -225,6 +291,7 @@ async def llm_plan(
         },
     ]
     default = candidates[0] if candidates else {"tactic": "soft_nudge", "objective": "obtain_payment_date"}
+    tool_choice = {"type": "function", "function": {"name": tool_name}}
     if mock or llm is None:
         plan = {
             "selected_tactic": default.get("tactic"),
@@ -232,26 +299,17 @@ async def llm_plan(
             "rationale": "Mock planner selected top-scoring candidate",
             "candidates_considered": [c.get("tactic") for c in candidates],
         }
-        return plan, {"kind": "llm", "name": tool_name, "mode": "mock", "args": plan, "result": plan, "messages": messages}
+        return plan, _trace_call(
+            name=tool_name, mode="mock", messages=messages, tools=[schema], tool_choice=tool_choice, args=plan, result=plan
+        )
 
     message, tokens = await llm.chat(
         messages,
         tools=[schema],
-        tool_choice={"type": "function", "function": {"name": tool_name}},
+        tool_choice=tool_choice,
         return_usage=True,
     )
     args, err = _parse_tool(message, tool_name)
-    call = {
-        "kind": "llm",
-        "name": tool_name,
-        "mode": "live",
-        "args": args,
-        "error": err,
-        "tokens": int(tokens),
-        "prompt_tokens": getattr(tokens, "prompt", 0),
-        "completion_tokens": getattr(tokens, "completion", 0),
-        "messages": messages,
-    }
     if err:
         plan = {
             "selected_tactic": default.get("tactic"),
@@ -259,11 +317,28 @@ async def llm_plan(
             "rationale": f"Fallback after LLM error: {err}",
             "candidates_considered": [c.get("tactic") for c in candidates],
         }
-        call["fallback"] = plan
-        call["result"] = plan
-        return plan, call
-    call["result"] = args
-    return args, call
+        return plan, _trace_call(
+            name=tool_name,
+            mode="live",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=args,
+            result=plan,
+            error=err,
+            tokens=tokens,
+            extra={"fallback": True},
+        )
+    return args, _trace_call(
+        name=tool_name,
+        mode="live",
+        messages=messages,
+        tools=[schema],
+        tool_choice=tool_choice,
+        args=args,
+        result=args,
+        tokens=tokens,
+    )
 
 
 async def llm_draft(
@@ -322,43 +397,60 @@ async def llm_draft(
             ),
         },
     ]
+    tool_choice = {"type": "function", "function": {"name": tool_name}}
     if force_text:
-        return subject, force_text, {"kind": "llm", "name": tool_name, "mode": "forced", "result": {"subject": subject, "body": force_text}}
+        result = {"subject": subject, "body": force_text}
+        return subject, force_text, _trace_call(
+            name=tool_name, mode="forced", messages=messages, tools=[schema], tool_choice=tool_choice, args=result, result=result
+        )
 
     if mock or llm is None:
         body = DEFAULT_GENERATOR.generate(
             case, plan.get("selected_tactic") or "soft_nudge", plan.get("objective") or "obtain_payment_date"
         )
         result = {"subject": subject, "body": body}
-        return subject, body, {"kind": "llm", "name": tool_name, "mode": "mock", "result": result, "messages": messages}
+        return subject, body, _trace_call(
+            name=tool_name, mode="mock", messages=messages, tools=[schema], tool_choice=tool_choice, args=result, result=result
+        )
 
     message, tokens = await llm.chat(
         messages,
         tools=[schema],
-        tool_choice={"type": "function", "function": {"name": tool_name}},
+        tool_choice=tool_choice,
         return_usage=True,
     )
     args, err = _parse_tool(message, tool_name)
-    call = {
-        "kind": "llm",
-        "name": tool_name,
-        "mode": "live",
-        "args": args,
-        "error": err,
-        "tokens": int(tokens),
-        "prompt_tokens": getattr(tokens, "prompt", 0),
-        "completion_tokens": getattr(tokens, "completion", 0),
-        "messages": messages,
-    }
     if err or not args.get("body"):
         body = DEFAULT_GENERATOR.generate(
             case, plan.get("selected_tactic") or "soft_nudge", plan.get("objective") or "obtain_payment_date"
         )
-        call["fallback"] = True
-        call["result"] = {"subject": subject, "body": body}
-        return subject, body, call
-    call["result"] = args
-    return args.get("subject") or subject, args["body"], call
+        result = {"subject": subject, "body": body}
+        return subject, body, _trace_call(
+            name=tool_name,
+            mode="live",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=args,
+            result=result,
+            error=err or "empty body",
+            tokens=tokens,
+            extra={"fallback": True},
+        )
+    return (
+        args.get("subject") or subject,
+        args["body"],
+        _trace_call(
+            name=tool_name,
+            mode="live",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=args,
+            result=args,
+            tokens=tokens,
+        ),
+    )
 
 
 async def llm_judge(
@@ -424,6 +516,7 @@ async def llm_judge(
             ),
         },
     ]
+    tool_choice = {"type": "function", "function": {"name": tool_name}}
     if mock or llm is None:
         result = {
             "passed": det.passed,
@@ -432,27 +525,24 @@ async def llm_judge(
             "regenerate": not det.passed,
             "notes": det.notes or "Deterministic critic",
         }
-        return result, {"kind": "llm", "name": tool_name, "mode": "mock", "result": result, "messages": messages}
+        return result, _trace_call(
+            name=tool_name,
+            mode="mock",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=result,
+            result=result,
+            extra={"deterministic_precheck": det_dict},
+        )
 
     message, tokens = await llm.chat(
         messages,
         tools=[schema],
-        tool_choice={"type": "function", "function": {"name": tool_name}},
+        tool_choice=tool_choice,
         return_usage=True,
     )
     args, err = _parse_tool(message, tool_name)
-    call = {
-        "kind": "llm",
-        "name": tool_name,
-        "mode": "live",
-        "args": args,
-        "error": err,
-        "tokens": int(tokens),
-        "prompt_tokens": getattr(tokens, "prompt", 0),
-        "completion_tokens": getattr(tokens, "completion", 0),
-        "messages": messages,
-        "deterministic_precheck": det_dict,
-    }
     if err:
         result = {
             "passed": det.passed,
@@ -461,15 +551,34 @@ async def llm_judge(
             "regenerate": not det.passed,
             "notes": f"Fallback: {err}",
         }
-        call["result"] = result
-        return result, call
+        return result, _trace_call(
+            name=tool_name,
+            mode="live",
+            messages=messages,
+            tools=[schema],
+            tool_choice=tool_choice,
+            args=args,
+            result=result,
+            error=err,
+            tokens=tokens,
+            extra={"deterministic_precheck": det_dict, "fallback": True},
+        )
     # Hard fail if deterministic critic failed (safety)
     if not det.passed:
         args["passed"] = False
         args["failures"] = list(set((args.get("failures") or []) + failures))
         args["regenerate"] = True
-    call["result"] = args
-    return args, call
+    return args, _trace_call(
+        name=tool_name,
+        mode="live",
+        messages=messages,
+        tools=[schema],
+        tool_choice=tool_choice,
+        args=args,
+        result=args,
+        tokens=tokens,
+        extra={"deterministic_precheck": det_dict},
+    )
 
 
 def resolve_llm(settings) -> Tuple[Any, bool]:

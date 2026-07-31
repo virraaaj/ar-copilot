@@ -168,3 +168,41 @@ html.dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
   font-size: 0.75rem;
   line-height: 1.4;
 }
+
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.src-badge-postgres {
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.src-badge-gremlin {
+  color: #c4b5fd;
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(167, 139, 250, 0.45);
+}
+.src-badge-sqlite {
+  color: #fdba74;
+  background: rgba(234, 88, 12, 0.18);
+  border-color: rgba(251, 146, 60, 0.4);
+}
+.src-badge-policy {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+.src-badge-runtime {
+  color: #a1a1aa;
+  background: rgba(63, 63, 70, 0.4);
+  border-color: rgba(113, 113, 122, 0.45);
+}

@@ -255,6 +255,12 @@ def build_agent_router(require_session) -> APIRouter:
     async def agent_outbox(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
         return await _store().list_outbox()
 
+    @router.get("/agent/store-topology")
+    async def store_topology(_user: str = Depends(require_session)) -> Dict[str, Any]:
+        from app.outcome_agent.runtime.stores import build_runtime_stores
+
+        return build_runtime_stores(get_settings()).topology()
+
     @router.post("/agent/cases/{case_row_id}/run-follow-up")
     async def run_follow_up(case_row_id: str, _user: str = Depends(require_session)) -> Dict[str, Any]:
         from app.outcome_agent.loop.traced_loop import run_traced_follow_up

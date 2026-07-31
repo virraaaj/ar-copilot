@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   getAgentCase,
+  getAgentStoreTopology,
   getAgentTraceRun,
   listAgentTraces,
   listMailbox,
@@ -10,6 +11,8 @@ import {
   submitMailboxReply,
   type AgentCase,
 } from "../../api";
+import LlmCallPanel from "../../components/agent/LlmCallPanel";
+import { backendsFromStep, IoList, SourceBadge } from "../../components/agent/SourceBadge";
 import { useSession } from "../../context/SessionContext";
 
 const PHASE_TONE: Record<string, string> = {
@@ -17,12 +20,14 @@ const PHASE_TONE: Record<string, string> = {
   "memory.read.operational": "text-status-emerald",
   "memory.read.episodic": "text-status-emerald",
   "memory.read.semantic": "text-status-emerald",
+  "memory.read.learning": "text-status-cyan",
   "memory.read.document": "text-status-emerald",
   "memory.read.graph": "text-status-emerald",
   "context.built": "text-status-cyan",
   "llm.plan": "text-status-violet",
   "llm.draft": "text-status-violet",
   "llm.judge": "text-status-violet",
+  "llm.interpret": "text-status-violet",
   "mail.receive": "text-status-amber",
   "mail.send": "text-status-amber",
   guardrails: "text-warning",
@@ -44,17 +49,20 @@ export default function AgentCockpit() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
+  const [topology, setTopology] = useState<{ mode: string; backends: Record<string, string> } | null>(null);
 
   const reload = useCallback(async () => {
     if (!token || !caseId) return;
-    const [c, t, m] = await Promise.all([
+    const [c, t, m, topo] = await Promise.all([
       getAgentCase(token, caseId),
       listAgentTraces(token, caseId),
       listMailbox(token, { caseId }),
+      getAgentStoreTopology(token).catch(() => null),
     ]);
     setCaseRow(c);
     setRuns(t);
     setMail(m);
+    if (topo) setTopology(topo);
     if (t[0]?.id) {
       const full = await getAgentTraceRun(token, String(t[0].id));
       setActiveRun(full);
@@ -147,6 +155,12 @@ export default function AgentCockpit() {
               <span className="tabular-nums">
                 ${Number(world.balance_due ?? caseRow.amount ?? 0).toLocaleString()}
               </span>
+              {topology && (
+                <>
+                  {" · "}
+                  Store mode <span className="text-primary font-medium">{topology.mode}</span>
+                </>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -167,6 +181,32 @@ export default function AgentCockpit() {
 
         {err && <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{err}</p>}
         {msg && <p className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">{msg}</p>}
+
+        {topology && (
+          <section className="lummus-card space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Memory sources (where data is pulled / written)
+              </h2>
+              <span className="text-[11px] text-muted-foreground font-mono">mode={topology.mode}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(topology.backends)
+                .filter(([k]) =>
+                  ["operational", "episodic", "semantic", "learning", "document", "graph", "mailbox", "case"].includes(k)
+                )
+                .map(([layer, backend]) => (
+                  <div
+                    key={layer}
+                    className="flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-2.5 py-1.5 text-xs"
+                  >
+                    <span className="font-mono text-muted-foreground">{layer}</span>
+                    <SourceBadge backend={backend} />
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
 
         <div className="grid gap-4 lg:grid-cols-12">
           {/* Mail thread */}
@@ -236,9 +276,14 @@ export default function AgentCockpit() {
                       }`}
                     >
                       <span className="font-mono text-[11px] text-muted-foreground w-5 shrink-0">{String(step.seq)}</span>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className={`font-medium ${PHASE_TONE[phase] || "text-foreground"}`}>{String(step.title)}</p>
                         <p className="font-mono text-[11px] text-muted-foreground truncate">{phase}</p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {backendsFromStep(step).map((b) => (
+                            <SourceBadge key={b} backend={b} />
+                          ))}
+                        </div>
                       </div>
                       <span className="ml-auto text-[11px] text-muted-foreground">{step.ms != null ? `${step.ms}ms` : ""}</span>
                     </button>
@@ -260,28 +305,12 @@ export default function AgentCockpit() {
                 </div>
                 {Boolean((selectedStep.call as any)?.name) && (
                   <div>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Call</p>
-                    <pre className="lummus-code max-h-48 overflow-auto">
-                      {JSON.stringify(selectedStep.call, null, 2)}
-                    </pre>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">LLM call</p>
+                    <LlmCallPanel call={selectedStep.call as any} />
                   </div>
                 )}
-                {Array.isArray(selectedStep.reads) && (selectedStep.reads as unknown[]).length > 0 && (
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Reads</p>
-                    <pre className="lummus-code max-h-40 overflow-auto">
-                      {JSON.stringify(selectedStep.reads, null, 2)}
-                    </pre>
-                  </div>
-                )}
-                {Array.isArray(selectedStep.writes) && (selectedStep.writes as unknown[]).length > 0 && (
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Writes</p>
-                    <pre className="lummus-code max-h-40 overflow-auto">
-                      {JSON.stringify(selectedStep.writes, null, 2)}
-                    </pre>
-                  </div>
-                )}
+                <IoList title="Reads (pulled from)" items={(selectedStep.reads as Array<Record<string, unknown>>) || []} />
+                <IoList title="Writes (persisted to)" items={(selectedStep.writes as Array<Record<string, unknown>>) || []} />
                 {selectedStep.error ? (
                   <p className="text-destructive text-xs">{String(selectedStep.error)}</p>
                 ) : null}
