@@ -23,22 +23,25 @@ def _load_settings(settings=None) -> AzureMemorySettings:
     global _settings
     if _settings is not None:
         return _settings
-    # Prefer env vars already on app settings
     import os
 
     from app.config import get_settings
 
     app = settings or get_settings()
-    if getattr(app, "DATABASE_URL", None):
-        os.environ.setdefault("DATABASE_URL", app.DATABASE_URL)
-    if getattr(app, "COSMOS_GREMLIN_HOST", None):
-        os.environ.setdefault("COSMOS_GREMLIN_HOST", app.COSMOS_GREMLIN_HOST)
-    if getattr(app, "COSMOS_GREMLIN_USERNAME", None):
-        os.environ.setdefault("COSMOS_GREMLIN_USERNAME", app.COSMOS_GREMLIN_USERNAME)
-    if getattr(app, "COSMOS_GREMLIN_PASSWORD", None):
-        os.environ.setdefault("COSMOS_GREMLIN_PASSWORD", app.COSMOS_GREMLIN_PASSWORD)
+    # Mirror app Settings into process env so secrets helper / demos see them
+    for key in (
+        "DATABASE_URL",
+        "COSMOS_GREMLIN_HOST",
+        "COSMOS_GREMLIN_USERNAME",
+        "COSMOS_GREMLIN_PASSWORD",
+        "AZURE_STORAGE_CONNECTION_STRING",
+        "AZURE_KEY_VAULT_NAME",
+    ):
+        val = getattr(app, key, None)
+        if val:
+            os.environ.setdefault(key, str(val))
     vault = getattr(app, "AZURE_KEY_VAULT_NAME", None) or "chxaragentdev-kv"
-    _settings = AzureMemorySettings.from_env_or_vault(vault)
+    _settings = AzureMemorySettings.from_env_or_vault(vault, app_settings=app)
     return _settings
 
 

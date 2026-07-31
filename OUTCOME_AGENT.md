@@ -51,6 +51,19 @@ Topology API: `GET /api/agent/store-topology`
 | `OUTCOME_AGENT_LLM_MODE` | `live` | `live` = Azure OpenAI; `mock` = deterministic/CI |
 | `OUTCOME_STORE_BACKEND` | `auto` | `sqlite` \| `azure` \| `auto` (azure if `DATABASE_URL` set) |
 
+### Azure env for other developers
+
+**Required** for `OUTCOME_STORE_BACKEND=azure`:
+
+- `DATABASE_URL`
+- `COSMOS_GREMLIN_HOST`
+- `COSMOS_GREMLIN_USERNAME`
+- `COSMOS_GREMLIN_PASSWORD`
+
+**Not required:** `AZURE_STORAGE_CONNECTION_STRING` (Blob is optional; mailbox/traces stay on SQLite).
+
+Or set `OUTCOME_STORE_BACKEND=sqlite` to run Trace Studio fully local with no Azure.
+
 ## API (new)
 
 - `POST /api/agent/cases/{id}/run-follow-up`
