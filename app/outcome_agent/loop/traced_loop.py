@@ -5,12 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan, llm_interpret, resolve_llm
-from app.outcome_agent.config.policies import policy_from_settings
+from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan, interpret_reply_llm, resolve_llm
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
+from app.outcome_agent.loop.communication import resolve_recipient
 from app.outcome_agent.loop.guardrails import check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
+from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
 from app.outcome_agent.loop.post_outcome import reflexion_note
 from app.outcome_agent.loop.signal_ingestion import apply_reply_signal
 from app.outcome_agent.memory.context_builder import build_context_packet
@@ -49,12 +50,15 @@ async def run_traced_follow_up(
     facts = bundle.facts
     graph = bundle.graph
     backends = bundle.backends
-    policy = policy_from_settings(settings)
     now = await sim_clock.now(store.db_path)
 
     case = await store.get(case_row_id)
     if not case:
         raise ValueError(f"case not found: {case_row_id}")
+
+    from app.outcome_agent.config.policy_overrides import effective_policy
+
+    policy = await effective_policy(case.get("project_number"), settings, db_path=store.db_path)
 
     def io(store_name: str, key: str, summary: str, payload: Any = None) -> Dict[str, Any]:
         return annotate_io(backends, store_name, key, summary, payload)
@@ -88,26 +92,8 @@ async def run_traced_follow_up(
             ctx0 = await build_context_packet(
                 case, events, tactic_weights=weights, graph_store=graph, policy_config=policy
             )
-            interp, call = await llm_interpret(client, inbound_text, ctx0, mock=mock or force_mock_llm)
+            fixed, call = await interpret_reply_llm(client, inbound_text, ctx0, mock=mock or force_mock_llm, now=now)
             bag["call"] = call
-
-            # Map LLM taxonomy → domain reply types used by apply_reply_signal
-            mapped = dict(interp.__dict__)
-            rt = mapped.get("reply_type") or "unknown"
-            remap = {
-                "payment_promise": "payment_date",
-                "follow_up_commitment": "checkback",
-                "approval_blocker": "blocker",
-                "cash_flow_blocker": "blocker",
-                "already_paid": "paid_claim",
-                "vague_delay": "vague",
-            }
-            mapped["reply_type"] = remap.get(rt, rt if rt in (
-                "payment_date", "blocker", "checkback", "dispute", "paid_claim", "vague", "unsubscribe", "hostile", "unknown"
-            ) else "unknown")
-            from app.outcome_agent.loop.reply_interpreter import InterpretedReply as IR
-
-            fixed = IR(**{k: mapped[k] for k in IR.__dataclass_fields__ if k in mapped})
 
             class _Fixed:
                 def interpret(self, text, *, now=None):
@@ -124,11 +110,18 @@ async def run_traced_follow_up(
 
     # Terminals
     world = case.get("world") or {}
+    state_before_terminal_check = case.get("state")
     if float(world.get("balance_due") or 0) <= 0 or case.get("state") == "paid":
         s = await next_seq()
         async with traces.step(run_id, s, "state.transition", "Already paid — skip outreach", principles=["P1"]) as bag:
             bag["status"] = "skipped"
             bag["reads"].append(io("world", "balance_due", str(world.get("balance_due")), world))
+        newly_paid = state_before_terminal_check != "paid"
+        if newly_paid:
+            case["state"] = "paid"
+            await ledger.append(case["id"], "payment_posted", {"paid_at": world.get("paid_at")})
+            await store.update(case["id"], state="paid", next_action_at=None)
+            await send_payment_notice(case, mailbox, ledger)
         await traces.finish_run(run_id, "ok", "skipped paid")
         return {"run_id": run_id, "skipped": True, "reason": "paid", "case": case}
 
@@ -208,7 +201,8 @@ async def run_traced_follow_up(
             case["escalation"] = pack.to_dict()
             case["next_action_at"] = None
             bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
-        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"))
+        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        await send_escalation_notice(case, mailbox, ledger)
         await traces.finish_run(run_id, "ok", "escalated")
         return {"run_id": run_id, "escalated": True, "case": case}
 
@@ -271,9 +265,35 @@ async def run_traced_follow_up(
         async with traces.step(run_id, s, "guardrails", "Critic failed — human review", principles=["P4"]) as bag:
             bag["status"] = "skipped"
             bag["reads"].append(io("judgment", "failures", str(judgment.get("failures")), judgment))
+        # Persist whatever apply_reply_signal already interpreted from the
+        # customer's message above (blocker/commitment/state/dialogue), even
+        # though the outbound draft itself got blocked. Found 2026-08-05 via
+        # mass-conversation stress testing: previously this whole function
+        # returned here without ever calling store.update(), so a real
+        # customer reply -- e.g. a blocker -- was parsed correctly in memory
+        # and then silently discarded the moment the *agent's own* ack email
+        # failed the critic twice. The customer's signal should never be
+        # lost just because our reply to it wasn't good enough to send.
+        if inbound_text:
+            await store.update(
+                case["id"],
+                state=case.get("state"),
+                world=case.get("world"),
+                dialogue=case.get("dialogue"),
+                budget=case.get("budget"),
+                goals=case.get("goals"),
+                commitments=case.get("commitments"),
+                blockers=case.get("blockers"),
+                failed_asks=case.get("failed_asks"),
+                escalation=case.get("escalation"),
+                customer_email=case.get("customer_email"),
+                customer_name=case.get("customer_name"),
+                target=case.get("target"),
+            )
         await store.add_decision_trace(case["id"], {"run_id": run_id, "blocked": True, "judgment": judgment})
         await traces.finish_run(run_id, "ok", "blocked by critic")
-        return {"run_id": run_id, "blocked": True, "judgment": judgment, "case": case}
+        refreshed = await store.get(case["id"]) if inbound_text else case
+        return {"run_id": run_id, "blocked": True, "judgment": judgment, "case": refreshed}
 
     # Guardrails
     s = await next_seq()
@@ -283,7 +303,6 @@ async def run_traced_follow_up(
             case,
             body,
             now=now,
-            dry_run=policy.dry_run,
             allowlist=policy.to_address_allowlist,
             recipient=case.get("customer_email"),
         )
@@ -297,12 +316,16 @@ async def run_traced_follow_up(
     # Send mail
     state_before = case.get("state")
     ask_id = f"ask-{uuid4().hex[:8]}"
-    recipient = case.get("customer_email") or "customer@example.com"
+    # Was unconditionally case["customer_email"] -- meant no tactic could
+    # ever actually reach the PM even if one existed. Fixed 2026-08-06
+    # alongside adding pm_awareness_check.
+    recipient = resolve_recipient(case, selected.tactic)
     from_addr = "ar-agent@local.mailbox"
     thread_id = case.get("subject_token") or case["id"]
 
     s = await next_seq()
     msg: Dict[str, Any] = {}
+    real_send_result: Optional[Dict[str, Any]] = None
     async with traces.step(run_id, s, "mail.send", "Send email to local mailbox", principles=["P2", "P12"]) as bag:
         msg = await mailbox.send(
             case_id=case["id"],
@@ -319,14 +342,31 @@ async def run_traced_follow_up(
             channel="email",
             recipient=recipient,
             subject=subject,
-            dry_run=policy.dry_run,
             meta={"ask_id": ask_id, "mailbox_id": msg["id"], "tactic": selected.tactic},
         )
         bag["writes"].append(io("mailbox", msg["id"], f"to {recipient}", msg))
+        # Real send: mirrors master's chase_engine.py wiring --
+        # get_email_sender() returns GraphEmailSender the moment
+        # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
+        from app.services.email_sender import get_email_sender
+
+        try:
+            real_send_result = await get_email_sender().send(recipient, subject, f"<p>{body}</p>", [])
+            bag["writes"].append(io("email", recipient, real_send_result.get("provider", "email"), real_send_result))
+        except Exception as exc:  # noqa: BLE001
+            real_send_result = {"success": False, "error": str(exc)}
+            bag["writes"].append(io("email", recipient, "real send failed", real_send_result))
         await ledger.append(
             case["id"],
             "outreach_sent",
-            {"body": body, "subject": subject, "recipient": recipient, "mailbox_id": msg["id"], "ask_id": ask_id},
+            {
+                "body": body,
+                "subject": subject,
+                "recipient": recipient,
+                "mailbox_id": msg["id"],
+                "ask_id": ask_id,
+                "real_send": real_send_result,
+            },
             at=now.isoformat(),
             principles=["P4", "P12"],
         )
@@ -342,7 +382,16 @@ async def run_traced_follow_up(
         dialogue["last_ask_tactic"] = selected.tactic
         case["dialogue"] = dialogue
         case["last_outreach_at"] = now.isoformat()
-        if case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due", "blocked"):
+        # "blocked" deliberately excluded (found via mass conversation
+        # testing, 2026-08-04): this used to reset a just-classified
+        # blocker straight back to waiting_for_customer the moment the
+        # blocker_ack email was sent, so the blocker only "existed" for
+        # the duration of this one function call -- by the next turn it
+        # was gone, and the no-firm-tactics-while-blocked protection no
+        # longer applied. A blocker should stay open until the customer
+        # actually resolves it (apply_reply_signal's payment_date branch
+        # already closes it correctly when that happens).
+        if case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due"):
             if case.get("state") != "promise_to_pay":
                 case["state"] = "waiting_for_customer"
         case["next_action_at"] = (now + timedelta(days=policy.nudge_interval_days)).isoformat()
@@ -398,6 +447,9 @@ async def run_traced_follow_up(
             next_action_at=case.get("next_action_at"),
             last_outreach_at=case.get("last_outreach_at"),
             last_decision={"run_id": run_id, "tactic": selected.tactic, "objective": selected.objective},
+            customer_email=case.get("customer_email"),
+            customer_name=case.get("customer_name"),
+            target=case.get("target"),
         )
         bag["writes"].append(io("case", case["id"], f"{state_before} → {case.get('state')}", {"before": state_before, "after": case.get("state"), "next_action_at": case.get("next_action_at")},))
 

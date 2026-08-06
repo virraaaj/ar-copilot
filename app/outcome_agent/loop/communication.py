@@ -3,6 +3,24 @@ from __future__ import annotations
 
 from typing import Any, Dict, Protocol
 
+# Tactics whose recipient is the PM/internal owner, not the customer. Added
+# 2026-08-06 (user feedback): a brand-new case's very first outreach must go
+# to the PM asking whether they already know a payment date, or whether the
+# agent should go ahead and contact the customer directly -- not straight to
+# the customer, and not a generic "who's your AP contact" ask either.
+PM_DIRECTED_TACTICS = {"pm_awareness_check"}
+
+
+def resolve_recipient(case: Dict[str, Any], tactic: str) -> str:
+    """Single source of truth for who a given tactic's email goes to.
+    Previously every send path (traced_loop.py, executor.py) read
+    case["customer_email"] unconditionally, so there was no way for a
+    PM-directed tactic to actually reach the PM even if one existed."""
+    world = case.get("world") or {}
+    if tactic in PM_DIRECTED_TACTICS:
+        return case.get("pm_email") or world.get("internal_owner") or case.get("customer_email") or "pm@example.com"
+    return case.get("customer_email") or case.get("pm_email") or "customer@example.com"
+
 
 class CommunicationGenerator(Protocol):
     def generate(self, case: Dict[str, Any], tactic: str, objective: str) -> str: ...
@@ -16,9 +34,15 @@ class TemplateCommunicationGenerator:
         customer = case.get("customer_name") or "there"
 
         templates = {
+            "pm_awareness_check": (
+                f"Hi, invoice {inv} ({amt_s}) is currently open. Are you already aware of "
+                f"an expected payment date for this one, or should we go ahead and reach "
+                f"out to the customer directly to get an update?"
+            ),
             "polite_outreach": (
-                f"Hi {customer}, checking in on {inv} ({amt_s}). "
-                f"Could you share a payment date we should track?"
+                f"Hi {customer}, here are the details on the open invoice we're tracking: "
+                f"{inv} for {amt_s}. Could you give us an update on where things stand, "
+                f"including an expected payment date?"
             ),
             "soft_nudge": (
                 f"Following up on {inv} ({amt_s}) — any update on timing?"

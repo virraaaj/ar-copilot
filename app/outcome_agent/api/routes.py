@@ -72,8 +72,17 @@ def build_agent_router(require_session) -> APIRouter:
         case = await store.get(case_row_id)
         if not case:
             raise HTTPException(404, "Case not found")
-        ledger = EventLedger(db_path=store.db_path)
-        events = await ledger.list_for_case(case_row_id)
+        # Was a hardcoded local-SQLite EventLedger regardless of runtime
+        # mode -- in "azure" mode (STATE_BACKEND=azure / DATABASE_URL set)
+        # every real event write goes through build_runtime_stores()'s
+        # AzureEventLedger (Postgres) instead, so this endpoint was always
+        # reading an empty table. Fixed 2026-08-06 (user feedback: no
+        # history showing on the Chases page) by resolving the ledger the
+        # same way every write path already does.
+        from app.outcome_agent.runtime.stores import build_runtime_stores
+
+        bundle = build_runtime_stores(get_settings(), db_path=store.db_path)
+        events = await bundle.ledger.list_for_case(case_row_id)
         for e in events:
             e["explanation"] = explain_event(case, e)
         return events
@@ -334,7 +343,6 @@ def build_agent_router(require_session) -> APIRouter:
         return {
             "outcome_agent_enabled": s.OUTCOME_AGENT_ENABLED,
             "outcome_agent_enabled_effective": s.outcome_agent_enabled_effective,
-            "dry_run": p.dry_run,
             "budgets": {
                 "max_unanswered": p.max_unanswered,
                 "max_missed_promises": p.max_missed_promises,

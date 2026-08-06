@@ -21,6 +21,7 @@ OBJECTIVES = {
 }
 
 TACTICS = {
+    "pm_awareness_check": "Ask the PM whether they know a payment date before contacting the customer",
     "polite_outreach": "Friendly first touch asking for status",
     "soft_nudge": "Gentle follow-up after silence",
     "firm_reminder": "Clear reminder with invoice/amount",
@@ -42,6 +43,7 @@ def choose_objective(
     uncertainty: Uncertainty,
     has_active_commitment: bool,
     failed_ask_count_for_objective: int = 0,
+    contact_target: str = "customer",
 ) -> Tuple[str, str]:
     """Return (objective, rationale). Deterministic hierarchy."""
     if world.is_paid:
@@ -56,6 +58,16 @@ def choose_objective(
         return "verify_payment", "Customer claimed paid but world still shows balance (P1)"
     if uncertainty.needs_clarification or uncertainty.confidence < 0.55:
         return "clarify_date", "Low confidence — ask one thing (P7)"
+    # Still waiting on the PM -- a PM reply that isn't a real blocker/promise
+    # (e.g. "let me check, I'll get back to you") must not fall through to
+    # the customer-engaged/follow-up-due branches below and start chasing
+    # the PM for a payment date as if they were the customer. Added
+    # 2026-08-06 (user feedback): this was the actual bug -- "checkback"
+    # set state=follow_up_scheduled, which unconditionally mapped to
+    # obtain_commitment regardless of who replied or whether contact with
+    # the customer was ever authorized.
+    if contact_target == "pm" and state not in ("blocked", "promise_to_pay", "promise_missed"):
+        return "establish_contact", "Still awaiting PM authorization or a date before contacting the customer directly"
     if state == "promise_missed":
         return "recover_missed_promise", "Prior promise missed — change approach (P13)"
     if state == "blocked":
@@ -79,9 +91,26 @@ def choose_tactic(
     uncertainty: Uncertainty,
     failed_tactics: Optional[List[str]] = None,
     tactic_weights: Optional[dict] = None,
+    is_first_contact: bool = False,
+    contact_target: str = "customer",
 ) -> Tuple[str, str]:
     failed = set(failed_tactics or [])
     weights = tactic_weights or {}
+
+    # Every touch while still PM-directed uses pm_awareness_check, not just
+    # the literal first message -- choose_objective already keeps returning
+    # establish_contact for as long as contact_target=="pm" (i.e. until the
+    # PM authorizes customer contact or provides one), so this fires on
+    # every re-check too, not only turn one. is_first_contact is kept as a
+    # fallback for callers that don't thread contact_target through.
+    # Added 2026-08-06 (user feedback): this was previously missing
+    # entirely -- establish_contact fell straight into the generic
+    # customer-facing candidates below, so the agent invented a "who's your
+    # AP contact" ask on its own with no real PM-first step, and once the
+    # PM replied at all (even just "let me check") the next turn jumped
+    # straight to chasing them for a payment date like a customer.
+    if objective == "establish_contact" and (contact_target == "pm" or is_first_contact) and "pm_awareness_check" not in failed:
+        return "pm_awareness_check", TACTICS.get("pm_awareness_check", "Check with PM before contacting customer")
 
     candidates: List[str]
     if objective == "verify_payment":
@@ -127,12 +156,16 @@ def build_goal_stack(
     failed_tactics: Optional[List[str]] = None,
     tactic_weights: Optional[dict] = None,
     failed_ask_count: int = 0,
+    contact_target: str = "customer",
 ) -> GoalStack:
     objective, obj_rationale = choose_objective(
-        state, world, dialogue, budget, uncertainty, has_active_commitment, failed_ask_count
+        state, world, dialogue, budget, uncertainty, has_active_commitment,
+        failed_ask_count, contact_target=contact_target,
     )
     tactic, tac_rationale = choose_tactic(
-        objective, state, uncertainty, failed_tactics, tactic_weights
+        objective, state, uncertainty, failed_tactics, tactic_weights,
+        is_first_contact=dialogue.latest_outbound is None,
+        contact_target=contact_target,
     )
     return GoalStack(
         primary_outcome=PRIMARY_OUTCOME,

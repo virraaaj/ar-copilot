@@ -1,24 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  listInvoices, getAgingSummary, uploadAgingExcel, listAgentCases, getAgentCommitmentMetric,
+  listInvoices, getAgingSummary, uploadAgingExcel, listAgentCases,
   type Invoice, type AgingSummary, type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
-import { SimulationControls } from "../components/SimulationControls";
 
 const OPEN_AGENT_STATES = new Set([
   "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer", "customer_responded",
   "blocked", "follow_up_scheduled", "promise_to_pay", "promise_missed", "escalation_required",
 ]);
-
-type CommitmentMetricView = {
-  total_open: number;
-  known: number;
-  unknown: number;
-  known_pct: number;
-};
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -54,7 +46,6 @@ export default function Dashboard() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [agentCases, setAgentCases] = useState<AgentCase[]>([]);
-  const [commitmentMetric, setCommitmentMetric] = useState<CommitmentMetricView | null>(null);
   // Collapsed by default (added 2026-07-23) -- with every project always
   // expanded this page was a wall of tables; an accordion makes "click a
   // project to see its invoices" the actual navigation model the boss asked
@@ -72,19 +63,14 @@ export default function Dashboard() {
     listAgentCases(token).then(setAgentCases).catch(() => setAgentCases([]));
   }, [token, refreshKey]);
 
+  // Poll so agent activity (a reply, a new outreach, a payment tracked)
+  // shows up on the homepage without a manual reload (added 2026-08-06,
+  // user request).
   useEffect(() => {
     if (!token) return;
-    getAgentCommitmentMetric(token)
-      .then((m) =>
-        setCommitmentMetric({
-          total_open: Number(m.total_open ?? 0),
-          known: Number(m.known ?? 0),
-          unknown: Number(m.unknown ?? 0),
-          known_pct: Number(m.known_pct ?? 0),
-        })
-      )
-      .catch(() => setCommitmentMetric(null));
-  }, [token, refreshKey]);
+    const id = setInterval(() => setRefreshKey((k) => k + 1), 15000);
+    return () => clearInterval(id);
+  }, [token]);
 
   function toggleExpanded(key: string) {
     setExpanded((prev) => {
@@ -233,40 +219,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      <SimulationControls onRan={() => setRefreshKey((k) => k + 1)} />
-
-      {commitmentMetric && commitmentMetric.total_open > 0 && (
-        <div className="mb-8 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Known next commitment
-              </p>
-              <p className="mt-1 flex items-baseline gap-2">
-                <span className="font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                  {commitmentMetric.known_pct}%
-                </span>
-                <span className="text-[13px] text-zinc-400 dark:text-zinc-500">
-                  {commitmentMetric.known} of {commitmentMetric.total_open} open invoices have a payment date,
-                  agreed follow-up date, or an assigned owner
-                </span>
-              </p>
-            </div>
-            {commitmentMetric.unknown > 0 && (
-              <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-3 py-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">
-                {commitmentMetric.unknown} unresolved
-              </span>
-            )}
-          </div>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            <div
-              className="h-full rounded-full bg-emerald-500 transition-all"
-              style={{ width: `${commitmentMetric.known_pct}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="mb-3 flex gap-2">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
           <option value="">All statuses</option>
@@ -291,6 +243,7 @@ export default function Dashboard() {
           const escalatedCount = projectCases.filter(
             (c) => c.state === "escalated_to_human" || c.state === "escalation_required"
           ).length;
+          const trackedCount = projectCases.filter((c) => c.state === "promise_to_pay").length;
 
           return (
             <div
@@ -330,6 +283,18 @@ export default function Dashboard() {
                       {activeCases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
                     </span>
                   )}
+                  {group.invoices.length > 0 && (
+                    <span
+                      title="Invoices with a tracked payment date"
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        trackedCount > 0
+                          ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300"
+                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                      }`}
+                    >
+                      {trackedCount}/{group.invoices.length} date tracked
+                    </span>
+                  )}
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                     {group.invoices.length} invoice{group.invoices.length === 1 ? "" : "s"}
                   </span>
@@ -350,7 +315,7 @@ export default function Dashboard() {
                           <span className="w-28 shrink-0 truncate text-zinc-600 dark:text-zinc-300">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </span>
-                          <AgentPhaseRail state={c.state} compact />
+                          <AgentPhaseRail state={c.state} target={c.target} compact />
                         </Link>
                       ))}
                     </div>

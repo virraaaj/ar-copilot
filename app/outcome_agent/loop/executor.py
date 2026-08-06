@@ -5,12 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan, resolve_llm
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
-from app.outcome_agent.loop.communication import DEFAULT_GENERATOR
-from app.outcome_agent.loop.critic import critique_with_regen
+from app.outcome_agent.loop.communication import resolve_recipient
 from app.outcome_agent.loop.guardrails import check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
+from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
 from app.outcome_agent.loop.post_outcome import reflexion_note
 from app.outcome_agent.memory.context_builder import build_context_packet
 
@@ -26,19 +27,24 @@ async def run_case_loop(
     settings,
     graph_store=None,
     force_bad_draft: Optional[str] = None,
+    mailbox=None,
 ) -> Dict[str, Any]:
     """Full observe→plan→simulate→critic→guard→execute for one case."""
-    from app.outcome_agent.config.policies import policy_from_settings
+    from app.outcome_agent.config.policy_overrides import effective_policy
 
-    policy = policy_from_settings(settings)
+    policy = await effective_policy(case.get("project_number"), settings, db_path=store.db_path)
     state_before = case.get("state")
     principles: List[str] = ["P12", "P8", "P9", "P4"]
 
     # Hard terminals — no outreach
     world = case.get("world") or {}
     if float(world.get("balance_due") or 0) <= 0 or world.get("status") == "paid" or state_before == "paid":
+        newly_paid = state_before != "paid"
         case["state"] = "paid"
         await store.update(case["id"], state="paid", next_action_at=None, world=case["world"])
+        if newly_paid:
+            await ledger.append(case["id"], "payment_posted", {"paid_at": world.get("paid_at")})
+            await send_payment_notice(case, mailbox, ledger)
         return {"skipped": True, "reason": "paid"}
 
     if state_before in ("disputed", "suppressed", "closed", "paused", "escalated_to_human"):
@@ -75,52 +81,75 @@ async def run_case_loop(
             principles, f"Escalation dossier: {pack.reason}", context, now,
         )
         await _persist(store, ledger, case, trace, principles)
+        await send_escalation_notice(case, mailbox, ledger)
         return {"trace": trace, "escalated": True}
 
     candidates, selected = plan_next_action(context)
     cand_dicts = [c.to_dict() for c in candidates]
+
+    # LLM-based plan/draft/judge (added 2026-08-04): this used to be a
+    # fixed template (TemplateCommunicationGenerator) with a deterministic
+    # regex critic, which is what the automatic poller and inject-reply
+    # both ran on -- it can't read the conversation, can't act on
+    # anything the customer actually said, and produced generic
+    # one-liners with no context. Now matches traced_loop.py's
+    # plan/draft/judge exactly, so every trigger type (manual follow-up,
+    # poller tick, inject-reply) gets the same quality of response.
+    client, mock = resolve_llm(settings)
+    plan_view = {"selected_tactic": selected.tactic, "objective": selected.objective, "rationale": selected.rationale}
+    if not force_bad_draft:
+        plan, _ = await llm_plan(client, context, cand_dicts, mock=mock)
+        for c in candidates:
+            if c.tactic == plan.get("selected_tactic"):
+                selected = c
+                break
+        plan_view = {
+            "selected_tactic": selected.tactic,
+            "objective": selected.objective,
+            "rationale": plan.get("rationale") or selected.rationale,
+        }
     selected_d = selected.to_dict()
 
-    # S7 harness: force bad draft through critic
-    if force_bad_draft:
-        selected_d["draft_text"] = force_bad_draft
-        selected_d["tactic"] = "force_threat"
-
-    draft = selected_d.get("draft_text") or DEFAULT_GENERATOR.generate(
-        case, selected.tactic, selected.objective
-    )
-
-    def _regen() -> str:
-        # Safe regenerated template
-        return DEFAULT_GENERATOR.generate(case, "clarify_ask", "clarify_date")
-
-    final_draft, critic_result = critique_with_regen(draft, context, selected_d, _regen)
+    subject = f"[{case.get('subject_token')}] Invoice {case.get('invoice_no')}"
+    final_draft = ""
+    judgment: Dict[str, Any] = {}
+    regenerated = False
+    for attempt in (1, 2):
+        force = force_bad_draft if attempt == 1 and force_bad_draft else None
+        subject, final_draft, _ = await llm_draft(client, case, plan_view, context, mock=mock, force_text=force)
+        judgment, _ = await llm_judge(client, subject, final_draft, case, context, mock=mock)
+        if judgment.get("passed"):
+            break
+        if attempt == 1 and judgment.get("regenerate", True):
+            force_bad_draft = None
+            regenerated = True
+            continue
+        break
     selected_d["draft_text"] = final_draft
 
-    if critic_result.requires_human_review and not critic_result.passed:
+    if not judgment.get("passed"):
         principles.append("P4")
         trace = _trace(
             case, trigger, state_before, state_before, cand_dicts, selected_d,
-            critic_result.to_dict(), principles,
+            judgment, principles,
             "Critic blocked send — human review", context, now,
             reflexion=reflexion_note(case),
         )
         await store.add_decision_trace(case["id"], trace)
-        await ledger.append(case["id"], "critic_blocked", {"checks": critic_result.checks}, at=now.isoformat(), principles=["P4"])
+        await ledger.append(case["id"], "critic_blocked", {"checks": judgment.get("failures")}, at=now.isoformat(), principles=["P4"])
         return {"trace": trace, "blocked": True}
 
     guard = check_before_send(
         case,
         final_draft,
         now=now,
-        dry_run=policy.dry_run,
         allowlist=policy.to_address_allowlist,
         recipient=case.get("customer_email"),
     )
     if not guard.allowed:
         trace = _trace(
             case, trigger, state_before, state_before, cand_dicts, selected_d,
-            critic_result.to_dict(), principles + ["P4"],
+            judgment, principles + ["P4"],
             f"Guardrail blocked: {guard.reason}", context, now,
             policies=guard.policies_checked,
         )
@@ -143,24 +172,58 @@ async def run_case_loop(
         case["next_action_at"] = None
         tools.append("escalation_pack")
         principles.extend(["P11", "P3"])
+        await send_escalation_notice(case, mailbox, ledger)
     else:
-        recipient = case.get("customer_email") or case.get("pm_email") or "demo@example.com"
-        subject = f"[{case.get('subject_token')}] Invoice {case.get('invoice_no')}"
+        recipient = resolve_recipient(case, selected.tactic)
         await store.add_outbox(
             case["id"],
             final_draft,
             channel="email",
             recipient=recipient,
             subject=subject,
-            dry_run=policy.dry_run,
             meta={"tactic": selected.tactic, "ask_id": ask_id},
         )
         tools.append("outbox")
-        kind = "dry_run_send" if policy.dry_run else "outreach_sent"
+        # Mirror into the shared Mailbox (added 2026-08-03): run_case_loop
+        # (the tick/poller path) previously only wrote to the case's own
+        # oa_outbox, so anything the poller sent never appeared on the
+        # Mailbox tab -- only outreach sent via the traced run-follow-up
+        # loop did. Both paths now write to the same place.
+        mailbox_id = None
+        if mailbox is not None:
+            thread_id = case.get("subject_token") or case["id"]
+            msg = await mailbox.send(
+                case_id=case["id"],
+                thread_id=thread_id,
+                to_addr=recipient,
+                from_addr="ar-agent@local.mailbox",
+                subject=subject,
+                body=final_draft,
+                headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
+            )
+            mailbox_id = msg["id"]
+            tools.append("mailbox")
+        # Real send (added 2026-08-04): same wiring as traced_loop.py --
+        # get_email_sender() returns GraphEmailSender the moment
+        # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
+        from app.services.email_sender import get_email_sender
+
+        try:
+            real_send_result = await get_email_sender().send(recipient, subject, f"<p>{final_draft}</p>", [])
+            tools.append("email")
+        except Exception as exc:  # noqa: BLE001
+            real_send_result = {"success": False, "error": str(exc)}
         await ledger.append(
             case["id"],
-            kind,
-            {"body": final_draft, "recipient": recipient, "tactic": selected.tactic, "ask_id": ask_id},
+            "outreach_sent",
+            {
+                "body": final_draft,
+                "recipient": recipient,
+                "tactic": selected.tactic,
+                "ask_id": ask_id,
+                "mailbox_id": mailbox_id,
+                "real_send": real_send_result,
+            },
             at=now.isoformat(),
             principles=["P4", "P12"],
         )
@@ -195,13 +258,13 @@ async def run_case_loop(
     if note:
         principles.append("P13")
 
-    if critic_result.regenerated:
+    if regenerated:
         principles.append("P4")
 
     state_after = case.get("state")
     trace = _trace(
         case, trigger, state_before, state_after, cand_dicts, selected_d,
-        critic_result.to_dict(), sorted(set(principles)),
+        judgment, sorted(set(principles)),
         f"Selected {selected.tactic} ({selected.objective}) score={selected.score}",
         context, now, policies=guard.policies_checked, tools=tools, reflexion=note,
     )
@@ -254,6 +317,9 @@ async def _persist(store, ledger, case, trace, principles) -> None:
         next_action_at=case.get("next_action_at"),
         last_outreach_at=case.get("last_outreach_at"),
         last_decision=trace,
+        customer_email=case.get("customer_email"),
+        customer_name=case.get("customer_name"),
+        target=case.get("target"),
     )
     await store.add_decision_trace(case["id"], trace)
     await ledger.append(

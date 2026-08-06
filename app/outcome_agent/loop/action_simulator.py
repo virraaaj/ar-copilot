@@ -10,7 +10,10 @@ from app.outcome_agent.loop.communication import DEFAULT_GENERATOR
 def simulate_candidates(context: Dict[str, Any]) -> List[CandidateAction]:
     goals = context.get("goal_stack") or {}
     objective = goals.get("current_objective", "establish_contact")
-    primary_tactic = goals.get("selected_tactic", "polite_outreach")
+    # `.get(..., default)` only applies when the key is missing, not when its
+    # value is None -- guard explicitly so a case with selected_tactic=None
+    # doesn't end up with a None primary_tactic threaded through the pool.
+    primary_tactic = goals.get("selected_tactic") or "polite_outreach"
     uncertainty = context.get("uncertainty") or {}
     budgets = context.get("budgets") or {}
     conflict = bool(context.get("world_dialogue_conflict"))

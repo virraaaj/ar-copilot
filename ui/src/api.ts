@@ -438,7 +438,6 @@ export interface PolicyConfig {
   allowed_actions: string[];
   channel_configuration: {
     chase_enabled: boolean;
-    dry_run: boolean;
     mail_poll_enabled: boolean;
     composer_enabled: boolean;
     smart_escalation_enabled: boolean;
@@ -456,6 +455,55 @@ export async function setRuntimeFlag(token: string, flag: string, enabled: boole
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled }),
+  });
+}
+
+// Editable, project-scoped agent policy (added 2026-08-06). Resolution
+// order: project override > default override > factory (.env) value --
+// see app/outcome_agent/config/policy_overrides.py.
+export interface AgentPolicyField {
+  value: number | boolean;
+  source: "project" | "default" | "factory";
+}
+
+export interface AgentPolicyResponse {
+  project_number: string | null;
+  fields: Record<string, AgentPolicyField>;
+}
+
+export async function getAgentPolicy(token: string, projectNumber?: string): Promise<AgentPolicyResponse> {
+  const qs = projectNumber ? `?project_number=${encodeURIComponent(projectNumber)}` : "";
+  return request(`/agent/policy${qs}`, token);
+}
+
+export async function setDefaultPolicyOverride(token: string, field: string, value: number | boolean): Promise<void> {
+  await request(`/agent/policy/default`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field, value }),
+  });
+}
+
+export async function clearDefaultPolicyOverride(token: string, field: string): Promise<void> {
+  await request(`/agent/policy/default/${encodeURIComponent(field)}`, token, { method: "DELETE" });
+}
+
+export async function setProjectPolicyOverride(
+  token: string,
+  projectNumber: string,
+  field: string,
+  value: number | boolean
+): Promise<void> {
+  await request(`/agent/policy/project/${encodeURIComponent(projectNumber)}`, token, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ field, value }),
+  });
+}
+
+export async function clearProjectPolicyOverride(token: string, projectNumber: string, field: string): Promise<void> {
+  await request(`/agent/policy/project/${encodeURIComponent(projectNumber)}/${encodeURIComponent(field)}`, token, {
+    method: "DELETE",
   });
 }
 
@@ -488,7 +536,6 @@ export interface OutboxEntry {
   evaluation_failures: string[];
   policy_blocked: boolean;
   policy_reason: string | null;
-  dry_run: boolean;
 }
 
 export async function getOutbox(token: string): Promise<OutboxEntry[]> {
@@ -550,6 +597,10 @@ export interface AgentCase {
   project_number: string | null;
   customer_name: string | null;
   state: string;
+  target: string | null;
+  pm_email: string | null;
+  customer_email: string | null;
+  paused: boolean;
   amount: number | null;
   world: Record<string, unknown>;
   dialogue: Record<string, unknown>;
@@ -560,6 +611,7 @@ export interface AgentCase {
   failed_asks: Array<Record<string, unknown>>;
   escalation: Record<string, unknown> | null;
   last_decision: Record<string, unknown> | null;
+  last_outreach_at: string | null;
   next_action_at: string | null;
   subject_token: string;
 }
@@ -624,6 +676,30 @@ export async function createAgentDispute(token: string, id: string, note = ""): 
   });
 }
 
+export async function pauseAgentCase(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/pause`, token, { method: "POST" });
+}
+
+export async function resumeAgentCase(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/resume`, token, { method: "POST" });
+}
+
+export async function closeAgentCase(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/close`, token, { method: "POST" });
+}
+
+export async function restartAgentCase(token: string, id: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/restart`, token, { method: "POST" });
+}
+
+export async function editAgentCommitment(token: string, id: string, promisedDate: string): Promise<Record<string, unknown>> {
+  return request(`/agent/cases/${encodeURIComponent(id)}/commitment`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ promised_date: promisedDate }),
+  });
+}
+
 export async function jumpSimClock(token: string, date: string): Promise<Record<string, unknown>> {
   return request(`/sim-clock/jump`, token, {
     method: "POST",
@@ -634,10 +710,6 @@ export async function jumpSimClock(token: string, date: string): Promise<Record<
 
 export async function getAgentLearningSummary(token: string): Promise<Record<string, unknown>> {
   return request(`/agent/learning/summary`, token);
-}
-
-export async function getAgentCommitmentMetric(token: string): Promise<Record<string, unknown>> {
-  return request(`/agent/commitment-metric`, token);
 }
 
 export async function runAgentFollowUp(token: string, id: string): Promise<Record<string, unknown>> {

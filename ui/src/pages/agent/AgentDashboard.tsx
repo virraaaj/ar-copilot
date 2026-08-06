@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  getAgentCommitmentMetric,
   getAgentLearningSummary,
   listAgentCases,
   resetAgentDemo,
@@ -12,19 +11,16 @@ import { useSession } from "../../context/SessionContext";
 export default function AgentDashboard() {
   const { token } = useSession();
   const [cases, setCases] = useState<AgentCase[]>([]);
-  const [metric, setMetric] = useState<Record<string, unknown> | null>(null);
   const [learning, setLearning] = useState<Record<string, unknown> | null>(null);
   const [msg, setMsg] = useState("");
 
   async function load() {
     if (!token) return;
-    const [c, m, l] = await Promise.all([
+    const [c, l] = await Promise.all([
       listAgentCases(token),
-      getAgentCommitmentMetric(token),
       getAgentLearningSummary(token),
     ]);
     setCases(c);
-    setMetric(m);
     setLearning(l);
   }
 
@@ -48,7 +44,7 @@ export default function AgentDashboard() {
             Agent Dashboard
           </h1>
           <p className="mt-1 text-[14px] text-zinc-500">
-            Portfolio view of outcome-agent cases — commitment-known % is the north star.
+            Portfolio view of outcome-agent cases.
           </p>
         </div>
         <div className="flex gap-2">
@@ -79,9 +75,8 @@ export default function AgentDashboard() {
 
       {msg && <p className="mb-4 text-[13px] text-zinc-500">{msg}</p>}
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-3">
         <Stat label="Open cases" value={String(open.length)} />
-        <Stat label="Known commitment %" value={`${metric?.known_pct ?? 0}%`} />
         <Stat label="Promises at risk" value={String(atRisk.length)} />
         <Stat label="Escalations" value={String(escalations.length)} />
       </div>

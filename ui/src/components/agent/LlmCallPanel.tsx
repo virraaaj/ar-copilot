@@ -12,6 +12,30 @@ type LlmCall = {
   error?: unknown;
 };
 
+// Surfaces the "why" a step's own result already carries (rationale,
+// judge notes/failures, reply classification) as plain-language lines
+// instead of making the user dig for it inside the raw JSON below. Added
+// 2026-08-06 (user feedback): Trace Studio showed the decision but not the
+// reasoning behind it.
+function reasoningLines(result: unknown): Array<{ label: string; value: string }> {
+  if (!result || typeof result !== "object") return [];
+  const r = result as Record<string, unknown>;
+  const lines: Array<{ label: string; value: string }> = [];
+  if (r.selected_tactic) lines.push({ label: "Chose tactic", value: String(r.selected_tactic) });
+  if (r.objective) lines.push({ label: "Objective", value: String(r.objective) });
+  if (r.rationale) lines.push({ label: "Why", value: String(r.rationale) });
+  if (typeof r.passed === "boolean") lines.push({ label: "Judge result", value: r.passed ? "Passed" : "Failed" });
+  if (Array.isArray(r.failures) && r.failures.length) lines.push({ label: "Failed checks", value: r.failures.join(", ") });
+  if (r.notes) lines.push({ label: "Judge notes", value: String(r.notes) });
+  if (r.reply_type) lines.push({ label: "Classified reply as", value: String(r.reply_type) });
+  if (r.summary) lines.push({ label: "Summary", value: String(r.summary) });
+  if (r.blocker_description) lines.push({ label: "Blocker", value: String(r.blocker_description) });
+  if (typeof r.authorizes_customer_contact === "boolean") {
+    lines.push({ label: "Authorized customer contact", value: r.authorizes_customer_contact ? "Yes" : "No" });
+  }
+  return lines;
+}
+
 function tokenSplit(call: LlmCall): { input: number; output: number; total: number } {
   if (call.tokens && typeof call.tokens === "object") {
     return {
@@ -30,6 +54,7 @@ export default function LlmCallPanel({ call }: { call: LlmCall }) {
   const request = call.request || { messages: call.messages };
   const response = call.response || { tool_args: call.args, result: call.result, error: call.error };
   const tokens = tokenSplit(call);
+  const reasoning = reasoningLines(response.result ?? response.tool_args);
 
   return (
     <div className="space-y-3">
@@ -37,6 +62,18 @@ export default function LlmCallPanel({ call }: { call: LlmCall }) {
         <span className="font-mono text-primary">{call.name || "llm"}</span>
         <span className="text-muted-foreground">· {call.mode || "unknown"}</span>
       </div>
+
+      {reasoning.length > 0 && (
+        <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-primary">Reasoning</p>
+          {reasoning.map((line) => (
+            <p key={line.label} className="text-sm leading-snug">
+              <span className="text-muted-foreground">{line.label}: </span>
+              <span className="text-foreground">{line.value}</span>
+            </p>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-md border border-border bg-secondary/50 px-2 py-1.5 text-center">

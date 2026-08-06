@@ -1,11 +1,18 @@
 """Pre-send guardrail engine — wraps chase_guardrails + agent hard rules."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from app.services.chase_guardrails import check_blackout_date, check_message_language
+
+# Catches unfilled template placeholders like "[Your Name]", "[Company
+# Name]", "[phone/email]" that a draft can leave behind if the model (or
+# a template fallback) never substitutes them -- added 2026-08-04 after
+# one shipped in a real outbound email.
+_PLACEHOLDER_RE = re.compile(r"\[[A-Za-z][A-Za-z /]{1,40}\]")
 
 
 @dataclass(frozen=True)
@@ -24,7 +31,6 @@ def check_before_send(
     draft: str,
     *,
     now: Optional[datetime] = None,
-    dry_run: bool = True,
     allowlist: Optional[List[str]] = None,
     recipient: Optional[str] = None,
 ) -> AgentGuardrailResult:
@@ -57,8 +63,13 @@ def check_before_send(
     if not lr.allowed:
         return AgentGuardrailResult(False, lr.reason, checked)
 
+    checked.append("placeholder_check")
+    m = _PLACEHOLDER_RE.search(draft)
+    if m:
+        return AgentGuardrailResult(False, f"draft contains an unfilled placeholder: {m.group(0)}", checked)
+
     checked.append("allowlist")
-    if allowlist and recipient and recipient.lower() not in allowlist and not dry_run:
+    if allowlist and recipient and recipient.lower() not in allowlist:
         return AgentGuardrailResult(False, "recipient not on allowlist", checked)
 
     return AgentGuardrailResult(True, None, checked)

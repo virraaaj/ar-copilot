@@ -64,6 +64,7 @@ async def build_context_packet(
         failed_tactics=failed_tactics,
         tactic_weights=weights,
         failed_ask_count=len(failed_asks),
+        contact_target=case.get("target") or "customer",
     )
 
     memory_facts: List[Dict[str, Any]] = []

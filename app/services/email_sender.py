@@ -117,10 +117,14 @@ class GraphEmailSender(EmailSender):
     async def send(self, to: str, subject: str, html_body: str, headers: List[Tuple[str, str]]) -> Dict[str, Any]:
         access_token = await self._get_access_token()
 
+        # `to` may be a comma-joined list (added 2026-08-06, escalation/
+        # payment-tracked notices) -- both recipients go in one message's
+        # toRecipients rather than one address per Graph API call.
+        recipients = [addr.strip() for addr in to.split(",") if addr.strip()]
         message: Dict[str, Any] = {
             "subject": subject,
             "body": {"contentType": "HTML", "content": html_body},
-            "toRecipients": [{"emailAddress": {"address": to}}],
+            "toRecipients": [{"emailAddress": {"address": addr}} for addr in recipients],
         }
         if headers:
             # Graph requires custom internetMessageHeaders names to start

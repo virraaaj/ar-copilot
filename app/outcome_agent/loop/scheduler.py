@@ -15,6 +15,7 @@ from app.outcome_agent.loop.signal_ingestion import (
     apply_payment_signal,
     apply_reply_signal,
 )
+from app.outcome_agent.mailbox.store import MailboxStore
 from app.outcome_agent.store.case_store import CaseStore
 from app.outcome_agent.store.event_ledger import EventLedger
 from app.outcome_agent.store.learning_store import LearningStore
@@ -113,6 +114,30 @@ async def run_agent_tick(
                     next_action_at=case.get("next_action_at"),
                 )
 
+    # Promote not_due/due cases to overdue once their due date actually
+    # arrives (added 2026-08-06, user request: chase should start
+    # automatically when an invoice becomes overdue, not the moment it's
+    # synced regardless of due date). Cases created not_due already carry
+    # next_action_at = due_date, so this only does real work once that
+    # date has passed on the (possibly simulated) clock.
+    today = now.date().isoformat()
+    for case in await store.list_all():
+        if case.get("state") not in ("not_due", "due"):
+            continue
+        due_date = (case.get("world") or {}).get("due_date")
+        if not due_date or due_date > today:
+            continue
+        case["state"] = "overdue"
+        case["next_action_at"] = now.isoformat()
+        await ledger.append(
+            case["id"],
+            "decision",
+            {"note": f"due date {due_date} reached -- promoted to overdue"},
+            at=now.isoformat(),
+            principles=["P12"],
+        )
+        await store.update(case["id"], state="overdue", next_action_at=now.isoformat())
+
     if case_row_id:
         due = [await store.get(case_row_id)]
         due = [c for c in due if c]
@@ -155,6 +180,7 @@ async def run_agent_tick(
             now=now,
             settings=settings,
             graph_store=graph,
+            mailbox=MailboxStore(db_path=store.db_path),
         )
         processed.append({"case_id": case["id"], "invoice_no": case.get("invoice_no"), **{k: v for k, v in result.items() if k != "case"}})
 
@@ -181,7 +207,29 @@ async def advance_case_with_reply(
         graph = GraphStore(db_path=store.db_path)
     except Exception:
         pass
-    interp = await apply_reply_signal(case, reply_text, ledger, now=now, graph_store=graph)
+    # Use the LLM interpreter, not the bare-keyword DEFAULT_INTERPRETER
+    # (added 2026-08-04): the deterministic fallback only classifies a
+    # blocker if the customer's exact words match a fixed regex list --
+    # a real reply like "checking a few things with the team before we
+    # make this payment" fell through to UNKNOWN and never became a
+    # tracked blocker, which is why the case kept escalating toward
+    # firmer tactics instead of routing to resolve_blocker/blocker_ack.
+    from app.outcome_agent.adapters.llm_tools import interpret_reply_llm, resolve_llm
+    from app.outcome_agent.config.policy_overrides import effective_policy
+    from app.outcome_agent.memory.context_builder import build_context_packet
+
+    policy = await effective_policy(case.get("project_number"), settings, db_path=store.db_path)
+    client, mock = resolve_llm(settings)
+    events = await ledger.list_for_case(case["id"])
+    weights = await learning.tactic_weights()
+    ctx0 = await build_context_packet(case, events, tactic_weights=weights, graph_store=graph, policy_config=policy)
+    fixed_interp, _ = await interpret_reply_llm(client, reply_text, ctx0, mock=mock, now=now)
+
+    class _Fixed:
+        def interpret(self, text, *, now=None):
+            return fixed_interp
+
+    interp = await apply_reply_signal(case, reply_text, ledger, now=now, interpreter=_Fixed(), graph_store=graph)
     await store.update(
         case["id"],
         state=case.get("state"),
@@ -191,6 +239,9 @@ async def advance_case_with_reply(
         commitments=case.get("commitments"),
         blockers=case.get("blockers"),
         next_action_at=now.isoformat(),
+        customer_email=case.get("customer_email"),
+        customer_name=case.get("customer_name"),
+        target=case.get("target"),
     )
     loop_result = None
     if run_loop and case.get("state") not in ("paid", "disputed", "suppressed"):
@@ -204,6 +255,7 @@ async def advance_case_with_reply(
             now=now,
             settings=settings,
             graph_store=graph,
+            mailbox=MailboxStore(db_path=store.db_path),
         )
     return {"interpretation": interp.__dict__, "loop": loop_result}
 
@@ -293,6 +345,9 @@ async def simulate_payment_for_case(
         commitments=case.get("commitments"),
         next_action_at=None,
     )
+    from app.outcome_agent.loop.notifications import send_payment_notice
+
+    await send_payment_notice(case, MailboxStore(db_path=store.db_path), ledger)
     return {"ok": True, "state": "paid"}
 
 
@@ -366,6 +421,7 @@ async def run_scenario(
                 now=now,
                 settings=settings,
                 graph_store=graph,
+                mailbox=MailboxStore(db_path=store.db_path),
                 force_bad_draft=beat.get("text"),
             )
             step["result"] = {

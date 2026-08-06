@@ -4,6 +4,7 @@ import {
   getAgentCase,
   getAgentStoreTopology,
   getAgentTraceRun,
+  jumpSimClock,
   listAgentTraces,
   listMailbox,
   resetAgentDemo,
@@ -14,6 +15,7 @@ import {
 import LlmCallPanel from "../../components/agent/LlmCallPanel";
 import { backendsFromStep, IoList, SourceBadge } from "../../components/agent/SourceBadge";
 import { useSession } from "../../context/SessionContext";
+import { AgentPhaseRail } from "../../components/AgentPhaseRail";
 
 const PHASE_TONE: Record<string, string> = {
   signal: "text-status-amber",
@@ -78,6 +80,39 @@ export default function AgentCockpit() {
     reload().catch((e) => setErr(String(e)));
   }, [reload]);
 
+  // Poll case state + mailbox + run list so a real reply arriving (or the
+  // background poller sending the next outreach) shows up without a
+  // manual reload (added 2026-08-06, user request). Only auto-jump the
+  // trace view to a newly-arrived run if the user was already looking at
+  // the latest one -- otherwise leave whatever run/step they clicked into
+  // alone instead of yanking the view out from under them.
+  const pollLight = useCallback(async () => {
+    if (!token || !caseId) return;
+    const [c, t, m] = await Promise.all([
+      getAgentCase(token, caseId),
+      listAgentTraces(token, caseId),
+      listMailbox(token, { caseId }),
+    ]);
+    setCaseRow(c);
+    setMail(m);
+    const wasLatest = !runs[0] || activeRun?.id === runs[0].id;
+    setRuns(t);
+    if (wasLatest && t[0]?.id && t[0].id !== activeRun?.id) {
+      const full = await getAgentTraceRun(token, String(t[0].id));
+      setActiveRun(full);
+      const steps = (full.steps as Array<Record<string, unknown>>) || [];
+      setSelectedStep(steps[steps.length - 1] || null);
+    }
+  }, [token, caseId, runs, activeRun]);
+
+  useEffect(() => {
+    if (!token || !caseId) return;
+    const id = setInterval(() => {
+      pollLight().catch(() => {});
+    }, 15000);
+    return () => clearInterval(id);
+  }, [token, caseId, pollLight]);
+
   async function onFollowUp() {
     if (!token || !caseId) return;
     setBusy(true);
@@ -102,6 +137,23 @@ export default function AgentCockpit() {
       const r = await submitMailboxReply(token, caseId, reply.trim());
       setReply("");
       setMsg(`Reply processed — run ${r.run_id}`);
+      await reload();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSkipToNextEvent() {
+    if (!token || !caseId || !caseRow?.next_action_at) return;
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const r = await jumpSimClock(token, caseRow.next_action_at);
+      const processed = Number((r.tick as Record<string, unknown> | undefined)?.processed ?? 0);
+      setMsg(`Jumped to ${String(r.now).slice(0, 10)} — ${processed} case(s) ticked`);
       await reload();
     } catch (e) {
       setErr(String(e));
@@ -162,6 +214,9 @@ export default function AgentCockpit() {
                 </>
               )}
             </p>
+            <div className="mt-4 max-w-2xl">
+              <AgentPhaseRail state={caseRow.state} target={caseRow.target} />
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to="/agent" className="lummus-btn-ghost">
@@ -172,6 +227,19 @@ export default function AgentCockpit() {
             </Link>
             <button type="button" disabled={busy} onClick={onReset} className="lummus-btn-ghost">
               Reset Demo
+            </button>
+            <button
+              type="button"
+              disabled={busy || !caseRow.next_action_at}
+              onClick={onSkipToNextEvent}
+              className="lummus-btn-ghost"
+              title={
+                caseRow.next_action_at
+                  ? `Jump straight to ${caseRow.next_action_at.slice(0, 10)} and run the tick`
+                  : "No scheduled next action on this case"
+              }
+            >
+              Skip to next event{caseRow.next_action_at ? ` (${caseRow.next_action_at.slice(0, 10)})` : ""}
             </button>
             <button type="button" disabled={busy} onClick={onFollowUp} className="lummus-btn-primary">
               {busy ? "Running…" : "Run follow-up"}

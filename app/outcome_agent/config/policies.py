@@ -16,7 +16,6 @@ class AgentPolicy:
     nudge_interval_days: int = 3
     min_days_between_emails: int = 3
     max_sends_per_tick: int = 10
-    dry_run: bool = True
     to_address_allowlist: List[str] = None  # type: ignore[assignment]
     high_dollar_threshold: float = 50000.0
     composer_enabled: bool = False
@@ -84,11 +83,6 @@ def policy_from_settings(settings: Any) -> AgentPolicy:
         max_sends_per_tick=int(
             getattr(settings, "OUTCOME_AGENT_MAX_SENDS_PER_TICK", None)
             or getattr(settings, "CHASE_MAX_SENDS_PER_TICK", 10)
-        ),
-        dry_run=bool(
-            getattr(settings, "OUTCOME_AGENT_DRY_RUN", None)
-            if getattr(settings, "OUTCOME_AGENT_DRY_RUN", None) is not None
-            else getattr(settings, "CHASE_DRY_RUN", True)
         ),
         to_address_allowlist=allowlist,
         composer_enabled=bool(

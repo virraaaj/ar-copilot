@@ -11,6 +11,7 @@ import MagicLink from "./pages/MagicLink";
 import ProjectInvoicePicker from "./pages/ProjectInvoicePicker";
 import Settings from "./pages/Settings";
 import Outbox from "./pages/Outbox";
+import Chases from "./pages/Chases";
 import AgentDashboard from "./pages/agent/AgentDashboard";
 import AgentCockpit from "./pages/agent/AgentCockpit";
 import AgentCaseList from "./pages/agent/AgentCaseList";
@@ -70,6 +71,14 @@ export default function App() {
         element={
           <RequireSession>
             <Documents />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/chases"
+        element={
+          <RequireSession>
+            <Chases />
           </RequireSession>
         }
       />

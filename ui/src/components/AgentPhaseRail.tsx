@@ -5,7 +5,7 @@ const STEPS: Step[] = [
   { key: "start", label: "Due / ready", states: ["not_due", "due", "overdue", "outreach_ready"] },
   {
     key: "waiting",
-    label: "Waiting on customer",
+    label: "Waiting on contact",
     states: ["waiting_for_customer", "customer_responded", "blocked", "follow_up_scheduled"],
   },
   { key: "commitment", label: "Commitment tracked", states: ["promise_to_pay"] },
@@ -17,7 +17,31 @@ function stepIndex(state: string): number {
   return STEPS.findIndex((s) => s.states.includes(state));
 }
 
-export function AgentPhaseRail({ state, compact = false }: { state: string; compact?: boolean }) {
+// The case's current target (case.target: "pm" | "customer") determines
+// who the agent is actually waiting on -- PM-first outreach means the
+// "waiting" step can mean either, and a flat "Waiting on customer" label
+// was misleading for the (common) PM-directed case. Only the "waiting"
+// step is target-dependent; every other step name is target-agnostic.
+function targetLabel(target: string | null | undefined): string {
+  if (target === "pm") return "PM";
+  if (target === "customer") return "customer";
+  return "contact";
+}
+
+function stepLabel(step: Step, target: string | null | undefined): string {
+  if (step.key === "waiting") return `Waiting on ${targetLabel(target)}`;
+  return step.label;
+}
+
+export function AgentPhaseRail({
+  state,
+  target,
+  compact = false,
+}: {
+  state: string;
+  target?: string | null;
+  compact?: boolean;
+}) {
   const isAlert =
     state === "escalated_to_human" ||
     state === "escalation_required" ||
@@ -47,7 +71,7 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
             return (
               <span
                 key={step.key}
-                title={step.label}
+                title={stepLabel(step, target)}
                 className={`h-1.5 w-4 rounded-full ${
                   done || (isDone && i === STEPS.length - 1)
                     ? "bg-emerald-500"
@@ -64,46 +88,52 @@ export function AgentPhaseRail({ state, compact = false }: { state: string; comp
             isAlert ? "text-rose-600 dark:text-rose-400" : "text-zinc-500 dark:text-zinc-400"
           }`}
         >
-          {isAlert ? alertLabel : STEPS[currentIndex]?.label ?? state}
+          {isAlert ? alertLabel : (STEPS[currentIndex] && stepLabel(STEPS[currentIndex], target)) ?? state}
         </span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-      {isAlert && (
-        <p className="text-[12px] font-medium text-rose-600 dark:text-rose-400">{alertLabel}</p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
+    <div>
+      <div className="flex items-start">
         {STEPS.map((step, i) => {
           const done = !isAlert && currentIndex !== -1 && i < currentIndex;
-          const current = !isAlert && i === currentIndex;
+          const current = !isAlert && i === currentIndex && !isDone;
+          const filled = done || isDone;
           return (
-            <div key={step.key} className="flex items-center gap-2">
-              <span
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
-                  done || (isDone && i === STEPS.length - 1)
-                    ? "bg-emerald-500 text-white"
-                    : current
-                      ? "bg-green-700 text-white"
-                      : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500"
-                }`}
-              >
-                {i + 1}
-              </span>
-              <span
-                className={`text-[12px] ${
-                  current ? "font-medium text-zinc-900 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400"
-                }`}
-              >
-                {step.label}
-              </span>
-              {i < STEPS.length - 1 && <span className="text-zinc-300 dark:text-zinc-600">→</span>}
+            <div key={step.key} className="flex flex-1 flex-col items-center last:flex-none last:items-end">
+              <div className="flex w-full items-center">
+                <div
+                  className={
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold " +
+                    (current
+                      ? "bg-green-700 text-white ring-4 ring-green-700/10 animate-pulse"
+                      : filled
+                        ? "bg-emerald-500 text-white"
+                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500")
+                  }
+                >
+                  {filled ? "✓" : i + 1}
+                </div>
+                {i < STEPS.length - 1 && (
+                  <div className={"h-0.5 flex-1 transition-colors " + (filled ? "bg-emerald-500" : "bg-zinc-100 dark:bg-zinc-800")} />
+                )}
+              </div>
+              <div className="mt-2 max-w-[100px] text-center text-[11px] leading-tight">
+                <span className={current ? "font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-400 dark:text-zinc-500"}>
+                  {stepLabel(step, target)}
+                </span>
+              </div>
             </div>
           );
         })}
       </div>
+      {isAlert && (
+        <div className="mt-4 rounded-lg px-3 py-2 text-[12.5px] font-medium bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300">
+          ⚠ {alertLabel}
+        </div>
+      )}
     </div>
   );
 }

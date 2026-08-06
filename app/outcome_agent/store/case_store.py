@@ -395,7 +395,7 @@ class CaseStore:
         channel: str = "email",
         recipient: Optional[str] = None,
         subject: Optional[str] = None,
-        dry_run: bool = True,
+        dry_run: bool = False,
         meta: Optional[Dict[str, Any]] = None,
     ) -> str:
         await self._ensure_schema()

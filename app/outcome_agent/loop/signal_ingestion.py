@@ -34,6 +34,29 @@ async def apply_reply_signal(
         dialogue.interpretation_confidence = min(dialogue.interpretation_confidence, 0.4)
         dialogue.open_questions = ["What concrete payment or follow-up date?"]
 
+    # Explicit customer asks (added 2026-08-04): these ride alongside
+    # whatever reply_type got classified above, so they're applied
+    # unconditionally rather than inside the reply_type branch below --
+    # a blocker reply and a contact-redirect request can arrive in the
+    # same message.
+    if interp.mentioned_contact_email and "@" in interp.mentioned_contact_email:
+        case["customer_email"] = interp.mentioned_contact_email
+    if interp.mentioned_contact_name:
+        case["customer_name"] = interp.mentioned_contact_name
+    if interp.special_instruction:
+        dialogue.special_instructions = (
+            dialogue.special_instructions + [interp.special_instruction]
+        )[-3:]
+    # Flip from PM-directed to customer-directed only on explicit
+    # authorization or a distinct customer contact being given -- added
+    # 2026-08-06. "Let me check, I'll get back to you" must NOT flip this;
+    # see authorizes_customer_contact's docstring.
+    if case.get("target") == "pm" and (
+        interp.authorizes_customer_contact
+        or (interp.mentioned_contact_email and "@" in interp.mentioned_contact_email)
+    ):
+        case["target"] = "customer"
+
     budget = AutonomyBudget.from_dict(case.get("budget") or {})
     reset_unanswered_on_reply(budget)
 

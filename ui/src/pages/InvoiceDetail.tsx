@@ -253,7 +253,7 @@ export default function InvoiceDetail() {
 
   useEffect(loadFollowUp, [token, invoiceId]);
 
-  useEffect(() => {
+  function loadAgentCase() {
     if (!token || !invoiceId) return;
     listAgentCases(token)
       .then((cases) =>
@@ -262,6 +262,22 @@ export default function InvoiceDetail() {
         )
       )
       .catch(() => setAgentCase(null));
+  }
+
+  useEffect(loadAgentCase, [token, invoiceId]);
+
+  // Poll so a reply landing or the agent sending its next outreach shows
+  // up without a manual reload (added 2026-08-06, user request).
+  useEffect(() => {
+    if (!token || !invoiceId) return;
+    const id = setInterval(() => {
+      loadInvoice();
+      loadTimeline();
+      loadFollowUp();
+      loadAgentCase();
+    }, 15000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, invoiceId]);
 
   async function submitFollowUp(email: string, cadenceDays: number, endDate: string) {
@@ -507,7 +523,7 @@ export default function InvoiceDetail() {
             </Link>
           </div>
           <div className="mt-6">
-            <AgentPhaseRail state={agentCase.state} />
+            <AgentPhaseRail state={agentCase.state} target={agentCase.target} />
           </div>
         </div>
       )}

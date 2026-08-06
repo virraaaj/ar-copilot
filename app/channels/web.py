@@ -55,6 +55,7 @@ from app.services.followup_store import FollowUpError, FollowUpStore
 from app.services import sim_clock
 from app.services.uat_reset import wipe_uat_data
 from app.outcome_agent.store.case_store import CaseStore
+from app.outcome_agent.loop.invoice_sync import sync_invoices_to_cases
 
 router = APIRouter(prefix="/api")
 
@@ -257,7 +258,36 @@ async def upload_aging_excel(
         # success rather than failing the whole upload.
         tick_error = str(exc)
 
-    return {"sync": sync_result, "tick": tick_result, "tick_error": tick_error}
+    # Outcome Agent case sync (added 2026-08-03): nothing else on this
+    # branch ever turns an uploaded invoice into an oa_cases row, so an
+    # upload alone never produced a chaseable case -- only Reset Demo's
+    # canned seed did. Best-effort: an upload that already succeeded above
+    # shouldn't fail just because this bridge hit an error.
+    agent_sync_result: Optional[Dict[str, Any]] = None
+    agent_sync_error: Optional[str] = None
+    try:
+        agent_sync_result = await sync_invoices_to_cases(backend)
+    except Exception as exc:  # noqa: BLE001
+        agent_sync_error = str(exc)
+
+    return {
+        "sync": sync_result,
+        "tick": tick_result,
+        "tick_error": tick_error,
+        "agent_sync": agent_sync_result,
+        "agent_sync_error": agent_sync_error,
+    }
+
+
+@router.post("/agent/sync-invoices")
+async def sync_invoices_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Manual re-trigger for sync_invoices_to_cases -- e.g. after an
+    upload done outside this app, or to retry if the automatic sync in
+    /aging-upload hit an error."""
+    return await sync_invoices_to_cases(backend)
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +817,10 @@ class AdvanceClockRequest(BaseModel):
     days: int
 
 
+class JumpClockRequest(BaseModel):
+    date: str  # ISO date or datetime
+
+
 def _clock_state(current: Any, simulated: bool) -> Dict[str, Any]:
     return {"now": current.isoformat(), "is_simulated": simulated}
 
@@ -811,6 +845,31 @@ async def advance_sim_clock_endpoint(
 
     tick = await run_agent_tick(get_settings(), db_path=store.db_path)
     state = _clock_state(new_time, True)
+    state["tick"] = tick
+    return state
+
+
+@router.post("/sim-clock/jump")
+async def jump_sim_clock_endpoint(
+    body: JumpClockRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    """Jump straight to a specific date and run a tick -- the frontend
+    already called this (jumpSimClock in api.ts) but the route never
+    existed, so "skip to next event" silently 404'd. Added 2026-08-06 to
+    support Trace Studio's "skip to next event" button, which jumps to a
+    case's own next_action_at instead of clicking +1d/+3d/+7d repeatedly."""
+    from datetime import datetime as _dt
+
+    try:
+        target = _dt.fromisoformat(body.date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date or datetime.")
+    store = CaseStore()
+    await sim_clock.set_simulated_at(target, store.db_path)
+    from app.outcome_agent.loop.scheduler import run_agent_tick
+
+    tick = await run_agent_tick(get_settings(), db_path=store.db_path)
+    state = _clock_state(target, True)
     state["tick"] = tick
     return state
 
@@ -867,7 +926,6 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
             "outcome_agent_enabled": s.OUTCOME_AGENT_ENABLED,
             "outcome_agent_enabled_effective": s.outcome_agent_enabled_effective,
             "chase_enabled": s.CHASE_ENABLED,
-            "dry_run": p.dry_run,
             "mail_poll_enabled": s.OUTCOME_AGENT_MAIL_POLL_ENABLED or s.CHASE_MAIL_POLL_ENABLED,
             "composer_enabled": composer_enabled,
             "smart_escalation_enabled": smart_escalation_enabled,
@@ -875,6 +933,106 @@ async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> D
             "max_sends_per_tick": p.max_sends_per_tick,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Editable agent policy (added 2026-08-06, user feedback): every timing/
+# threshold knob on AgentPolicy, customizable at a per-project level with a
+# global default underneath -- see app/outcome_agent/config/policy_overrides.py
+# for the resolution order and the (deliberate) set of fields excluded from
+# override (allowlists -- deploy-time safety decisions, not UI toggles,
+# same boundary runtime_flags.py already draws).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/agent/policy")
+async def get_agent_policy_endpoint(
+    project_number: Optional[str] = None,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import (
+        OVERRIDABLE_FIELDS,
+        effective_policy,
+        resolve_field,
+    )
+
+    store = CaseStore()
+    settings = get_settings()
+    policy = await effective_policy(project_number, settings, db_path=store.db_path)
+    field_map = {
+        "max_unanswered": policy.max_unanswered,
+        "max_missed_promises": policy.max_missed_promises,
+        "max_postponements": policy.max_postponements,
+        "max_commitment_days": policy.max_commitment_days,
+        "grace_days": policy.grace_days,
+        "payment_verify_days": policy.payment_verify_days,
+        "nudge_interval_days": policy.nudge_interval_days,
+        "min_hours_between_touches": policy.min_days_between_emails * 24,
+        "max_sends_per_tick": policy.max_sends_per_tick,
+        "high_dollar_threshold": policy.high_dollar_threshold,
+        "composer_enabled": policy.composer_enabled,
+        "smart_escalation_enabled": policy.smart_escalation_enabled,
+    }
+    fields: Dict[str, Any] = {}
+    for field in OVERRIDABLE_FIELDS:
+        source = await resolve_field(field, project_number, db_path=store.db_path)
+        fields[field] = {"value": field_map[field], "source": source["source"]}
+    return {"project_number": project_number, "fields": fields}
+
+
+class SetPolicyOverrideRequest(BaseModel):
+    field: str
+    value: Any
+
+
+@router.put("/agent/policy/default")
+async def set_default_policy_override_endpoint(
+    body: SetPolicyOverrideRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import DEFAULT_SCOPE, set_scope_override
+
+    store = CaseStore()
+    try:
+        value = await set_scope_override(DEFAULT_SCOPE, body.field, body.value, db_path=store.db_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"scope": "default", "field": body.field, "value": value}
+
+
+@router.delete("/agent/policy/default/{field}")
+async def clear_default_policy_override_endpoint(
+    field: str, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import DEFAULT_SCOPE, clear_scope_override
+
+    store = CaseStore()
+    await clear_scope_override(DEFAULT_SCOPE, field, db_path=store.db_path)
+    return {"scope": "default", "field": field, "cleared": True}
+
+
+@router.put("/agent/policy/project/{project_number}")
+async def set_project_policy_override_endpoint(
+    project_number: str, body: SetPolicyOverrideRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import project_scope, set_scope_override
+
+    store = CaseStore()
+    try:
+        value = await set_scope_override(project_scope(project_number), body.field, body.value, db_path=store.db_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"scope": project_scope(project_number), "field": body.field, "value": value}
+
+
+@router.delete("/agent/policy/project/{project_number}/{field}")
+async def clear_project_policy_override_endpoint(
+    project_number: str, field: str, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import clear_scope_override, project_scope
+
+    store = CaseStore()
+    await clear_scope_override(project_scope(project_number), field, db_path=store.db_path)
+    return {"scope": project_scope(project_number), "field": field, "cleared": True}
 
 
 class SetRuntimeFlagRequest(BaseModel):
@@ -933,7 +1091,6 @@ async def get_outbox_endpoint(_user: str = Depends(require_session)) -> List[Dic
                 "subject": r.get("subject"),
                 "body": r.get("body"),
                 "channel": r.get("channel"),
-                "dry_run": r.get("dry_run", True),
                 "composed": False,
                 "requires_human_review": False,
                 "evaluation_failures": [],
