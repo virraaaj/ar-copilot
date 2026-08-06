@@ -39,7 +39,9 @@ def _real_now() -> datetime:
 
 
 def _db_path(db_path: Optional[str] = None) -> str:
-    return db_path or get_settings().STATE_DB_PATH
+    if db_path is not None:
+        return db_path
+    return get_settings().STATE_DB_PATH
 
 
 async def _ensure_schema(path: str) -> None:

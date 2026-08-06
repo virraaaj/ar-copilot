@@ -4,8 +4,8 @@ import { login, ApiError } from "../api";
 import { useSession } from "../context/SessionContext";
 
 export default function Login() {
-  const [email, setEmail] = useState("uat-test@lummus.internal");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("demo@corehelix.ai");
+  const [password, setPassword] = useState("demo");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { setSession } = useSession();
@@ -16,9 +16,10 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      const { session_token, email: confirmedEmail } = await login(email, password);
+      const { session_token, email: confirmedEmail, demo_mode } = await login(email, password);
       setSession(session_token, confirmedEmail);
-      navigate("/");
+      // Offline demo (DEV_AUTH_BYPASS): skip Dashboard — it needs Lummus UAT.
+      navigate(demo_mode ? "/agent" : "/");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed");
     } finally {
@@ -34,7 +35,9 @@ export default function Login() {
             AR
           </span>
           <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">AR Copilot</h1>
-          <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">Sign in with your Lummus account</p>
+          <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">
+            Sign in — offline demo accepts any password when DEV_AUTH_BYPASS is on
+          </p>
         </div>
 
         <form

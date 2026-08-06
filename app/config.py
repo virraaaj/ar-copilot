@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # to remove the restriction entirely once something better replaces it.
     ALLOWED_EMAIL_DOMAIN: str = "corehelix.ai"
 
+    # Local/offline Outcome Agent demo: skip Lummus credential verify on
+    # /api/auth/login and issue an in-memory session. Never enable outside
+    # localhost. See OUTCOME_AGENT.md "Demo path (offline, no UAT backend)".
+    DEV_AUTH_BYPASS: bool = False
+
     # ---- Bot Framework / Teams (Phase 4) ----
     MICROSOFT_APP_ID: str = ""
     MICROSOFT_APP_PASSWORD: str = ""
@@ -52,6 +57,18 @@ class Settings(BaseSettings):
 
     # ---- Local state (audit log, conversation refs, proactive dedupe) ----
     STATE_DB_PATH: str = ".state/ar_copilot.db"
+
+    # ---- Azure production memory (Postgres + Cosmos Gremlin) ----
+    # Prefer Key Vault in scripts; env overrides for local smoke tests.
+    # OUTCOME_STORE_BACKEND: sqlite | azure | auto (azure if DATABASE_URL set)
+    OUTCOME_STORE_BACKEND: str = "auto"
+    DATABASE_URL: str = ""
+    COSMOS_GREMLIN_HOST: str = ""
+    COSMOS_GREMLIN_USERNAME: str = ""
+    COSMOS_GREMLIN_PASSWORD: str = ""
+    COSMOS_GREMLIN_PORT: int = 443
+    AZURE_KEY_VAULT_NAME: str = "chxaragentdev-kv"
+    AZURE_STORAGE_CONNECTION_STRING: str = ""
 
     # ---- Proactive engine (Phase 5) ----
     PROACTIVE_POLL_ENABLED: bool = False
@@ -78,12 +95,11 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = ""
     FOLLOWUP_POLL_INTERVAL_SECONDS: int = 300
 
-    # ---- Agentic invoice chase engine (PLAN_AGENTIC_CHASE.md, added 2026-07-20) ----
+    # ---- Outcome Agent (OUTCOME_AGENT.md); CHASE_* names shim to OUTCOME_AGENT_* ----
     # Master kill switch -- the poller doesn't even start without this.
-    # Ships default-off and dry-run-first: see PLAN_AGENTIC_CHASE.md §4.6.
+    # Ships default-off and dry-run-first.
     CHASE_ENABLED: bool = False
     CHASE_POLL_INTERVAL_SECONDS: int = 900
-    CHASE_DRY_RUN: bool = True
     CHASE_MAX_SENDS_PER_TICK: int = 10
     CHASE_MAX_NUDGES: int = 3
     CHASE_MAX_MISSED_COMMITMENTS: int = 3
@@ -118,6 +134,41 @@ class Settings(BaseSettings):
     @property
     def chase_to_address_allowlist(self) -> List[str]:
         return [a.strip().lower() for a in self.CHASE_TO_ADDRESS_ALLOWLIST.split(",") if a.strip()]
+
+    # ---- Long-Horizon Outcome Agent (replaces chase runtime core) ----
+    # Kill switch defaults safe: disabled. When OUTCOME_AGENT_* is unset,
+    # callers may still fall back to CHASE_* via the migration shim
+    # properties below for one release.
+    OUTCOME_AGENT_ENABLED: bool = False
+    OUTCOME_AGENT_POLL_INTERVAL_SECONDS: int = 900
+    OUTCOME_AGENT_MAX_SENDS_PER_TICK: int = 10
+    OUTCOME_AGENT_MAX_NUDGES: int = 3
+    OUTCOME_AGENT_MAX_MISSED_COMMITMENTS: int = 3
+    OUTCOME_AGENT_MAX_COMMITMENT_DAYS: int = 90
+    OUTCOME_AGENT_GRACE_DAYS: int = 2
+    OUTCOME_AGENT_PAYMENT_VERIFY_DAYS: int = 3
+    OUTCOME_AGENT_NUDGE_INTERVAL_DAYS: int = 3
+    OUTCOME_AGENT_MAX_POSTPONEMENTS: int = 3
+    OUTCOME_AGENT_MIN_HOURS_BETWEEN_TOUCHES: int = 72
+    OUTCOME_AGENT_TO_ADDRESS_ALLOWLIST: str = ""
+    OUTCOME_AGENT_MAIL_POLL_ENABLED: bool = False
+    OUTCOME_AGENT_MAIL_POLL_INTERVAL_SECONDS: int = 300
+    OUTCOME_AGENT_COMPOSER_ENABLED: bool = False
+    OUTCOME_AGENT_SMART_ESCALATION_ENABLED: bool = False
+    # live = Azure OpenAI forced tools; mock = deterministic/ScriptedLLM (CI)
+    OUTCOME_AGENT_LLM_MODE: str = "live"
+
+    @property
+    def outcome_agent_to_address_allowlist(self) -> List[str]:
+        raw = self.OUTCOME_AGENT_TO_ADDRESS_ALLOWLIST or self.CHASE_TO_ADDRESS_ALLOWLIST
+        return [a.strip().lower() for a in raw.split(",") if a.strip()]
+
+    @property
+    def outcome_agent_enabled_effective(self) -> bool:
+        """Prefer OUTCOME_AGENT_ENABLED; if False by default, also honor CHASE_ENABLED."""
+        if self.OUTCOME_AGENT_ENABLED:
+            return True
+        return bool(self.CHASE_ENABLED)
 
     # ---- Weekly AR-health digest (added 2026-07-17) ----
     # One digest card per project per ISO week, sent to that project's

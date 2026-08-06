@@ -1,60 +1,68 @@
-// Chases tab (PLAN_AGENTIC_CHASE.md Phase C4, added 2026-07-20): the
-// agentic chase engine's control surface -- every invoice it's actively
-// pursuing (or has escalated), the full event history, and the human
-// actions available (pause/resume/close/restart/edit the tracked
-// commitment). All the actual chase-progression logic lives in
-// app/services/chase_engine.py/chase_machine.py; this is purely a
-// window onto ChaseStore plus a few write actions.
+// Chases tab (rebuilt 2026-08-06 on the Outcome Agent's oa_cases data model
+// -- the original version of this page, on master, was backed by the old
+// chase_store.py engine that this branch replaced). This is the browsing +
+// lifecycle-control surface: every case, grouped by project, with
+// pause/resume/close/restart/set-date actions and event history. Actual
+// reply interaction (typing a customer/PM reply and watching the agent
+// respond) intentionally lives in Trace Studio, not here -- see the "Open
+// in Trace Studio" link on the detail panel.
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
-  listChases,
-  listChaseEvents,
+  closeAgentCase,
+  editAgentCommitment,
+  getAgentCaseEvents,
+  getAgentDecisionTraces,
+  listAgentCases,
   listProjects,
-  pauseChase,
-  resumeChase,
-  closeChase,
-  restartChase,
-  editChaseCommitment,
-  injectChaseReply,
-  simulateChasePayment,
-  type Chase,
-  type ChaseEvent,
+  pauseAgentCase,
+  restartAgentCase,
+  resumeAgentCase,
+  simulateAgentPayment,
+  type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
-import { ChaseEventRow } from "../components/ChaseEventRow";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
-import { MemoryGraphPanel } from "../components/MemoryGraphPanel";
-
-const STATE_STYLES: Record<string, string> = {
-  pending: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300",
-  awaiting_pm: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
-  awaiting_customer: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
-  awaiting_contact: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
-  blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  commitment_tracked: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  verifying_payment: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  escalated: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  paused: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-  closed_paid: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  closed_manual: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-};
+import { ChaseEventRow } from "../components/ChaseEventRow";
 
 const STATE_LABELS: Record<string, string> = {
-  pending: "Starting",
-  awaiting_pm: "Waiting on PM",
-  awaiting_customer: "Waiting on customer",
-  awaiting_contact: "Waiting on contact",
+  not_due: "Not due",
+  due: "Due",
+  overdue: "Overdue",
+  outreach_ready: "Ready for outreach",
+  waiting_for_customer: "Waiting on reply",
+  customer_responded: "Customer responded",
   blocked: "Blocked",
-  commitment_tracked: "Payment date tracked",
-  verifying_payment: "Verifying payment",
-  escalated: "Escalated",
+  follow_up_scheduled: "Follow-up scheduled",
+  promise_to_pay: "Payment date tracked",
+  promise_missed: "Promise missed",
+  disputed: "Disputed",
+  suppressed: "Suppressed",
+  escalation_required: "Escalation required",
+  escalated_to_human: "Escalated",
+  paid: "Paid",
+  closed: "Closed",
   paused: "Paused",
-  closed_paid: "Paid",
-  closed_manual: "Closed",
 };
 
-const OPEN_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
+const STATE_STYLES: Record<string, string> = {
+  blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  promise_missed: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  promise_to_pay: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  paid: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+  escalation_required: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
+  escalated_to_human: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
+  disputed: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
+  paused: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+  closed: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+  suppressed: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+};
+
+const OPEN_STATES = new Set([
+  "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer",
+  "customer_responded", "blocked", "follow_up_scheduled", "promise_to_pay",
+  "promise_missed", "escalation_required", "paused",
+]);
 
 function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state;
@@ -66,52 +74,65 @@ function formatWhen(iso: string | null): string {
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-// Tokens consumed per invoice (added 2026-07-22) -- the AI-composed
-// messages and smart-escalation trajectory assessments both spend real
-// tokens; ChaseStore.total_tokens_used is the running total charged
-// against this specific chase. 0 means neither AI feature has fired for
-// it yet (either they're off, or nothing's happened that needed them).
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
+function activeCommitmentDate(commitments: Array<Record<string, unknown>>): string | null {
+  const active = commitments.find((c) => c.status === "active" && c.type === "payment_date");
+  return active ? String(active.date ?? "") : null;
 }
 
-// Azure OpenAI gpt-5-mini pricing (added 2026-07-28) -- $0.125/1M input,
-// $1.00/1M output tokens. Estimate only: displayed for cost visibility,
-// not billed anywhere in this app; check the Azure pricing page for the
-// current live rate before budgeting off this number.
-const GPT5_MINI_INPUT_PER_TOKEN = 0.125 / 1_000_000;
-const GPT5_MINI_OUTPUT_PER_TOKEN = 1.0 / 1_000_000;
-
-function estimateCost(promptTokens: number, completionTokens: number): number {
-  return promptTokens * GPT5_MINI_INPUT_PER_TOKEN + completionTokens * GPT5_MINI_OUTPUT_PER_TOKEN;
-}
-
-function formatCost(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return `$${usd.toFixed(4)}`;
-  return `$${usd.toFixed(2)}`;
-}
-
-function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void }) {
+function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => void }) {
   const { token } = useSession();
-  const [events, setEvents] = useState<ChaseEvent[] | null>(null);
-  const [closeReason, setCloseReason] = useState("");
-  const [showClose, setShowClose] = useState(false);
-  const [newDate, setNewDate] = useState(chase.promised_date ?? "");
+  const [events, setEvents] = useState<Array<Record<string, unknown>> | null>(null);
+  const [traces, setTraces] = useState<Array<Record<string, unknown>> | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [newDate, setNewDate] = useState(activeCommitmentDate(chase.commitments) ?? "");
   const [showEditDate, setShowEditDate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showSimulate, setShowSimulate] = useState(false);
-  const [replyText, setReplyText] = useState("");
 
   useEffect(() => {
     if (!token) return;
     setEvents(null);
-    listChaseEvents(token, chase.id).then(setEvents).catch((e) => setError(String(e)));
+    setTraces(null);
+    getAgentCaseEvents(token, chase.id).then(setEvents).catch((e) => setError(String(e)));
+    getAgentDecisionTraces(token, chase.id).then(setTraces).catch(() => setTraces([]));
   }, [token, chase.id]);
 
-  async function run(action: () => Promise<void>) {
+  // Poll the open case's own history too -- a reply landing or a new
+  // outreach going out doesn't change chase.id, so the effect above
+  // alone would never pick it up without a manual reload.
+  useEffect(() => {
+    if (!token) return;
+    const id = setInterval(() => {
+      getAgentCaseEvents(token, chase.id).then(setEvents).catch(() => {});
+      getAgentDecisionTraces(token, chase.id).then(setTraces).catch(() => {});
+    }, 15000);
+    return () => clearInterval(id);
+  }, [token, chase.id]);
+
+  // Correlate each event to its decision trace: outreach_sent/dry_run_send
+  // share mailbox_id with the trace that produced them (traced_loop.py sets
+  // mailbox_id: msg.get("id") on both). critic_blocked events don't have a
+  // mailbox_id (nothing was sent), so pair blocked traces to critic_blocked
+  // events positionally -- both lists are already chronological, and this
+  // branch only ever appends one trace per blocked event, so pairing by
+  // occurrence order (Nth blocked trace <-> Nth critic_blocked event) is
+  // exact, not a heuristic.
+  function traceForEvent(event: Record<string, unknown>, precedingBlockedCount: number): Record<string, unknown> | undefined {
+    if (!traces || traces.length === 0) return undefined;
+    const detail = (event.detail as Record<string, unknown>) || {};
+    const mailboxId = detail.mailbox_id;
+    if (mailboxId) {
+      const byMailbox = traces.find((t) => t.mailbox_id === mailboxId);
+      if (byMailbox) return byMailbox;
+    }
+    if (event.kind === "critic_blocked") {
+      const blockedTraces = traces.filter((t) => t.blocked === true);
+      return blockedTraces[precedingBlockedCount];
+    }
+    return undefined;
+  }
+
+  async function run(action: () => Promise<unknown>) {
     if (!token) return;
     setBusy(true);
     setError(null);
@@ -125,6 +146,9 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
     }
   }
 
+  const promisedDate = activeCommitmentDate(chase.commitments);
+  const isTerminal = chase.state === "paid" || chase.state === "closed";
+
   return (
     <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -134,35 +158,41 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           </p>
           <p className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">{chase.project_number ?? "No project"}</p>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${STATE_STYLES[chase.state] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"}`}>
+        <span
+          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+            STATE_STYLES[chase.state] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+          }`}
+        >
           {stateLabel(chase.state)}
         </span>
+      </div>
+
+      <div className="mb-4">
+        <AgentPhaseRail state={chase.state} target={chase.target} />
       </div>
 
       <dl className="mb-4 grid grid-cols-2 gap-3 text-[12px]">
         <div>
           <dt className="text-zinc-400 dark:text-zinc-500">Target</dt>
           <dd className="text-zinc-700 dark:text-zinc-300">
-            {chase.target === "pm"
-              ? "PM"
-              : chase.target === "customer"
-                ? "Customer"
-                : chase.target
-                  ? chase.target.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                  : "--"}
+            {chase.target === "pm" ? "PM" : chase.target === "customer" ? "Customer" : chase.target ?? "--"}
           </dd>
         </div>
         <div>
           <dt className="text-zinc-400 dark:text-zinc-500">Promised date</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{chase.promised_date ?? "--"}</dd>
+          <dd className="text-zinc-700 dark:text-zinc-300">{promisedDate ?? "--"}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Missed commitments</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{chase.missed_count}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Amount</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums">
+            {chase.amount != null ? `$${Number(chase.amount).toLocaleString()}` : "--"}
+          </dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Nudges sent</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{chase.nudge_count}</dd>
+          <dt className="text-zinc-400 dark:text-zinc-500">Open blockers</dt>
+          <dd className="text-zinc-700 dark:text-zinc-300">
+            {chase.blockers.filter((b) => b.status === "open").length}
+          </dd>
         </div>
         <div>
           <dt className="text-zinc-400 dark:text-zinc-500">Last outreach</dt>
@@ -172,66 +202,49 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           <dt className="text-zinc-400 dark:text-zinc-500">Next action</dt>
           <dd className="text-zinc-700 dark:text-zinc-300">{formatWhen(chase.next_action_at)}</dd>
         </div>
-        <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Tokens used</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums" title={`${chase.total_tokens_used.toLocaleString()} tokens`}>
-            {formatTokens(chase.total_tokens_used)}
-          </dd>
-        </div>
-        {chase.total_tokens_used > 0 && (
-          <>
-            <div>
-              <dt className="text-zinc-400 dark:text-zinc-500">Token split (in / out)</dt>
-              <dd
-                className="text-zinc-700 dark:text-zinc-300 tabular-nums"
-                title={`${chase.prompt_tokens_used.toLocaleString()} prompt / ${chase.completion_tokens_used.toLocaleString()} completion tokens`}
-              >
-                {formatTokens(chase.prompt_tokens_used)} / {formatTokens(chase.completion_tokens_used)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-zinc-400 dark:text-zinc-500">Est. cost (gpt-5-mini)</dt>
-              <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums">
-                {formatCost(estimateCost(chase.prompt_tokens_used, chase.completion_tokens_used))}
-              </dd>
-            </div>
-          </>
-        )}
       </dl>
 
-      <MemoryGraphPanel chaseId={chase.id} />
-
-      {error && <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">{error}</p>}
+      {error && (
+        <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">
+          {error}
+        </p>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {OPEN_STATES.has(chase.state) && chase.state !== "pending" && (
+        <Link
+          to={`/agent/cases/${chase.id}`}
+          className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800"
+        >
+          Open in Trace Studio
+        </Link>
+        {chase.state !== "paused" && !isTerminal && (
           <button
             disabled={busy}
-            onClick={() => run(() => pauseChase(token!, chase.id))}
+            onClick={() => run(() => pauseAgentCase(token!, chase.id))}
             className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Pause
           </button>
         )}
-        {(chase.state === "paused" || chase.state === "escalated") && (
+        {(chase.state === "paused" || chase.state === "escalated_to_human") && (
           <button
             disabled={busy}
-            onClick={() => run(() => resumeChase(token!, chase.id))}
+            onClick={() => run(() => resumeAgentCase(token!, chase.id))}
             className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Resume
           </button>
         )}
-        {(chase.state === "escalated" || chase.state === "closed_manual") && (
+        {(chase.state === "escalated_to_human" || chase.state === "closed") && (
           <button
             disabled={busy}
-            onClick={() => run(() => restartChase(token!, chase.id))}
+            onClick={() => run(() => restartAgentCase(token!, chase.id))}
             className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Restart from scratch
           </button>
         )}
-        {chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
+        {!isTerminal && (
           <button
             disabled={busy}
             onClick={() => setShowEditDate((s) => !s)}
@@ -240,67 +253,28 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
             Set payment date
           </button>
         )}
-        {chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
+        {!isTerminal && (
           <button
             disabled={busy}
-            onClick={() => setShowClose((s) => !s)}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
-            Close manually
-          </button>
-        )}
-        {chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
-          <button
-            disabled={busy}
-            onClick={() => setShowSimulate((s) => !s)}
+            onClick={() => run(() => simulateAgentPayment(token!, chase.id))}
             className="rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
-            Simulate...
+            Simulate payment
+          </button>
+        )}
+        {!isTerminal && (
+          <button
+            disabled={closeBusy}
+            onClick={() => {
+              setCloseBusy(true);
+              run(() => closeAgentCase(token!, chase.id)).finally(() => setCloseBusy(false));
+            }}
+            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
+          >
+            Close
           </button>
         )}
       </div>
-
-      {showSimulate && chase.state !== "closed_paid" && chase.state !== "closed_manual" && (
-        <div className="mb-4 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50/60 dark:bg-zinc-800/40 p-3">
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Simulation controls (for demo/testing -- not a real reply or payment)
-          </p>
-          <div className="mb-2 flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Type a reply as if from the PM/customer..."
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px]"
-            />
-            <button
-              disabled={busy || !replyText.trim()}
-              onClick={() =>
-                run(async () => {
-                  await injectChaseReply(token!, chase.id, replyText);
-                  setReplyText("");
-                  setShowSimulate(false);
-                })
-              }
-              className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
-            >
-              Inject reply
-            </button>
-          </div>
-          <button
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await simulateChasePayment(token!, chase.id);
-                setShowSimulate(false);
-              })
-            }
-            className="rounded-full border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
-            Post simulated payment
-          </button>
-        </div>
-      )}
 
       {showEditDate && (
         <div className="mb-4 flex items-center gap-2">
@@ -312,29 +286,15 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
           />
           <button
             disabled={busy || !newDate}
-            onClick={() => run(async () => { await editChaseCommitment(token!, chase.id, newDate); setShowEditDate(false); })}
+            onClick={() =>
+              run(async () => {
+                await editAgentCommitment(token!, chase.id, newDate);
+                setShowEditDate(false);
+              })
+            }
             className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
           >
             Save
-          </button>
-        </div>
-      )}
-
-      {showClose && (
-        <div className="mb-4 flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Reason for closing"
-            value={closeReason}
-            onChange={(e) => setCloseReason(e.target.value)}
-            className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[13px]"
-          />
-          <button
-            disabled={busy || !closeReason.trim()}
-            onClick={() => run(async () => { await closeChase(token!, chase.id, closeReason); setShowClose(false); })}
-            className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
-          >
-            Close
           </button>
         </div>
       )}
@@ -343,10 +303,22 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
         <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">History</h3>
         {!events && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
         {events && events.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No events yet.</p>}
-        <div className="space-y-2">
-          {events?.map((e) => (
-            <ChaseEventRow key={e.id} chase={chase} event={e} />
-          ))}
+        <div>
+          {(() => {
+            let blockedSeen = 0;
+            return events?.map((e, i) => {
+              const trace = traceForEvent(e, blockedSeen);
+              if (e.kind === "critic_blocked") blockedSeen += 1;
+              return (
+                <ChaseEventRow
+                  key={String(e.id ?? i)}
+                  event={e}
+                  trace={trace}
+                  isLast={i === events.length - 1}
+                />
+              );
+            });
+          })()}
         </div>
       </div>
     </div>
@@ -355,27 +327,31 @@ function ChaseDetail({ chase, onChanged }: { chase: Chase; onChanged: () => void
 
 export default function Chases() {
   const { token } = useSession();
-  const [chases, setChases] = useState<Chase[] | null>(null);
+  const [chases, setChases] = useState<AgentCase[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("open");
   const [searchParams] = useSearchParams();
-  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("chase_id"));
-  // Grouped by project, collapsed by default, same pattern as Dashboard
-  // (added 2026-07-23) -- a flat list of every chase in the system stopped
-  // scaling once there were more than a handful; grouping mirrors how
-  // Dashboard already organizes everything else by project.
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("case_id"));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const autoExpanded = useRef(false);
   const [projectNames, setProjectNames] = useState<Map<string, string>>(new Map());
 
   function refresh() {
     if (!token) return;
-    listChases(token)
-      .then(setChases)
-      .catch((e) => setError(String(e)));
+    listAgentCases(token).then(setChases).catch((e) => setError(String(e)));
   }
 
   useEffect(refresh, [token]);
+
+  // Poll for real-world activity (a reply lands, the poller sends an
+  // outreach, a payment gets tracked) -- added 2026-08-06 (user request):
+  // this page previously only ever refreshed on a manual reload, so a
+  // reply that arrived a minute ago wasn't visible until you hit F5.
+  useEffect(() => {
+    if (!token) return;
+    const id = setInterval(refresh, 15000);
+    return () => clearInterval(id);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -384,11 +360,12 @@ export default function Chases() {
       .catch(() => setProjectNames(new Map()));
   }, [token]);
 
-  const visible = chases?.filter((c) => (filter === "open" ? OPEN_STATES.has(c.state) : filter === "all" ? true : c.state === filter)) ?? [];
+  const visible =
+    chases?.filter((c) =>
+      filter === "open" ? OPEN_STATES.has(c.state) : filter === "escalated" ? c.state === "escalated_to_human" : true
+    ) ?? [];
   const selected = chases?.find((c) => c.id === selectedId) ?? null;
 
-  // Deep links from the escalation Teams card carry ?chase_id= -- expand
-  // that chase's project group once, the first time its data shows up.
   useEffect(() => {
     if (autoExpanded.current || !selected?.project_number) return;
     autoExpanded.current = true;
@@ -405,7 +382,7 @@ export default function Chases() {
   }
 
   const projectGroups = (() => {
-    const byProject = new Map<string, { project_number: string | null; chases: Chase[] }>();
+    const byProject = new Map<string, { project_number: string | null; chases: AgentCase[] }>();
     for (const c of visible) {
       const key = c.project_number ?? "unknown";
       if (!byProject.has(key)) byProject.set(key, { project_number: c.project_number, chases: [] });
@@ -427,7 +404,8 @@ export default function Chases() {
       <div className="mb-8">
         <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chases</h1>
         <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
-          Every invoice the agentic chase engine is actively pursuing, or has escalated for review.
+          Every invoice the agent is actively pursuing, or has escalated for review. Open a case in Trace Studio to
+          send a follow-up or inject a reply.
         </p>
       </div>
 
@@ -437,7 +415,9 @@ export default function Chases() {
             key={f}
             onClick={() => setFilter(f)}
             className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium capitalize transition-colors ${
-              filter === f ? "bg-green-700 text-white" : "border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+              filter === f
+                ? "bg-green-700 text-white"
+                : "border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
             }`}
           >
             {f}
@@ -453,7 +433,7 @@ export default function Chases() {
           {projectGroups.map((group) => {
             const key = group.project_number ?? "unknown";
             const isOpen = expanded.has(key);
-            const escalatedCount = group.chases.filter((c) => c.state === "escalated").length;
+            const escalatedCount = group.chases.filter((c) => c.state === "escalated_to_human").length;
 
             return (
               <div key={key} className="overflow-hidden rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900">
@@ -492,16 +472,11 @@ export default function Chases() {
                           selectedId === c.id ? "border-green-700 bg-zinc-50 dark:bg-zinc-800/40" : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
-                            {c.invoice_no ?? c.case_key ?? c.case_id}
-                          </p>
-                          {c.total_tokens_used > 0 && (
-                            <span className="shrink-0 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">{formatTokens(c.total_tokens_used)} tok</span>
-                          )}
-                        </div>
+                        <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
+                          {c.invoice_no ?? c.case_key ?? c.case_id}
+                        </p>
                         <div className="mt-1">
-                          <AgentPhaseRail state={c.state} compact />
+                          <AgentPhaseRail state={c.state} target={c.target} compact />
                         </div>
                       </button>
                     ))}
@@ -514,7 +489,7 @@ export default function Chases() {
 
         <div>
           {selected ? (
-            <ChaseDetail chase={selected} onChanged={refresh} />
+            <CaseDetail chase={selected} onChanged={refresh} />
           ) : (
             <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Select a chase to see its details.</p>
           )}

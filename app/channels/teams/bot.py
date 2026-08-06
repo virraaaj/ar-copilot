@@ -31,8 +31,8 @@ from app.config import get_settings
 from app.guardrails.identity import resolve_role
 from app.guardrails.magic_link import MagicLinkPayload, create_magic_link_token
 from app.services.backend_client import BackendClient
-from app.services.chase_engine import advance_chase_with_reply
-from app.services.chase_store import ChaseStore
+from app.outcome_agent.loop.scheduler import advance_case_with_reply
+from app.outcome_agent.store.case_store import CaseStore
 from app.services.email_sender import EmailSender
 
 # Deliberately simple keyword detection, not NLU -- catches the common
@@ -65,7 +65,7 @@ class TeamsBot:
         agent_loop: AgentLoop,
         messenger: TeamsMessenger,
         project_conversation_store: Optional[ProjectConversationStore] = None,
-        chase_store: Optional[ChaseStore] = None,
+        chase_store: Optional[CaseStore] = None,
         backend_client: Optional[BackendClient] = None,
         email_sender: Optional[EmailSender] = None,
         llm: Optional[Any] = None,
@@ -73,10 +73,7 @@ class TeamsBot:
         self._loop = agent_loop
         self._messenger = messenger
         self._project_store = project_conversation_store or ProjectConversationStore()
-        # All four chase-related deps are optional and default to None --
-        # every existing caller/test that predates the chase engine
-        # (PLAN_AGENTIC_CHASE.md Phase C3) keeps working unchanged, just
-        # with the chase-reply pre-check inert (see _maybe_handle_chase_reply).
+        # CaseStore optional — when absent, agent-reply pre-check is inert.
         self._chase_store = chase_store
         self._backend = backend_client
         self._email_sender = email_sender
@@ -117,7 +114,7 @@ class TeamsBot:
         that *is* routed here, so this gate only needs to be cheap, not
         exhaustive.
         """
-        if self._chase_store is None or self._backend is None or self._email_sender is None or self._llm is None:
+        if self._chase_store is None:
             return False
         if text.strip().endswith("?"):
             return False
@@ -126,13 +123,19 @@ class TeamsBot:
         if not project_number:
             return False
 
-        candidates = await self._chase_store.list_open_for_project(project_number, target="pm")
+        candidates = await self._chase_store.list_open_for_project(project_number)
         if not candidates:
             return False
+        # Prefer cases waiting on a reply
+        waiting = [
+            c
+            for c in candidates
+            if c.get("state") in ("waiting_for_customer", "customer_responded", "blocked", "follow_up_scheduled")
+        ] or candidates
 
-        chase = self._pick_chase_for_reply(candidates, text)
+        chase = self._pick_chase_for_reply(waiting, text)
         if chase is None:
-            refs = ", ".join(c.get("invoice_no") or c.get("case_key") or c["id"] for c in candidates)
+            refs = ", ".join(c.get("invoice_no") or c.get("case_key") or c["id"] for c in waiting)
             await self._messenger.send_text(
                 activity.conversation_id,
                 f"I have a few open invoices waiting on a reply here: {refs}. "
@@ -141,10 +144,7 @@ class TeamsBot:
             return True
 
         settings = get_settings()
-        await advance_chase_with_reply(
-            chase, text, self._llm, self._backend, self._messenger, self._email_sender,
-            self._chase_store, self._project_store, settings,
-        )
+        await advance_case_with_reply(chase["id"], text, settings, db_path=self._chase_store.db_path)
         return True
 
     @staticmethod

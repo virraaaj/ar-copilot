@@ -59,3 +59,150 @@ html.dark input[type="date"]::-webkit-calendar-picker-indicator {
 html.dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
   opacity: 1;
 }
+
+/* ---- Lummus Trace Studio theme (ported from lummus_scale index.css) ---- */
+.lummus-shell {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 4%;
+  --primary: 144 60% 65%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 10%;
+  --muted: 0 0% 8%;
+  --muted-foreground: 0 0% 55%;
+  --accent: 200 100% 60%;
+  --destructive: 0 84% 60%;
+  --warning: 38 92% 55%;
+  --border: 0 0% 12%;
+  --radius: 0.75rem;
+  --status-emerald: 142 76% 50%;
+  --status-cyan: 188 85% 53%;
+  --status-violet: 262 83% 58%;
+  --status-amber: 38 92% 55%;
+  --status-rose: 0 72% 51%;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.lummus-shell .text-foreground { color: hsl(var(--foreground)); }
+.lummus-shell .text-muted-foreground { color: hsl(var(--muted-foreground)); }
+.lummus-shell .text-primary { color: hsl(var(--primary)); }
+.lummus-shell .text-destructive { color: hsl(var(--destructive)); }
+.lummus-shell .text-warning { color: hsl(var(--warning)); }
+.lummus-shell .text-status-emerald { color: hsl(var(--status-emerald)); }
+.lummus-shell .text-status-cyan { color: hsl(var(--status-cyan)); }
+.lummus-shell .text-status-violet { color: hsl(var(--status-violet)); }
+.lummus-shell .text-status-amber { color: hsl(var(--status-amber)); }
+.lummus-shell .bg-primary\/10 { background: hsl(var(--primary) / 0.1); }
+.lummus-shell .bg-primary\/5 { background: hsl(var(--primary) / 0.05); }
+.lummus-shell .bg-secondary\/60 { background: hsl(var(--secondary) / 0.6); }
+.lummus-shell .bg-destructive\/10 { background: hsl(var(--destructive) / 0.1); }
+.lummus-shell .bg-muted\/40 { background: hsl(var(--muted) / 0.4); }
+.lummus-shell .border-border { border-color: hsl(var(--border)); }
+.lummus-shell .border-primary\/50 { border-color: hsl(var(--primary) / 0.5); }
+.lummus-shell .border-primary\/30 { border-color: hsl(var(--primary) / 0.3); }
+.lummus-shell .border-destructive\/40 { border-color: hsl(var(--destructive) / 0.4); }
+
+.lummus-card {
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 1px rgba(113, 217, 148, 0.2);
+}
+
+.lummus-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  background: #15803d; /* green-700 — Lummus button default */
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  transition: background 0.15s;
+}
+.lummus-btn-primary:hover { background: #166534; }
+.lummus-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.lummus-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.5rem 0.875rem;
+}
+.lummus-btn-ghost:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+.lummus-input {
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+.lummus-input:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.25);
+}
+
+.lummus-code {
+  border: 1px solid hsl(var(--border));
+  background: hsl(0 0% 2%);
+  color: hsl(var(--foreground) / 0.9);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.src-badge-postgres {
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.src-badge-gremlin {
+  color: #c4b5fd;
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(167, 139, 250, 0.45);
+}
+.src-badge-sqlite {
+  color: #fdba74;
+  background: rgba(234, 88, 12, 0.18);
+  border-color: rgba(251, 146, 60, 0.4);
+}
+.src-badge-policy {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+.src-badge-runtime {
+  color: #a1a1aa;
+  background: rgba(63, 63, 70, 0.4);
+  border-color: rgba(113, 113, 122, 0.45);
+}

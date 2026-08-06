@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  listInvoices, getAgingSummary, uploadAgingExcel, listChases, getCommitmentMetric,
-  type Invoice, type AgingSummary, type Chase, type CommitmentMetric,
+  listInvoices, getAgingSummary, uploadAgingExcel, listAgentCases,
+  type Invoice, type AgingSummary, type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
-import { SimulationControls } from "../components/SimulationControls";
 
-const OPEN_CHASE_STATES = new Set(["pending", "awaiting_pm", "awaiting_customer", "awaiting_contact", "blocked", "commitment_tracked", "verifying_payment"]);
+const OPEN_AGENT_STATES = new Set([
+  "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer", "customer_responded",
+  "blocked", "follow_up_scheduled", "promise_to_pay", "promise_missed", "escalation_required",
+]);
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -43,8 +45,7 @@ export default function Dashboard() {
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [chases, setChases] = useState<Chase[]>([]);
-  const [commitmentMetric, setCommitmentMetric] = useState<CommitmentMetric | null>(null);
+  const [agentCases, setAgentCases] = useState<AgentCase[]>([]);
   // Collapsed by default (added 2026-07-23) -- with every project always
   // expanded this page was a wall of tables; an accordion makes "click a
   // project to see its invoices" the actual navigation model the boss asked
@@ -59,17 +60,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!token) return;
-    listChases(token).then(setChases).catch(() => setChases([]));
+    listAgentCases(token).then(setAgentCases).catch(() => setAgentCases([]));
   }, [token, refreshKey]);
 
-  // North-star metric (added 2026-07-25, per the long-horizon outcome
-  // agent spec): what fraction of open chases have a known next
-  // commitment vs. still an open question mark -- the product's real
-  // success signal, distinct from "how many emails went out."
+  // Poll so agent activity (a reply, a new outreach, a payment tracked)
+  // shows up on the homepage without a manual reload (added 2026-08-06,
+  // user request).
   useEffect(() => {
     if (!token) return;
-    getCommitmentMetric(token).then(setCommitmentMetric).catch(() => setCommitmentMetric(null));
-  }, [token, refreshKey]);
+    const id = setInterval(() => setRefreshKey((k) => k + 1), 15000);
+    return () => clearInterval(id);
+  }, [token]);
 
   function toggleExpanded(key: string) {
     setExpanded((prev) => {
@@ -144,9 +145,9 @@ export default function Dashboard() {
     return [...byProject.values()].sort((a, b) => (a.project_name ?? "").localeCompare(b.project_name ?? ""));
   })();
 
-  function chasesForProject(projectNumber: string | null): Chase[] {
+  function casesForProject(projectNumber: string | null): AgentCase[] {
     if (!projectNumber) return [];
-    return chases.filter((c) => c.project_number === projectNumber);
+    return agentCases.filter((c) => c.project_number === projectNumber);
   }
 
   const selectClass =
@@ -218,40 +219,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      <SimulationControls onRan={() => setRefreshKey((k) => k + 1)} />
-
-      {commitmentMetric && commitmentMetric.total_open > 0 && (
-        <div className="mb-8 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                Known next commitment
-              </p>
-              <p className="mt-1 flex items-baseline gap-2">
-                <span className="font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                  {commitmentMetric.known_pct}%
-                </span>
-                <span className="text-[13px] text-zinc-400 dark:text-zinc-500">
-                  {commitmentMetric.known} of {commitmentMetric.total_open} open invoices have a payment date,
-                  agreed follow-up date, or an assigned owner
-                </span>
-              </p>
-            </div>
-            {commitmentMetric.unknown > 0 && (
-              <span className="shrink-0 rounded-full bg-amber-50 dark:bg-amber-950/40 px-3 py-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">
-                {commitmentMetric.unknown} unresolved
-              </span>
-            )}
-          </div>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            <div
-              className="h-full rounded-full bg-emerald-500 transition-all"
-              style={{ width: `${commitmentMetric.known_pct}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="mb-3 flex gap-2">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
           <option value="">All statuses</option>
@@ -271,9 +238,12 @@ export default function Dashboard() {
         {projectGroups.map((group) => {
           const key = group.project_number ?? group.project_name ?? "unknown";
           const isOpen = expanded.has(key);
-          const projectChases = chasesForProject(group.project_number);
-          const activeChases = projectChases.filter((c) => OPEN_CHASE_STATES.has(c.state));
-          const escalatedCount = projectChases.filter((c) => c.state === "escalated").length;
+          const projectCases = casesForProject(group.project_number);
+          const activeCases = projectCases.filter((c) => OPEN_AGENT_STATES.has(c.state));
+          const escalatedCount = projectCases.filter(
+            (c) => c.state === "escalated_to_human" || c.state === "escalation_required"
+          ).length;
+          const trackedCount = projectCases.filter((c) => c.state === "promise_to_pay").length;
 
           return (
             <div
@@ -300,17 +270,29 @@ export default function Dashboard() {
                   {group.project_number && <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
                 </div>
                 <span className="ml-auto flex shrink-0 items-center gap-2">
-                  {projectChases.length > 0 && (
+                  {projectCases.length > 0 && (
                     <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
                         escalatedCount > 0
                           ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
-                          : activeChases.length > 0
+                          : activeCases.length > 0
                             ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                             : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
                       }`}
                     >
-                      {activeChases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
+                      {activeCases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
+                    </span>
+                  )}
+                  {group.invoices.length > 0 && (
+                    <span
+                      title="Invoices with a tracked payment date"
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        trackedCount > 0
+                          ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300"
+                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
+                      }`}
+                    >
+                      {trackedCount}/{group.invoices.length} date tracked
                     </span>
                   )}
                   <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
@@ -321,16 +303,20 @@ export default function Dashboard() {
 
               {isOpen && (
                 <>
-                  {activeChases.length > 0 && (
+                  {activeCases.length > 0 && (
                     <div className="space-y-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-800/40 px-5 py-3.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Agent activity</p>
-                      {activeChases.map((c) => (
-                        <div key={c.id} className="flex items-center gap-3 text-[12px]">
+                      {activeCases.map((c) => (
+                        <Link
+                          key={c.id}
+                          to={`/agent/cases/${c.id}`}
+                          className="flex items-center gap-3 text-[12px] hover:opacity-80"
+                        >
                           <span className="w-28 shrink-0 truncate text-zinc-600 dark:text-zinc-300">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </span>
-                          <AgentPhaseRail state={c.state} compact />
-                        </div>
+                          <AgentPhaseRail state={c.state} target={c.target} compact />
+                        </Link>
                       ))}
                     </div>
                   )}

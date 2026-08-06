@@ -34,6 +34,12 @@ export default function NavBar() {
             <NavLink to="/chases" className={linkClass}>
               Chases
             </NavLink>
+            <NavLink to="/agent" className={linkClass}>
+              Agent
+            </NavLink>
+            <NavLink to="/agent/mailbox" className={linkClass}>
+              Mailbox
+            </NavLink>
             <NavLink to="/outbox" className={linkClass}>
               Outbox
             </NavLink>

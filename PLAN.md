@@ -473,9 +473,8 @@ the next one rather than killing the loop.
 boss: "something more agentic ... chases an invoice until it gets a
 payment date, and if it hasn't been paid by that date, it chases the
 invoice again." Full design brief, phase breakdown, and acceptance
-criteria live in **`PLAN_AGENTIC_CHASE.md`** (kept as its own document
-rather than folded in here since it's a substantial standalone design) —
-implemented there as Phases C0-C5, all complete and live-verified.
+criteria have been superseded by the **Outcome Agent** rebuild — see
+**`OUTCOME_AGENT.md`** for the current principle-first design and demo path.
 
 Summary: a per-invoice "chase" state machine (`services/chase_store.py`,
 `chase_machine.py`) that starts with the PM once an invoice is overdue,
@@ -489,12 +488,12 @@ through both the existing `/api/messages` Teams edge (`bot.py`'s
 pre-AgentLoop chase check) and a new Graph-mailbox poller (blocked on the
 same `Mail.Read` admin consent gap as inbound email generally — see
 `.env`'s `GRAPH_MAIL_*` comment). A `Chases` web tab
-(`ui/src/pages/Chases.tsx`) gives full visibility + human override
+(`/agent` Outcome Agent cockpit) gives full visibility + human override
 (pause/resume/close/restart/edit-commitment) once something escalates.
 
 Ships default-off (`CHASE_ENABLED=false`) and dry-run-first
 (`CHASE_DRY_RUN=true`) with a hard per-tick send cap — see
-`PLAN_AGENTIC_CHASE.md` §4.6 for the full guardrail list. Live-verified
+`OUTCOME_AGENT.md` for kill switches and guardrails. Live-verified
 end-to-end against the real UAT backend (a real overdue invoice, created
 via aging-table sync + trigger-tick) and real gpt-5-mini (a real reply --
 "the customer told our AR team they will pay this by August 15th 2026" --

@@ -50,12 +50,12 @@ from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, BackendError, get_backend_client
 from app.channels.teams.messenger import get_messenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
-from app.services.chase_engine import run_chase_tick
-from app.services.chase_store import ChaseStore
 from app.services.email_sender import get_email_sender
 from app.services.followup_store import FollowUpError, FollowUpStore
 from app.services import sim_clock
 from app.services.uat_reset import wipe_uat_data
+from app.outcome_agent.store.case_store import CaseStore
+from app.outcome_agent.loop.invoice_sync import sync_invoices_to_cases
 
 router = APIRouter(prefix="/api")
 
@@ -74,6 +74,8 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     session_token: str
     email: str
+    # True when DEV_AUTH_BYPASS issued the session (offline Outcome Agent demo).
+    demo_mode: bool = False
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -89,17 +91,18 @@ async def login(body: LoginRequest) -> LoginResponse:
         if domain != s.ALLOWED_EMAIL_DOMAIN.lower():
             raise HTTPException(status_code=403, detail=f"Only @{s.ALLOWED_EMAIL_DOMAIN} accounts can sign in right now.")
 
-    client = BackendClient(s.BACKEND_API_URL, body.email, body.password)
-    try:
-        await client.verify_login()
-    except BackendError:
-        raise HTTPException(status_code=401, detail="Invalid Lummus credentials")
-    finally:
-        await client.close()
+    if not s.DEV_AUTH_BYPASS:
+        client = BackendClient(s.BACKEND_API_URL, body.email, body.password)
+        try:
+            await client.verify_login()
+        except BackendError:
+            raise HTTPException(status_code=401, detail="Invalid Lummus credentials")
+        finally:
+            await client.close()
 
     token = secrets.token_urlsafe(24)
     _sessions[token] = body.email
-    return LoginResponse(session_token=token, email=body.email)
+    return LoginResponse(session_token=token, email=body.email, demo_mode=bool(s.DEV_AUTH_BYPASS))
 
 
 def require_session(authorization: Optional[str] = Header(default=None)) -> str:
@@ -110,6 +113,12 @@ def require_session(authorization: Optional[str] = Header(default=None)) -> str:
     if not email:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return email
+
+
+# Outcome Agent routes (/api/agent/*) + /api/chases compat aliases
+from app.outcome_agent.api.routes import build_agent_router  # noqa: E402
+
+router.include_router(build_agent_router(require_session))
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +172,9 @@ async def list_invoices_endpoint(
     _user: str = Depends(require_session),
     backend: BackendClient = Depends(get_backend_client),
 ) -> List[Dict[str, Any]]:
+    # Offline Outcome Agent demo: Dashboard must not require Lummus UAT.
+    if get_settings().DEV_AUTH_BYPASS:
+        return []
     return await tool_list_invoices(
         backend, status=status, stage=stage, business_unit_id=business_unit_id,
         overdue_days_min=overdue_days_min, limit=limit,
@@ -205,6 +217,13 @@ async def aging_summary_endpoint(
     _user: str = Depends(require_session),
     backend: BackendClient = Depends(get_backend_client),
 ) -> Dict[str, Any]:
+    if get_settings().DEV_AUTH_BYPASS:
+        return {
+            "total_invoices": 0,
+            "total_open_amount": 0.0,
+            "by_aging_bucket": {},
+            "by_stage": {},
+        }
     return await tool_aging_summary(backend, business_unit_id=business_unit_id)
 
 
@@ -239,7 +258,36 @@ async def upload_aging_excel(
         # success rather than failing the whole upload.
         tick_error = str(exc)
 
-    return {"sync": sync_result, "tick": tick_result, "tick_error": tick_error}
+    # Outcome Agent case sync (added 2026-08-03): nothing else on this
+    # branch ever turns an uploaded invoice into an oa_cases row, so an
+    # upload alone never produced a chaseable case -- only Reset Demo's
+    # canned seed did. Best-effort: an upload that already succeeded above
+    # shouldn't fail just because this bridge hit an error.
+    agent_sync_result: Optional[Dict[str, Any]] = None
+    agent_sync_error: Optional[str] = None
+    try:
+        agent_sync_result = await sync_invoices_to_cases(backend)
+    except Exception as exc:  # noqa: BLE001
+        agent_sync_error = str(exc)
+
+    return {
+        "sync": sync_result,
+        "tick": tick_result,
+        "tick_error": tick_error,
+        "agent_sync": agent_sync_result,
+        "agent_sync_error": agent_sync_error,
+    }
+
+
+@router.post("/agent/sync-invoices")
+async def sync_invoices_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Manual re-trigger for sync_invoices_to_cases -- e.g. after an
+    upload done outside this app, or to retry if the automatic sync in
+    /aging-upload hit an error."""
+    return await sync_invoices_to_cases(backend)
 
 
 # ---------------------------------------------------------------------------
@@ -578,12 +626,8 @@ async def list_projects_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# Agentic chase engine (PLAN_AGENTIC_CHASE.md Phase C4) — the web Chases
-# tab: every chase's current state + full event history, plus the human
-# actions available once one escalates (pause/resume/close/restart/edit
-# the tracked commitment). This is a thin read/write window onto
-# ChaseStore -- all the actual chase-progression logic lives in
-# chase_engine.py/chase_machine.py, untouched here.
+# Agentic chase engine routes moved to app/outcome_agent/api/routes.py
+# (included above via build_agent_router). Compat /chases/* aliases live there.
 # ---------------------------------------------------------------------------
 
 
@@ -591,164 +635,9 @@ class EditCommitmentRequest(BaseModel):
     promised_date: str  # ISO date
 
 
-@router.get("/chases")
-async def list_chases_endpoint(
-    state: Optional[str] = None,
-    case_id: Optional[str] = None,
-    _user: str = Depends(require_session),
-) -> List[Dict[str, Any]]:
-    store = ChaseStore()
-    return await store.list_all(state=state, case_id=case_id)
-
-
-@router.get("/chases/commitment-metric")
-async def commitment_metric_endpoint(
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    """The outcome-agent north-star metric: what fraction of open chases
-    have a known next commitment (payment date, agreed follow-up date, or
-    a human owner via escalation) vs. still an open question mark."""
-    from app.services.outcome_metrics import commitment_breakdown, compute_commitment_metric
-
-    store = ChaseStore()
-    metric = await compute_commitment_metric(store)
-    breakdown = await commitment_breakdown(store)
-    return {
-        "total_open": metric.total_open,
-        "known": metric.known,
-        "unknown": metric.unknown,
-        "known_pct": metric.known_pct,
-        "unknown_cases": [r for r in breakdown if not r["known_commitment"]],
-    }
-
-
-@router.get("/chases/{chase_id}")
-async def get_chase_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    return chase
-
-
-@router.get("/chases/{chase_id}/events")
-async def list_chase_events_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> List[Dict[str, Any]]:
-    """Each event carries an `explanation` (spec §6.19) -- a plain-English,
-    template-generated sentence saying why the agent took that action.
-    None for event kinds that don't represent a narratable decision
-    (e.g. 'created')."""
-    from app.services.chase_explain import explain_event
-
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    events = await store.list_events(chase_id)
-    for e in events:
-        e["explanation"] = explain_event(chase, e) if chase else None
-    return events
-
-
-@router.get("/chases/{chase_id}/graph")
-async def get_chase_graph_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    """The temporal knowledge graph's neighborhood for this chase's
-    invoice -- entities and relationships written by
-    chase_engine.py's _apply_graph_updates (long-horizon outcome agent
-    spec §6.8). Returns an empty graph (not 404) for a chase that hasn't
-    had any graph-worthy event yet, since "nothing to show" is a normal,
-    valid state, not an error."""
-    from app.services.graph_store import GraphStore
-
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    invoice_id = f"invoice:{chase.get('invoice_no') or chase.get('case_key') or chase['case_id']}"
-    graph = GraphStore(db_path=store.db_path)
-    return await graph.neighborhood(invoice_id)
-
-
-@router.post("/chases/{chase_id}/pause")
-async def pause_chase_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    store = ChaseStore()
-    if not await store.get(chase_id):
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    await store.update(chase_id, state="paused", next_action_at=None)
-    await store.add_event(chase_id, "human_action", {"action": "pause", "by": _user})
-    return {"ok": True}
-
-
-@router.post("/chases/{chase_id}/resume")
-async def resume_chase_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    """Resumes a paused (or escalated) chase back onto the nudge cadence
-    -- next_action_at set to now so the very next poll tick picks it back
-    up, same "acts immediately" convention as followup_store.create()."""
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    resume_state = chase.get("target") and f"awaiting_{chase['target']}" or "pending"
-    await store.update(chase_id, state=resume_state, next_action_at=_now_iso())
-    await store.add_event(chase_id, "human_action", {"action": "resume", "by": _user})
-    return {"ok": True}
-
-
-class CloseChaseRequest(BaseModel):
-    reason: str
-
-
-@router.post("/chases/{chase_id}/close")
-async def close_chase_endpoint(
-    chase_id: str,
-    body: CloseChaseRequest,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    store = ChaseStore()
-    if not await store.get(chase_id):
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    if not body.reason.strip():
-        raise HTTPException(status_code=422, detail="reason is required.")
-    await store.update(chase_id, state="closed_manual", next_action_at=None)
-    await store.add_event(chase_id, "human_action", {"action": "close", "reason": body.reason, "by": _user})
-    return {"ok": True}
-
-
-@router.post("/chases/{chase_id}/restart")
-async def restart_chase_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    """Re-opens a closed/escalated chase from scratch (state=pending) --
-    for when a human resolves the underlying issue (e.g. got the customer
-    email manually) and wants the automated chase to pick back up."""
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    await store.update(
-        chase_id, state="pending", target=None, promised_date=None, promised_by=None,
-        missed_count=0, nudge_count=0, clarify_count=0, next_action_at=_now_iso(),
-    )
-    await store.add_event(chase_id, "human_action", {"action": "restart", "by": _user})
-    return {"ok": True}
-
-
-@router.patch("/chases/{chase_id}/commitment")
-async def edit_chase_commitment_endpoint(
-    chase_id: str,
+@router.patch("/agent/cases/{case_row_id}/commitment")
+async def edit_case_commitment_endpoint(
+    case_row_id: str,
     body: EditCommitmentRequest,
     _user: str = Depends(require_session),
 ) -> Dict[str, Any]:
@@ -756,15 +645,28 @@ async def edit_chase_commitment_endpoint(
         check_future_or_today(body.promised_date, "promised_date")
     except PolicyViolation as exc:
         raise HTTPException(status_code=422, detail=str(exc))
-
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    await store.update(chase_id, state="commitment_tracked", promised_date=body.promised_date, promised_by="pm")
-    await store.add_event(
-        chase_id, "human_action", {"action": "edit_commitment", "promised_date": body.promised_date, "by": _user}
+    store = CaseStore()
+    case = await store.get(case_row_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    commitments = list(case.get("commitments") or [])
+    for c in commitments:
+        if c.get("status") == "active":
+            c["status"] = "superseded"
+    commitments.append(
+        {
+            "id": f"cmt-human-{body.promised_date}",
+            "case_id": case.get("case_id"),
+            "type": "payment_date",
+            "date": body.promised_date,
+            "owner": "pm",
+            "status": "active",
+            "source": "human",
+            "confidence": 1.0,
+            "miss_consequence": "re-engage or escalate",
+        }
     )
+    await store.update(case_row_id, state="promise_to_pay", commitments=commitments)
     return {"ok": True}
 
 
@@ -915,13 +817,17 @@ class AdvanceClockRequest(BaseModel):
     days: int
 
 
+class JumpClockRequest(BaseModel):
+    date: str  # ISO date or datetime
+
+
 def _clock_state(current: Any, simulated: bool) -> Dict[str, Any]:
     return {"now": current.isoformat(), "is_simulated": simulated}
 
 
 @router.get("/sim-clock")
 async def get_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
-    store = ChaseStore()
+    store = CaseStore()
     current = await sim_clock.now(store.db_path)
     simulated = await sim_clock.is_simulated(store.db_path)
     return _clock_state(current, simulated)
@@ -933,14 +839,44 @@ async def advance_sim_clock_endpoint(
 ) -> Dict[str, Any]:
     if body.days <= 0:
         raise HTTPException(status_code=400, detail="days must be positive.")
-    store = ChaseStore()
+    store = CaseStore()
     new_time = await sim_clock.advance_days(body.days, store.db_path)
-    return _clock_state(new_time, True)
+    from app.outcome_agent.loop.scheduler import run_agent_tick
+
+    tick = await run_agent_tick(get_settings(), db_path=store.db_path)
+    state = _clock_state(new_time, True)
+    state["tick"] = tick
+    return state
+
+
+@router.post("/sim-clock/jump")
+async def jump_sim_clock_endpoint(
+    body: JumpClockRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    """Jump straight to a specific date and run a tick -- the frontend
+    already called this (jumpSimClock in api.ts) but the route never
+    existed, so "skip to next event" silently 404'd. Added 2026-08-06 to
+    support Trace Studio's "skip to next event" button, which jumps to a
+    case's own next_action_at instead of clicking +1d/+3d/+7d repeatedly."""
+    from datetime import datetime as _dt
+
+    try:
+        target = _dt.fromisoformat(body.date.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date or datetime.")
+    store = CaseStore()
+    await sim_clock.set_simulated_at(target, store.db_path)
+    from app.outcome_agent.loop.scheduler import run_agent_tick
+
+    tick = await run_agent_tick(get_settings(), db_path=store.db_path)
+    state = _clock_state(target, True)
+    state["tick"] = tick
+    return state
 
 
 @router.post("/sim-clock/reset")
 async def reset_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
-    store = ChaseStore()
+    store = CaseStore()
     await sim_clock.reset_to_real_time(store.db_path)
     current = await sim_clock.now(store.db_path)
     return _clock_state(current, False)
@@ -948,60 +884,155 @@ async def reset_sim_clock_endpoint(_user: str = Depends(require_session)) -> Dic
 
 @router.get("/outcome-definition")
 async def get_outcome_definition_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
-    """The spec's OutcomeDefinition (§6.1) -- what the agent is trying to
-    accomplish and what counts as progress, derived from the real,
-    already-enforced ChaseConfig rather than a second driftable copy."""
-    from app.services.chase_engine import _config_from_settings
-    from app.services.outcome_definition import OutcomeDefinition
+    """Outcome definition from outcome_agent policy (principles + hard rules)."""
+    from app.outcome_agent.config.collections_outcome import outcome_definition
+    from app.outcome_agent.config.policies import policy_from_settings
 
-    config = _config_from_settings(get_settings())
-    return OutcomeDefinition.from_chase_config(config).to_dict()
+    return outcome_definition(policy_from_settings(get_settings()))
 
 
 @router.get("/policy-config")
 async def get_policy_config_endpoint(_user: str = Depends(require_session)) -> Dict[str, Any]:
-    """Policy/Configuration Viewer (spec §6.18) -- a read-only view of the
-    real, already-enforced rules (ChaseConfig, guardrails.py, config.py's
-    channel flags), not a second copy: every value here is read straight
-    from the same objects chase_engine.py/chase_machine.py actually use,
-    so this can never drift from what the agent is really doing."""
-    from app.services.chase_engine import _config_from_settings
+    """Policy/Configuration Viewer — outcome agent + kill switches."""
+    from app.outcome_agent.config.policies import policy_from_settings
     from app.services.chase_guardrails import BLACKOUT_DATES
     from app.services import runtime_flags
 
     s = get_settings()
-    config = _config_from_settings(s)
+    p = policy_from_settings(s)
     composer_enabled = await runtime_flags.effective("CHASE_COMPOSER_ENABLED", s)
     smart_escalation_enabled = await runtime_flags.effective("CHASE_SMART_ESCALATION_ENABLED", s)
     return {
         "contact_frequency": {
-            "nudge_interval_days": config.nudge_interval_days,
-            "max_nudges": config.max_nudges,
-            "min_hours_between_touches": s.CHASE_MIN_HOURS_BETWEEN_TOUCHES,
+            "nudge_interval_days": p.nudge_interval_days,
+            "max_nudges": p.max_unanswered,
+            "min_hours_between_touches": s.OUTCOME_AGENT_MIN_HOURS_BETWEEN_TOUCHES
+            or s.CHASE_MIN_HOURS_BETWEEN_TOUCHES,
         },
         "escalation_rules": {
-            "max_missed_commitments": config.max_missed_commitments,
-            "max_commitment_days": config.max_commitment_days,
-            "grace_days": config.grace_days,
-            "payment_verify_days": config.payment_verify_days,
-            "max_clarifications": config.max_clarifications,
-            "max_postponements": config.max_postponements,
+            "max_missed_commitments": p.max_missed_promises,
+            "max_commitment_days": p.max_commitment_days,
+            "grace_days": p.grace_days,
+            "payment_verify_days": p.payment_verify_days,
+            "max_clarifications": 1,
+            "max_postponements": p.max_postponements,
             "blackout_dates": sorted(str(d) for d in BLACKOUT_DATES),
         },
         "allowed_actions": [
-            "outreach", "nudge", "confirm", "clarify", "rechase", "verify_check",
-            "ask_for_customer_email", "checkback_ack", "blocker_ack", "blocker_check_in",
+            "send_message", "schedule_follow_up", "escalate", "mark_paid",
+            "create_dispute", "clarify", "verify_payment",
         ],
         "channel_configuration": {
+            "outcome_agent_enabled": s.OUTCOME_AGENT_ENABLED,
+            "outcome_agent_enabled_effective": s.outcome_agent_enabled_effective,
             "chase_enabled": s.CHASE_ENABLED,
-            "dry_run": s.CHASE_DRY_RUN,
-            "mail_poll_enabled": s.CHASE_MAIL_POLL_ENABLED,
+            "mail_poll_enabled": s.OUTCOME_AGENT_MAIL_POLL_ENABLED or s.CHASE_MAIL_POLL_ENABLED,
             "composer_enabled": composer_enabled,
             "smart_escalation_enabled": smart_escalation_enabled,
-            "to_address_allowlist": s.chase_to_address_allowlist,
-            "max_sends_per_tick": s.CHASE_MAX_SENDS_PER_TICK,
+            "to_address_allowlist": s.outcome_agent_to_address_allowlist,
+            "max_sends_per_tick": p.max_sends_per_tick,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Editable agent policy (added 2026-08-06, user feedback): every timing/
+# threshold knob on AgentPolicy, customizable at a per-project level with a
+# global default underneath -- see app/outcome_agent/config/policy_overrides.py
+# for the resolution order and the (deliberate) set of fields excluded from
+# override (allowlists -- deploy-time safety decisions, not UI toggles,
+# same boundary runtime_flags.py already draws).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/agent/policy")
+async def get_agent_policy_endpoint(
+    project_number: Optional[str] = None,
+    _user: str = Depends(require_session),
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import (
+        OVERRIDABLE_FIELDS,
+        effective_policy,
+        resolve_field,
+    )
+
+    store = CaseStore()
+    settings = get_settings()
+    policy = await effective_policy(project_number, settings, db_path=store.db_path)
+    field_map = {
+        "max_unanswered": policy.max_unanswered,
+        "max_missed_promises": policy.max_missed_promises,
+        "max_postponements": policy.max_postponements,
+        "max_commitment_days": policy.max_commitment_days,
+        "grace_days": policy.grace_days,
+        "payment_verify_days": policy.payment_verify_days,
+        "nudge_interval_days": policy.nudge_interval_days,
+        "min_hours_between_touches": policy.min_days_between_emails * 24,
+        "max_sends_per_tick": policy.max_sends_per_tick,
+        "high_dollar_threshold": policy.high_dollar_threshold,
+        "composer_enabled": policy.composer_enabled,
+        "smart_escalation_enabled": policy.smart_escalation_enabled,
+    }
+    fields: Dict[str, Any] = {}
+    for field in OVERRIDABLE_FIELDS:
+        source = await resolve_field(field, project_number, db_path=store.db_path)
+        fields[field] = {"value": field_map[field], "source": source["source"]}
+    return {"project_number": project_number, "fields": fields}
+
+
+class SetPolicyOverrideRequest(BaseModel):
+    field: str
+    value: Any
+
+
+@router.put("/agent/policy/default")
+async def set_default_policy_override_endpoint(
+    body: SetPolicyOverrideRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import DEFAULT_SCOPE, set_scope_override
+
+    store = CaseStore()
+    try:
+        value = await set_scope_override(DEFAULT_SCOPE, body.field, body.value, db_path=store.db_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"scope": "default", "field": body.field, "value": value}
+
+
+@router.delete("/agent/policy/default/{field}")
+async def clear_default_policy_override_endpoint(
+    field: str, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import DEFAULT_SCOPE, clear_scope_override
+
+    store = CaseStore()
+    await clear_scope_override(DEFAULT_SCOPE, field, db_path=store.db_path)
+    return {"scope": "default", "field": field, "cleared": True}
+
+
+@router.put("/agent/policy/project/{project_number}")
+async def set_project_policy_override_endpoint(
+    project_number: str, body: SetPolicyOverrideRequest, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import project_scope, set_scope_override
+
+    store = CaseStore()
+    try:
+        value = await set_scope_override(project_scope(project_number), body.field, body.value, db_path=store.db_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"scope": project_scope(project_number), "field": body.field, "value": value}
+
+
+@router.delete("/agent/policy/project/{project_number}/{field}")
+async def clear_project_policy_override_endpoint(
+    project_number: str, field: str, _user: str = Depends(require_session)
+) -> Dict[str, Any]:
+    from app.outcome_agent.config.policy_overrides import clear_scope_override, project_scope
+
+    store = CaseStore()
+    await clear_scope_override(project_scope(project_number), field, db_path=store.db_path)
+    return {"scope": project_scope(project_number), "field": field, "cleared": True}
 
 
 class SetRuntimeFlagRequest(BaseModel):
@@ -1027,14 +1058,11 @@ async def set_runtime_flag_endpoint(
 
 @router.get("/policy-documents")
 async def get_policy_documents_endpoint(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
-    """Static Knowledge/RAG layer (spec §6.9) -- the fixed policy library
-    chase_composer.py retrieves from when drafting messages, exposed
-    read-only so an operator can see exactly what "policy" the agent is
-    grounding its tone/behavior in."""
-    from app.services.chase_engine import _config_from_settings
+    """Static Knowledge/RAG layer — policy library used when drafting."""
+    from app.outcome_agent.config.policies import policy_from_settings
     from app.services.policy_knowledge import list_documents
 
-    config = _config_from_settings(get_settings())
+    config = policy_from_settings(get_settings())
     return [
         {"id": d.id, "title": d.title, "category": d.category, "text": d.text}
         for d in list_documents(config)
@@ -1043,104 +1071,31 @@ async def get_policy_documents_endpoint(_user: str = Depends(require_session)) -
 
 @router.get("/outbox")
 async def get_outbox_endpoint(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
-    """Outbox screen (spec §6.18) -- every message the agent has generated
-    (sent for real, or previewed under CHASE_DRY_RUN), newest first, with
-    policy/evaluation status surfaced per row so an operator can audit
-    what went out without opening each chase individually."""
-    store = ChaseStore()
-    events = await store.list_events_by_kind(["outreach_sent", "dry_run_send"])
+    """Outbox from outcome-agent CaseStore (dry-run and sent)."""
+    store = CaseStore()
+    rows = await store.list_outbox()
     out = []
-    for e in events:
-        d = e.get("detail") or {}
-        target = d.get("target")
-        recipient = e.get("pm_email") if target == "pm" else e.get("customer_email") if target == "customer" else None
-        out.append({
-            "id": e["id"],
-            "chase_id": e["chase_id"],
-            "at": e["at"],
-            "invoice_no": e.get("invoice_no"),
-            "case_key": e.get("case_key"),
-            "case_id": e.get("case_id"),
-            "project_number": e.get("project_number"),
-            "target": target,
-            "recipient": recipient,
-            "subject": d.get("subject"),
-            "body": d.get("text"),
-            "channel": d.get("channel") or d.get("would_use_channel"),
-            "composed": d.get("composed", False),
-            "requires_human_review": d.get("requires_human_review", False),
-            "evaluation_failures": d.get("evaluation_failures", []),
-            "policy_blocked": d.get("channel") == "blocked",
-            "policy_reason": d.get("error"),
-            "dry_run": e["kind"] == "dry_run_send",
-        })
+    for r in rows:
+        case = await store.get(r["case_row_id"])
+        out.append(
+            {
+                "id": r["id"],
+                "chase_id": r["case_row_id"],
+                "case_row_id": r["case_row_id"],
+                "at": r["at"],
+                "invoice_no": (case or {}).get("invoice_no"),
+                "case_key": (case or {}).get("case_key"),
+                "case_id": (case or {}).get("case_id"),
+                "project_number": (case or {}).get("project_number"),
+                "recipient": r.get("recipient"),
+                "subject": r.get("subject"),
+                "body": r.get("body"),
+                "channel": r.get("channel"),
+                "composed": False,
+                "requires_human_review": False,
+                "evaluation_failures": [],
+                "policy_blocked": False,
+                "policy_reason": None,
+            }
+        )
     return out
-
-
-@router.post("/chases/run-tick")
-async def run_chase_tick_endpoint(
-    _user: str = Depends(require_session),
-    backend: BackendClient = Depends(get_backend_client),
-) -> Dict[str, Any]:
-    """Manually triggers one chase-engine pass (create-eligible-cases +
-    process-due-chases), same call the background poller makes on its own
-    schedule -- the Simulation Control Panel's "Run Agent" button. Runs
-    regardless of CHASE_ENABLED (that flag only gates the automatic
-    background loop; an explicit operator click is a distinct decision),
-    so the demo works even in an environment where the poller is off."""
-    s = get_settings()
-    processed = await run_chase_tick(
-        backend, get_messenger(), get_email_sender(), ChaseStore(), ProjectConversationStore(), s, get_llm()
-    )
-    return {"processed": processed}
-
-
-class InjectReplyRequest(BaseModel):
-    text: str
-
-
-@router.post("/chases/{chase_id}/inject-reply")
-async def inject_reply_endpoint(
-    chase_id: str,
-    body: InjectReplyRequest,
-    _user: str = Depends(require_session),
-    backend: BackendClient = Depends(get_backend_client),
-) -> Dict[str, Any]:
-    """Simulation Control Panel's "inject customer reply" (spec §6.17/
-    §11.3) -- runs the injected text through the exact same real
-    interpretation pipeline (parse_chase_reply, chase_machine.on_reply)
-    as a genuine inbound Teams/email reply. Not a mock: this is the real
-    LLM classifying real (operator-typed) text, just skipping the actual
-    email/Teams transport."""
-    from app.services.chase_engine import advance_chase_with_reply
-
-    store = ChaseStore()
-    chase = await store.get(chase_id)
-    if not chase:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    s = get_settings()
-    parsed = await advance_chase_with_reply(
-        chase, body.text, get_llm(), backend, get_messenger(), get_email_sender(),
-        store, ProjectConversationStore(), s,
-    )
-    updated = await store.get(chase_id)
-    return {"intent": parsed.intent, "confidence": parsed.confidence, "chase": updated}
-
-
-@router.post("/chases/{chase_id}/simulate-payment")
-async def simulate_payment_endpoint(
-    chase_id: str,
-    _user: str = Depends(require_session),
-) -> Dict[str, Any]:
-    """Simulation Control Panel's "post payment" (spec §6.17/§11.5) --
-    closes the chase as paid directly, without a real backend check
-    (deliberately the one exception to "never trust a message as proof
-    of payment": here the human operator IS the source of truth)."""
-    from app.services.chase_engine import simulate_payment
-
-    store = ChaseStore()
-    try:
-        await simulate_payment(store, chase_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Chase not found.")
-    return await store.get(chase_id)

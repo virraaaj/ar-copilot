@@ -1,6 +1,6 @@
 // Outbox screen (spec §6.18, added 2026-07-28) -- every message the chase
-// agent has generated (real send or dry-run preview), newest first, with
-// policy/evaluation status per row. Pure read view over GET /api/outbox.
+// agent has generated, newest first, with policy/evaluation status per
+// row. Pure read view over GET /api/outbox.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
@@ -14,7 +14,6 @@ function formatWhen(iso: string): string {
 const CHANNEL_STYLES: Record<string, string> = {
   email: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
   teams: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  dry_run: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300",
   email_failed: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
   blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
 };
@@ -49,9 +48,6 @@ export default function Outbox() {
                 </Link>
                 <span className="text-zinc-300 dark:text-zinc-600">·</span>
                 <span className="text-zinc-500 dark:text-zinc-400">{e.project_number ?? "No project"}</span>
-                {e.dry_run && (
-                  <span className="rounded-full bg-sky-50 dark:bg-sky-950/40 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">dry run</span>
-                )}
               </div>
               <span className="text-[11.5px] text-zinc-400 dark:text-zinc-500">{formatWhen(e.at)}</span>
             </div>

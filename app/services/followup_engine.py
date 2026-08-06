@@ -18,15 +18,18 @@ pattern already used for proactive reminders (channels/teams/proactive.py).
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 from app.channels.teams.messenger import TeamsMessenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.backend_client import BackendClient
-from app.services.chase_store import ChaseStore
 from app.services.email_lineage import build_lineage_footer, build_lineage_headers
 from app.services.email_sender import EmailSender
 from app.services.followup_store import FollowUpStore
+
+
+class _OpenCaseLookup(Protocol):
+    async def get_open_for_case(self, case_id: str) -> Any: ...
 
 logger = logging.getLogger(__name__)
 
@@ -45,16 +48,16 @@ def _build_followup_email(case_key: str, project_name: Optional[str], amount: Op
 
 
 async def send_due_followups(
-    backend: BackendClient, email_sender: EmailSender, store: FollowUpStore, chase_store: Optional[ChaseStore] = None
+    backend: BackendClient,
+    email_sender: EmailSender,
+    store: FollowUpStore,
+    chase_store: Optional[_OpenCaseLookup] = None,
 ) -> int:
     """Returns how many follow-up emails were actually sent this pass.
 
-    chase_store is optional only for backward compatibility with existing
-    call sites/tests that predate the chase engine (PLAN_AGENTIC_CHASE.md
-    §8: "the chase engine supersedes this feature for chased invoices") --
-    when given, a case with an open chase is skipped here so a customer
-    doesn't get both a fixed-cadence email and an agentic chase message
-    for the same invoice."""
+    chase_store may be CaseStore (outcome agent) or any object with
+    get_open_for_case — when given, a case with an open agent case is
+    skipped so the customer doesn't get both follow-up and agent mail."""
     due = await store.list_due()
     sent_count = 0
 

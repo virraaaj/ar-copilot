@@ -1,95 +1,58 @@
-// Shared chase-event rendering (factored out of Chases.tsx 2026-07-23 so
-// InvoiceDetail's new "agent communication" section and the Chases tab
-// render the same event log the same way instead of two implementations
-// drifting apart). Takes the owning chase so outreach rows can resolve
-// "who -> who" from chase.pm_email/customer_email + event.detail.target
-// (chase_engine.py only logs the target *role*, not a literal address).
+// Icon-based event timeline for the Chases page (ported design from
+// master's ChaseEventRow.tsx 2026-08-06, adapted to this branch's actual
+// oa_events kind vocabulary -- invoice_synced/outreach_sent/reply_received/
+// contact_changed_notice/critic_blocked/decision/promise_missed/
+// date_advanced/payment_posted/dispute_created/note, not master's
+// chase_machine-driven kinds. Each row also carries "reasoning" pulled
+// from the matching oa_decision_traces entry (same rationale/judgment
+// data Trace Studio's Reasoning panel shows) so the Chases tab doesn't
+// need Trace Studio open to see *why* a step happened, not just that it did.
 import { useState } from "react";
-import type { Chase, ChaseEvent } from "../api";
 
-function formatWhen(iso: string | null): string {
+type KindMeta = { icon: string; color: string; label: string };
+
+const KIND_META: Record<string, KindMeta> = {
+  invoice_synced: { icon: "🚀", color: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", label: "Case started" },
+  outreach_sent: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", label: "Outreach sent" },
+  dry_run_send: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", label: "Outreach (dry run)" },
+  reply_received: { icon: "💬", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", label: "Reply received" },
+  contact_changed_notice: { icon: "🔀", color: "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", label: "Contact changed" },
+  critic_blocked: { icon: "🚫", color: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300", label: "Draft blocked" },
+  decision: { icon: "🧠", color: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", label: "Decision" },
+  promise_missed: { icon: "⏰", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", label: "Promise missed" },
+  date_advanced: { icon: "🕒", color: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300", label: "Clock advanced" },
+  payment_posted: { icon: "✅", color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", label: "Payment posted" },
+  dispute_created: { icon: "⚠️", color: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300", label: "Dispute created" },
+  note: { icon: "📝", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", label: "Note" },
+  seed_loaded: { icon: "🌱", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", label: "Seeded" },
+};
+
+const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", label: "" };
+
+function metaFor(kind: string): KindMeta {
+  return KIND_META[kind] ?? { ...DEFAULT_META, label: kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) };
+}
+
+function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "--";
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-const TRAJECTORY_VERDICT_STYLES: Record<string, string> = {
-  progressing: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  stalling: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  concerning: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-};
-
-function humanizeRole(role: string): string {
-  return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function targetLabel(chase: Chase, target: unknown): string | null {
-  if (typeof target !== "string" || !target) return null;
-  if (target === "pm") return `PM${chase.pm_email ? ` (${chase.pm_email})` : ""}`;
-  if (target === "customer") return `Customer${chase.customer_email ? ` (${chase.customer_email})` : ""}`;
-  // Any other project-contact role (bu_finance, general_manager, ...) --
-  // added 2026-07-23 for handoff_to_contact, resolved via chase.contact_email.
-  return `${humanizeRole(target)}${chase.contact_email ? ` (${chase.contact_email})` : ""}`;
-}
-
-const CHANNEL_LABELS: Record<string, string> = {
-  teams: "via Teams",
-  email: "via email",
-  email_failed: "via email (failed)",
-  dry_run: "dry run",
-  blocked: "blocked by policy",
-};
-
-// Per-kind icon/color/label -- added 2026-07-24 (was a flat wall of text
-// that read as one undifferentiated stream; this gives each kind its own
-// visual identity so the shape of a chase's history is scannable at a
-// glance instead of requiring reading every line).
-type KindMeta = { icon: string; color: string; ring: string; label: string };
-
-const KIND_META: Record<string, KindMeta> = {
-  created: { icon: "🚀", color: "bg-slate-100 text-slate-600", ring: "ring-slate-200", label: "Started" },
-  action_decided: { icon: "🧠", color: "bg-slate-100 text-slate-600", ring: "ring-slate-200", label: "Decided" },
-  outreach_sent: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", ring: "ring-sky-200 dark:ring-sky-800", label: "Outreach sent" },
-  dry_run_send: { icon: "📤", color: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300", ring: "ring-sky-200 dark:ring-sky-800", label: "Outreach (dry run)" },
-  reply_received: { icon: "💬", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Reply received" },
-  reply_parsed: { icon: "🔍", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Reply parsed" },
-  clarify_requested: { icon: "❓", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Clarifying" },
-  commitment_tracked: { icon: "📅", color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-200 dark:ring-emerald-800", label: "Payment date tracked" },
-  commitment_missed: { icon: "⏰", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Commitment missed" },
-  handoff_to_customer: { icon: "🔀", color: "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", ring: "ring-violet-200 dark:ring-violet-800", label: "Handed off to customer" },
-  handoff_to_contact: { icon: "🔀", color: "bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", ring: "ring-violet-200 dark:ring-violet-800", label: "Handed off" },
-  checkback_scheduled: { icon: "🕒", color: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300", ring: "ring-indigo-200 dark:ring-indigo-800", label: "Checking back later" },
-  blocker_reported: { icon: "🚧", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Blocker reported" },
-  blocker_check_in: { icon: "🚧", color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", ring: "ring-amber-200 dark:ring-amber-800", label: "Blocker check-in" },
-  escalated: { icon: "⚠️", color: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300", ring: "ring-rose-200 dark:ring-rose-800", label: "Escalated" },
-  closed: { icon: "✅", color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", ring: "ring-emerald-200 dark:ring-emerald-800", label: "Closed" },
-  human_action: { icon: "🖐️", color: "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300", ring: "ring-indigo-200 dark:ring-indigo-800", label: "Human action" },
-  out_of_office_detected: { icon: "🌴", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Out of office" },
-  suppressed: { icon: "🔕", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "Unsubscribed" },
-};
-
-const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300", ring: "ring-zinc-200 dark:ring-zinc-700", label: "" };
-
-function metaFor(kind: string): KindMeta {
-  const found = KIND_META[kind];
-  if (found) return found;
-  return { ...DEFAULT_META, label: kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) };
-}
-
-// Long quoted-reply text (mobile clients auto-append the whole prior
-// thread) made every reply row balloon to a wall of text -- collapse
-// anything past a couple lines behind a toggle instead of always showing
-// the raw quote.
-const COLLAPSE_THRESHOLD = 180;
+const COLLAPSE_THRESHOLD = 220;
 
 function MessageBubble({ text, tone = "zinc" }: { text: string; tone?: "zinc" | "sky" | "violet" }) {
   const [expanded, setExpanded] = useState(false);
   const isLong = text.length > COLLAPSE_THRESHOLD;
   const shown = expanded || !isLong ? text : text.slice(0, COLLAPSE_THRESHOLD).trimEnd() + "…";
   const toneClass =
-    tone === "sky" ? "bg-sky-50/60 dark:bg-sky-950/40 border-sky-100 dark:border-sky-800" : tone === "violet" ? "bg-violet-50/60 dark:bg-violet-950/40 border-violet-100 dark:border-violet-800" : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800";
+    tone === "sky"
+      ? "bg-sky-50/60 dark:bg-sky-950/40 border-sky-100 dark:border-sky-800"
+      : tone === "violet"
+        ? "bg-violet-50/60 dark:bg-violet-950/40 border-violet-100 dark:border-violet-800"
+        : "bg-zinc-50 dark:bg-zinc-800/40 border-zinc-100 dark:border-zinc-800";
   return (
-    <div className={`mt-1.5 rounded-lg border px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-700 dark:text-zinc-300 ${toneClass}`}>
+    <div className={`mt-1.5 whitespace-pre-wrap rounded-lg border px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-700 dark:text-zinc-300 ${toneClass}`}>
       {shown}
       {isLong && (
         <button
@@ -103,150 +66,187 @@ function MessageBubble({ text, tone = "zinc" }: { text: string; tone?: "zinc" | 
   );
 }
 
-function WhyExplanation({ text }: { text: string }) {
+function ReasoningToggle({ trace }: { trace: Record<string, unknown> }) {
   const [open, setOpen] = useState(false);
+  const plan = (trace.plan as Record<string, unknown>) || {};
+  const judgment = (trace.judgment as Record<string, unknown>) || {};
+  const lines: Array<{ label: string; value: string }> = [];
+  if (plan.selected_tactic) lines.push({ label: "Tactic", value: String(plan.selected_tactic) });
+  if (plan.rationale) lines.push({ label: "Why", value: String(plan.rationale) });
+  if (typeof judgment.passed === "boolean") lines.push({ label: "Judge", value: judgment.passed ? "Passed" : "Failed" });
+  if (Array.isArray(judgment.failures) && judgment.failures.length) {
+    lines.push({ label: "Failed checks", value: (judgment.failures as string[]).join(", ") });
+  }
+  if (judgment.notes) lines.push({ label: "Judge notes", value: String(judgment.notes) });
+  if (lines.length === 0) return null;
+
   return (
-    <div className="mt-1">
+    <div className="mt-1.5">
       <button
         onClick={() => setOpen((o) => !o)}
         className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 underline decoration-dotted hover:text-zinc-600 dark:hover:text-zinc-300"
       >
-        {open ? "hide why" : "why?"}
+        {open ? "hide reasoning" : "why?"}
       </button>
-      {open && <p className="mt-1 text-[12px] italic leading-relaxed text-zinc-500 dark:text-zinc-400">{text}</p>}
+      {open && (
+        <div className="mt-1 space-y-1 rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-2">
+          {lines.map((l) => (
+            <p key={l.label} className="text-[12px] leading-relaxed">
+              <span className="text-zinc-500 dark:text-zinc-400">{l.label}: </span>
+              <span className="italic text-zinc-700 dark:text-zinc-300">{l.value}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function EventShell({
-  kind, at, explanation, children,
+  kind,
+  at,
+  isLast,
+  children,
 }: {
-  kind: string; at: string | null; explanation?: string | null; children: React.ReactNode;
+  kind: string;
+  at: string | null | undefined;
+  isLast: boolean;
+  children: React.ReactNode;
 }) {
   const meta = metaFor(kind);
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] ring-4 ${meta.color} ${meta.ring}`}>
-          {meta.icon}
-        </span>
-        <span className="mt-1 w-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] ${meta.color}`}>{meta.icon}</span>
+        {!isLast && <span className="mt-1 w-px flex-1 bg-zinc-100 dark:bg-zinc-800" />}
       </div>
       <div className="min-w-0 flex-1 pb-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.color}`}>
-            {meta.label}
-          </span>
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.color}`}>{meta.label}</span>
           <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{formatWhen(at)}</span>
         </div>
         {children}
-        {explanation && <WhyExplanation text={explanation} />}
       </div>
     </div>
   );
 }
 
-export function ChaseEventRow({ chase, event }: { chase: Chase; event: ChaseEvent }) {
-  if (event.kind === "trajectory_assessed") {
-    const verdict = String(event.detail?.verdict ?? "");
+export function ChaseEventRow({
+  event,
+  trace,
+  isLast = false,
+}: {
+  event: Record<string, unknown>;
+  trace?: Record<string, unknown>;
+  isLast?: boolean;
+}) {
+  const kind = String(event.kind ?? "");
+  const detail = (event.detail as Record<string, unknown>) || {};
+  const at = event.at as string | undefined;
+
+  if (kind === "outreach_sent" || kind === "dry_run_send") {
+    const recipient = detail.recipient ? String(detail.recipient) : null;
+    const tactic = detail.tactic ? String(detail.tactic) : null;
+    const body = detail.body ? String(detail.body) : null;
+    const realSend = detail.real_send as Record<string, unknown> | undefined;
     return (
-      <EventShell kind="trajectory_assessed" at={event.at} explanation={event.explanation}>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-[12px] text-zinc-500 dark:text-zinc-400">🧭 AI trajectory check:</span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-              TRAJECTORY_VERDICT_STYLES[verdict] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
-            }`}
-          >
-            {verdict || "unknown"}
-          </span>
-        </div>
-        {event.detail?.reason ? <MessageBubble text={String(event.detail.reason)} /> : null}
-      </EventShell>
-    );
-  }
-
-  if (event.kind === "checkback_scheduled") {
-    const followupDate = event.detail?.followup_date ? String(event.detail.followup_date) : null;
-    const postponeCount = event.detail?.postpone_count;
-    return (
-      <EventShell kind="checkback_scheduled" at={event.at} explanation={event.explanation}>
-        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">
-          {followupDate ? (
-            <>
-              Following up again on <span className="font-medium text-zinc-700 dark:text-zinc-300">{followupDate}</span>
-            </>
-          ) : (
-            "Asked when a good time to follow up would be"
-          )}
-          {typeof postponeCount === "number" && (
-            <span className="ml-1.5 text-zinc-400 dark:text-zinc-500">
-              ({postponeCount} check-in{postponeCount === 1 ? "" : "s"} so far)
-            </span>
-          )}
-        </p>
-      </EventShell>
-    );
-  }
-
-  if (event.kind === "blocker_reported") {
-    const blockerType = event.detail?.blocker_type ? String(event.detail.blocker_type).replace(/_/g, " ") : "blocker";
-    const description = event.detail?.blocker_description ? String(event.detail.blocker_description) : null;
-    const resolutionDate = event.detail?.blocker_resolution_date ? String(event.detail.blocker_resolution_date) : null;
-    return (
-      <EventShell kind="blocker_reported" at={event.at} explanation={event.explanation}>
-        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">
-          <span className="font-medium capitalize text-zinc-700 dark:text-zinc-300">{blockerType}</span>
-          {resolutionDate ? (
-            <>
-              {" "}-- expected to clear <span className="font-medium text-zinc-700 dark:text-zinc-300">{resolutionDate}</span>
-            </>
-          ) : (
-            " -- no resolution date yet"
-          )}
-        </p>
-        {description && <MessageBubble text={description} tone="violet" />}
-      </EventShell>
-    );
-  }
-
-  const isOutreach = event.kind === "outreach_sent" || event.kind === "dry_run_send";
-  const composed = isOutreach && event.detail?.composed === true;
-  const who = isOutreach ? targetLabel(chase, event.detail?.target) : null;
-  const channel = isOutreach ? CHANNEL_LABELS[String(event.detail?.channel ?? "")] : null;
-  const bodyText = event.detail?.text ? String(event.detail.text) : event.detail?.reason ? String(event.detail.reason) : null;
-  const sentiment = event.kind === "reply_received" ? (event.detail?.sentiment as string | undefined) : undefined;
-  const needsReview =
-    (event.kind === "reply_received" || isOutreach) && event.detail?.requires_human_review === true;
-
-  return (
-    <EventShell kind={event.kind} at={event.at} explanation={event.explanation}>
-      {(who || channel || composed || sentiment || needsReview) && (
+      <EventShell kind={kind} at={at} isLast={isLast}>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
-          {who && (
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              &rarr; {who}
+          {recipient && <span className="font-medium text-zinc-700 dark:text-zinc-300">&rarr; {recipient}</span>}
+          {tactic && (
+            <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
+              {tactic.replace(/_/g, " ")}
             </span>
           )}
-          {channel && <span className="text-zinc-400 dark:text-zinc-500">{channel}</span>}
-          {composed && (
-            <span className="rounded-full bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
-              ✨ AI-composed
-            </span>
-          )}
-          {sentiment && (sentiment === "angry" || sentiment === "frustrated") && (
-            <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium capitalize text-amber-700 dark:text-amber-300">
-              {sentiment}
-            </span>
-          )}
-          {needsReview && (
+          {realSend && realSend.success === false && (
             <span className="rounded-full bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:text-rose-300">
-              ⚑ needs review
+              real send failed
             </span>
           )}
         </div>
+        {body && <MessageBubble text={body} tone="sky" />}
+        {trace && <ReasoningToggle trace={trace} />}
+      </EventShell>
+    );
+  }
+
+  if (kind === "reply_received") {
+    const text = detail.text ? String(detail.text) : null;
+    const replyType = detail.reply_type ? String(detail.reply_type) : null;
+    const confidence = typeof detail.confidence === "number" ? detail.confidence : null;
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+          {replyType && (
+            <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium capitalize text-zinc-500 dark:text-zinc-400">
+              classified: {replyType.replace(/_/g, " ")}
+            </span>
+          )}
+          {confidence != null && <span className="text-zinc-400 dark:text-zinc-500">{Math.round(confidence * 100)}% confidence</span>}
+        </div>
+        {text && <MessageBubble text={text} />}
+        {trace && <ReasoningToggle trace={trace} />}
+      </EventShell>
+    );
+  }
+
+  if (kind === "contact_changed_notice") {
+    const fields = Array.isArray(detail.fields_changed) ? (detail.fields_changed as string[]) : [];
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">
+          {fields.length > 0 && <span className="text-zinc-400 dark:text-zinc-500">{fields.join(", ")}: </span>}
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">{String(detail.old_contact ?? "")}</span>
+          <span className="mx-1 text-zinc-400 dark:text-zinc-500">&rarr;</span>
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">{String(detail.new_contact ?? "")}</span>
+        </p>
+      </EventShell>
+    );
+  }
+
+  if (kind === "critic_blocked") {
+    const checks = Array.isArray(detail.checks) ? (detail.checks as string[]) : [];
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        {checks.length > 0 && (
+          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">Failed: {checks.join(", ")}</p>
+        )}
+      </EventShell>
+    );
+  }
+
+  if (kind === "promise_missed") {
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        {Boolean(detail.date) && <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">Was due {String(detail.date)}</p>}
+      </EventShell>
+    );
+  }
+
+  if (kind === "payment_posted") {
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        {Boolean(detail.paid_at) && <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">Paid {String(detail.paid_at)}</p>}
+      </EventShell>
+    );
+  }
+
+  if (kind === "dispute_created") {
+    return (
+      <EventShell kind={kind} at={at} isLast={isLast}>
+        {detail.note ? <MessageBubble text={String(detail.note)} tone="violet" /> : null}
+      </EventShell>
+    );
+  }
+
+  // decision / note / seed_loaded / date_advanced / anything unmapped:
+  // fall back to the server-computed plain-language explanation.
+  return (
+    <EventShell kind={kind} at={at} isLast={isLast}>
+      {typeof event.explanation === "string" && event.explanation && (
+        <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">{event.explanation}</p>
       )}
-      {bodyText && <MessageBubble text={bodyText} tone={isOutreach ? "sky" : "zinc"} />}
+      {trace && <ReasoningToggle trace={trace} />}
     </EventShell>
   );
 }

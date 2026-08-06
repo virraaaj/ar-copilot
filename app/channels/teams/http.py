@@ -25,7 +25,7 @@ from app.channels.teams.messenger import get_messenger
 from app.channels.teams.project_conversation_store import ProjectConversationStore
 from app.services.azure_openai import get_llm
 from app.services.backend_client import BackendClient, get_backend_client
-from app.services.chase_store import ChaseStore
+from app.outcome_agent.store.case_store import CaseStore
 from app.services.email_sender import get_email_sender
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ async def receive_activity(
             agent_loop=loop,
             messenger=get_messenger(),
             project_conversation_store=project_store,
-            chase_store=ChaseStore(),
+            chase_store=CaseStore(),
             backend_client=backend,
             email_sender=get_email_sender(),
             llm=llm,
