@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useTheme } from "../context/ThemeContext";
 
@@ -10,6 +10,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export default function NavBar() {
   const { email, clearSession } = useSession();
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
 
   return (
     <nav className="sticky top-0 z-10 border-b border-zinc-200/70 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
@@ -49,6 +50,13 @@ export default function NavBar() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate("/guided-demo")}
+            className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-1.5 text-[13px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+          >
+            <span aria-hidden>✨</span>
+            Guided Demo
+          </button>
           <button
             onClick={toggleTheme}
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}

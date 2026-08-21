@@ -52,6 +52,26 @@ _AUTHORIZE_CUSTOMER_CONTACT_RE = re.compile(
     r"yes,? (?:please )?(?:reach out|contact them|contact the customer))\b",
     re.IGNORECASE,
 )
+# Explicit lexical dispute markers -- pulled out to a module-level constant
+# (2026-08-20, FIX_PLAN_commitment_grounding.md, Fix 3) so the LLM
+# interpreter path in adapters/llm_tools.py can reuse the exact same
+# deterministic check as an override, instead of trusting the LLM's own
+# label on this one safety-critical signal. Found 2026-08-20 live: "we're
+# disputing this invoice -- the amount billed doesn't match what we agreed
+# to" was classified `blocker` at 90% confidence by the LLM -- the
+# deterministic regex below would have gotten it right on the most explicit
+# dispute phrasing possible.
+_DISPUTE_RE = re.compile(
+    # \bdispute\b alone (the original pattern here) does not match
+    # "disputing" or "disputed" -- \b requires a word boundary immediately
+    # after "dispute", which "disputing"/"disputed" don't have. Widened
+    # 2026-08-20 (FIX_PLAN_commitment_grounding.md, Fix 3) after finding the
+    # guided demo's own dispute beat ("we're disputing this invoice...")
+    # fell through this exact gap in BOTH the deterministic interpreter and
+    # (via this now-shared constant) the live-LLM override.
+    r"\b(disput(?:e|es|ed|ing)|quantit(?:y|ies) (?:are )?wrong|incorrect (?:amount|invoice)|do not owe)\b",
+    re.IGNORECASE,
+)
 
 
 def _extract_meta(text: str) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
@@ -93,7 +113,7 @@ class DeterministicReplyInterpreter:
         if re.search(r"\b(unsubscribe|stop emailing|opt[- ]?out)\b", low):
             return InterpretedReply(ReplyType.UNSUBSCRIBE.value, 0.95, sentiment="negative", summary="opt-out")
 
-        if re.search(r"\b(dispute|quantit(?:y|ies) (?:are )?wrong|incorrect (?:amount|invoice)|do not owe)\b", low):
+        if _DISPUTE_RE.search(low):
             return InterpretedReply(ReplyType.DISPUTE.value, 0.9, sentiment="frustrated", summary="dispute")
 
         if re.search(r"\b(already paid|we paid|payment (?:was )?sent|remitted)\b", low):

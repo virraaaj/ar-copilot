@@ -70,6 +70,7 @@ function ReasoningToggle({ trace }: { trace: Record<string, unknown> }) {
   const [open, setOpen] = useState(false);
   const plan = (trace.plan as Record<string, unknown>) || {};
   const judgment = (trace.judgment as Record<string, unknown>) || {};
+  const candidates = Array.isArray(trace.candidates) ? (trace.candidates as Array<Record<string, unknown>>) : [];
   const lines: Array<{ label: string; value: string }> = [];
   if (plan.selected_tactic) lines.push({ label: "Tactic", value: String(plan.selected_tactic) });
   if (plan.rationale) lines.push({ label: "Why", value: String(plan.rationale) });
@@ -78,7 +79,7 @@ function ReasoningToggle({ trace }: { trace: Record<string, unknown> }) {
     lines.push({ label: "Failed checks", value: (judgment.failures as string[]).join(", ") });
   }
   if (judgment.notes) lines.push({ label: "Judge notes", value: String(judgment.notes) });
-  if (lines.length === 0) return null;
+  if (lines.length === 0 && candidates.length === 0) return null;
 
   return (
     <div className="mt-1.5">
@@ -96,6 +97,30 @@ function ReasoningToggle({ trace }: { trace: Record<string, unknown> }) {
               <span className="italic text-zinc-700 dark:text-zinc-300">{l.value}</span>
             </p>
           ))}
+          {candidates.length > 0 && (
+            <div className="pt-1">
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                Considered {candidates.length} option{candidates.length === 1 ? "" : "s"}:
+              </p>
+              <ul className="mt-0.5 space-y-0.5">
+                {[...candidates]
+                  .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+                  .map((c, i) => {
+                    const isSelected = c.tactic === plan.selected_tactic;
+                    return (
+                      <li
+                        key={i}
+                        className={`text-[11.5px] leading-relaxed ${isSelected ? "font-medium text-zinc-700 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"}`}
+                      >
+                        {isSelected ? "✓ " : "· "}
+                        {String(c.tactic ?? "").replace(/_/g, " ")}
+                        {typeof c.score === "number" && <span className="tabular-nums"> ({c.score.toFixed(2)})</span>}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -149,6 +174,8 @@ export function ChaseEventRow({
     const tactic = detail.tactic ? String(detail.tactic) : null;
     const body = detail.body ? String(detail.body) : null;
     const realSend = detail.real_send as Record<string, unknown> | undefined;
+    const humanReview = detail.human_review === true;
+    const fallbackReason = detail.fallback_reason ? String(detail.fallback_reason) : null;
     return (
       <EventShell kind={kind} at={at} isLast={isLast}>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
@@ -163,8 +190,21 @@ export function ChaseEventRow({
               real send failed
             </span>
           )}
+          {humanReview && (
+            <span
+              title={fallbackReason ?? undefined}
+              className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+            >
+              safe fallback — needs review
+            </span>
+          )}
         </div>
         {body && <MessageBubble text={body} tone="sky" />}
+        {humanReview && fallbackReason && (
+          <p className="mt-1 text-[11.5px] italic text-amber-600 dark:text-amber-400">
+            AI draft blocked: {fallbackReason}
+          </p>
+        )}
         {trace && <ReasoningToggle trace={trace} />}
       </EventShell>
     );
@@ -206,11 +246,16 @@ export function ChaseEventRow({
 
   if (kind === "critic_blocked") {
     const checks = Array.isArray(detail.checks) ? (detail.checks as string[]) : [];
+    const notes = detail.notes ? String(detail.notes) : null;
     return (
       <EventShell kind={kind} at={at} isLast={isLast}>
         {checks.length > 0 && (
           <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-300">Failed: {checks.join(", ")}</p>
         )}
+        {notes && <MessageBubble text={notes} />}
+        <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+          A safe template was sent instead — see the next event.
+        </p>
       </EventShell>
     );
   }

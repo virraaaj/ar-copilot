@@ -8,7 +8,7 @@ from uuid import uuid4
 from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan, interpret_reply_llm, resolve_llm
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
-from app.outcome_agent.loop.communication import resolve_recipient
+from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
 from app.outcome_agent.loop.guardrails import check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
 from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
@@ -125,7 +125,9 @@ async def run_traced_follow_up(
         await traces.finish_run(run_id, "ok", "skipped paid")
         return {"run_id": run_id, "skipped": True, "reason": "paid", "case": case}
 
-    if case.get("state") in ("disputed", "suppressed", "closed", "paused", "escalated_to_human"):
+    # "disputed" deliberately excluded -- see executor.py's matching
+    # comment; it must run through the normal loop to actually escalate.
+    if case.get("state") in ("suppressed", "closed", "paused", "escalated_to_human"):
         s = await next_seq()
         async with traces.step(run_id, s, "state.transition", f"Terminal/suppressed: {case.get('state')}", principles=["P11"]) as bag:
             bag["status"] = "skipped"
@@ -260,40 +262,74 @@ async def run_traced_follow_up(
                 continue
             break
 
+    used_safe_fallback = False
+    original_judgment = judgment
     if not judgment.get("passed"):
+        # Both attempts failed the critic. Fall back to the deterministic,
+        # safe-by-construction template for this tactic rather than
+        # dropping the send entirely -- see executor.py's matching fix
+        # (2026-08-18) for the full rationale: this used to return here
+        # with nothing sent, no Outbox entry, and no way for a human to
+        # even see a draft was blocked.
         s = await next_seq()
-        async with traces.step(run_id, s, "guardrails", "Critic failed — human review", principles=["P4"]) as bag:
-            bag["status"] = "skipped"
+        async with traces.step(run_id, s, "guardrails", "Critic failed twice — sending safe fallback", principles=["P4"]) as bag:
+            bag["status"] = "ok"
             bag["reads"].append(io("judgment", "failures", str(judgment.get("failures")), judgment))
-        # Persist whatever apply_reply_signal already interpreted from the
-        # customer's message above (blocker/commitment/state/dialogue), even
-        # though the outbound draft itself got blocked. Found 2026-08-05 via
-        # mass-conversation stress testing: previously this whole function
-        # returned here without ever calling store.update(), so a real
-        # customer reply -- e.g. a blocker -- was parsed correctly in memory
-        # and then silently discarded the moment the *agent's own* ack email
-        # failed the critic twice. The customer's signal should never be
-        # lost just because our reply to it wasn't good enough to send.
-        if inbound_text:
-            await store.update(
-                case["id"],
-                state=case.get("state"),
-                world=case.get("world"),
-                dialogue=case.get("dialogue"),
-                budget=case.get("budget"),
-                goals=case.get("goals"),
-                commitments=case.get("commitments"),
-                blockers=case.get("blockers"),
-                failed_asks=case.get("failed_asks"),
-                escalation=case.get("escalation"),
-                customer_email=case.get("customer_email"),
-                customer_name=case.get("customer_name"),
-                target=case.get("target"),
+            body = DEFAULT_GENERATOR.generate(case, selected.tactic, selected.objective)
+            subject = f"[{case.get('subject_token')}] Invoice {case.get('invoice_no')}"
+            bag["writes"].append(io("draft", "fallback_email", subject, {"subject": subject, "body": body}))
+        await ledger.append(
+            case["id"], "critic_blocked", {"checks": judgment.get("failures"), "notes": judgment.get("notes")},
+            at=now.isoformat(), principles=["P4"],
+        )
+        used_safe_fallback = True
+        judgment = {
+            "passed": True,
+            "failures": [],
+            "regenerate": False,
+            "notes": "Safe template fallback after critic block on the AI draft — flagged for human review.",
+        }
+
+    # Note: this function used to return early here with the customer's
+    # interpreted reply (blocker/commitment/state/dialogue) never
+    # persisted -- found 2026-08-05 via mass-conversation stress testing,
+    # since the whole run stopped the moment the agent's own ack email
+    # failed the critic twice. Now that a blocked draft falls through to
+    # the safe-template send below instead of returning, that persist
+    # happens naturally as part of the normal send path -- nothing extra
+    # needed here.
+
+    # Was unconditionally case["customer_email"] -- meant no tactic could
+    # ever actually reach the PM even if one existed. Fixed 2026-08-06
+    # alongside adding pm_awareness_check. Resolved before the guardrail
+    # check (not just before sending) so the allowlist check below
+    # actually validates the address this message is really going to,
+    # not always customer_email regardless of target -- found 2026-08-18
+    # via user review.
+    recipient = resolve_recipient(case, selected.tactic)
+    if recipient is None:
+        # The address for the party this tactic is meant to reach (PM or
+        # customer, per case.target) isn't actually known. Escalate
+        # instead of falling back to a placeholder or the OTHER party's
+        # address -- never guess who to email.
+        s = await next_seq()
+        who = "PM" if (case.get("target") == "pm" or selected.tactic in PM_DIRECTED_TACTICS) else "customer"
+        async with traces.step(run_id, s, "state.transition", f"Escalate — no known {who} email", principles=["P3", "P11"]) as bag:
+            pack = EscalationPack(
+                reason=f"No known {who} email on file — cannot send tactic={selected.tactic}",
+                evidence=[f"tactic={selected.tactic}", f"target={case.get('target')}"],
+                recommended_human_move=f"Add a {who} contact email to this case, then resume",
+                case_id=case.get("case_id") or "",
+                invoice_no=case.get("invoice_no") or "",
             )
-        await store.add_decision_trace(case["id"], {"run_id": run_id, "blocked": True, "judgment": judgment})
-        await traces.finish_run(run_id, "ok", "blocked by critic")
-        refreshed = await store.get(case["id"]) if inbound_text else case
-        return {"run_id": run_id, "blocked": True, "judgment": judgment, "case": refreshed}
+            case["state"] = "escalated_to_human"
+            case["escalation"] = pack.to_dict()
+            case["next_action_at"] = None
+            bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
+        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        await send_escalation_notice(case, mailbox, ledger)
+        await traces.finish_run(run_id, "ok", "escalated: no known recipient")
+        return {"run_id": run_id, "escalated": True, "case": case}
 
     # Guardrails
     s = await next_seq()
@@ -304,7 +340,7 @@ async def run_traced_follow_up(
             body,
             now=now,
             allowlist=policy.to_address_allowlist,
-            recipient=case.get("customer_email"),
+            recipient=recipient,
         )
         bag["reads"].append(io("policy", "guard", "allowed" if guard.allowed else guard.reason, {"allowed": guard.allowed, "checked": guard.policies_checked}))
         if not guard.allowed:
@@ -316,10 +352,6 @@ async def run_traced_follow_up(
     # Send mail
     state_before = case.get("state")
     ask_id = f"ask-{uuid4().hex[:8]}"
-    # Was unconditionally case["customer_email"] -- meant no tactic could
-    # ever actually reach the PM even if one existed. Fixed 2026-08-06
-    # alongside adding pm_awareness_check.
-    recipient = resolve_recipient(case, selected.tactic)
     from_addr = "ar-agent@local.mailbox"
     thread_id = case.get("subject_token") or case["id"]
 
@@ -336,13 +368,17 @@ async def run_traced_follow_up(
             body=body,
             headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
         )
+        outbox_meta: Dict[str, Any] = {"ask_id": ask_id, "mailbox_id": msg["id"], "tactic": selected.tactic}
+        if used_safe_fallback:
+            outbox_meta["human_review"] = True
+            outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
         await store.add_outbox(
             case["id"],
             body,
             channel="email",
             recipient=recipient,
             subject=subject,
-            meta={"ask_id": ask_id, "mailbox_id": msg["id"], "tactic": selected.tactic},
+            meta=outbox_meta,
         )
         bag["writes"].append(io("mailbox", msg["id"], f"to {recipient}", msg))
         # Real send: mirrors master's chase_engine.py wiring --
@@ -366,6 +402,7 @@ async def run_traced_follow_up(
                 "mailbox_id": msg["id"],
                 "ask_id": ask_id,
                 "real_send": real_send_result,
+                **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
             },
             at=now.isoformat(),
             principles=["P4", "P12"],

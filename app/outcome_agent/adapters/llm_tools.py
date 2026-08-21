@@ -6,9 +6,46 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.outcome_agent.loop.reply_interpreter import DeterministicReplyInterpreter, InterpretedReply
+from app.outcome_agent.loop.reply_interpreter import (
+    _DISPUTE_RE,
+    DeterministicReplyInterpreter,
+    InterpretedReply,
+)
 
 logger = logging.getLogger(__name__)
+
+# Deterministic checks whose failure hard-overrides the LLM judge's own
+# "passed" verdict below, regardless of what the LLM concluded. Kept
+# deliberately narrow: these are the checks where being wrong is genuinely
+# unsafe (a threat, a promise the system can't keep, banned language) --
+# not the more subjective content-quality checks (multi-ask, one-concrete-
+# ask, advances-objective, ...) that the judge prompt explicitly asks the
+# LLM to decide independently ("do not just copy the precheck's failures
+# through"). Before this list existed, ANY deterministic failure hard-
+# overrode the LLM either way, silently contradicting that instruction --
+# the regex-based ask-counter is a known-blunt heuristic (see critic.py's
+# own comments on it being tuned against false positives more than once),
+# so a single mis-flagged "multi_ask" could force a real block even when
+# the LLM had already correctly judged the draft fine. Found 2026-08-18
+# reviewing the guided demo: a clean, single-topic follow-up ("give us an
+# update, and confirm the date is still Aug 20") was blocked outright this
+# way, then never actually regenerated into anything different since the
+# regex flags the same pattern either way.
+_SAFETY_CRITICAL_CHECKS = {
+    "language_guardrail",
+    "no_unsupported_promise",
+    "no_unsupported_claims",
+    "no_attachment_promise",
+    "relationship_tone",
+    "escalation_policy_ok",
+    # Added 2026-08-20 (FIX_PLAN_commitment_grounding.md, Fix 2): a draft
+    # asserting a payment date the counterparty never gave is a factual
+    # fabrication, not a content-quality judgment call -- same category of
+    # "genuinely unsafe to be wrong about" as the checks above. The LLM
+    # judge must not be able to wave this one through the way it can with
+    # multi-ask or advances-objective.
+    "no_fabricated_commitment",
+}
 
 
 def _parse_tool(message: Any, tool_name: str) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -338,6 +375,20 @@ async def interpret_reply_llm(
     interp, call = await llm_interpret(llm, text, context, mock=mock, now=now)
     rt = interp.reply_type
     interp.reply_type = _REPLY_TYPE_REMAP.get(rt, rt if rt in _KNOWN_REPLY_TYPES else "unknown")
+    # Fix 3 (2026-08-20, FIX_PLAN_commitment_grounding.md, root cause RC3):
+    # explicit dispute language always overrides the LLM's own label here,
+    # same philosophy as _SAFETY_CRITICAL_CHECKS above -- for a signal this
+    # safety-critical (continuing to dun a customer who has formally
+    # disputed is a real relationship and compliance risk), the
+    # deterministic check is authoritative, not just a hint. The mock/
+    # fallback paths already run DeterministicReplyInterpreter directly and
+    # get this right; this override is for the live-LLM path, where the
+    # model underperformed the regex on the most explicit dispute phrasing
+    # possible ("we're disputing this invoice...", classified `blocker` at
+    # 90% confidence).
+    if _DISPUTE_RE.search((text or "").lower()) and interp.reply_type != "dispute":
+        interp.reply_type = "dispute"
+        interp.confidence = max(interp.confidence, 0.9)
     return interp, call
 
 
@@ -456,11 +507,27 @@ async def llm_draft(
     force_text: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Any]]:
     """Returns subject, body, call_trace."""
-    from app.outcome_agent.loop.communication import DEFAULT_GENERATOR
+    from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS
 
     tool_name = "record_email_draft"
     inv = case.get("invoice_no") or "invoice"
     subject = f"[{case.get('subject_token')}] Invoice {inv}"
+    # Who this email actually goes to. Previously only threaded through
+    # for tactic=="pm_awareness_check" -- every other PM-directed tactic
+    # (firm_reminder, confirm_promise, reflexion_reask, ...) got no signal
+    # at all about the recipient, so once a conversation moved past the
+    # first message the model had no way to know it was still writing to
+    # the PM and defaulted to addressing the customer directly ("Hello
+    # Harborview Logistics,") even when the email was correctly routed to
+    # the PM's inbox. Found 2026-08-18 via user review: the address was
+    # right, the content was still wrong. selected_tactic (not just
+    # case.target) is checked too, matching resolve_recipient()'s own
+    # rule that pm_awareness_check always reaches the PM.
+    recipient_role = (
+        "pm"
+        if case.get("target") == "pm" or plan.get("selected_tactic") in PM_DIRECTED_TACTICS
+        else "customer"
+    )
     schema = {
         "type": "function",
         "function": {
@@ -481,9 +548,28 @@ async def llm_draft(
         {
             "role": "system",
             "content": (
+                "The user message's recipient_role tells you who this email actually goes to "
+                "-- read it before writing anything, it applies regardless of tactic, not just "
+                "pm_awareness_check. If recipient_role is \"pm\": you are writing to an internal "
+                "colleague (the Project Manager) about their customer relationship, not to the "
+                "customer. Refer to the customer by name in the THIRD PERSON (e.g. \"Harborview "
+                "hasn't confirmed a payment date yet\", \"following up on where things stand with "
+                "Harborview\") -- never address the customer directly (never open with \"Hello "
+                "Harborview Logistics,\" or write as if the customer is reading this) and never "
+                "phrase the ask as if the PM personally owes the money. Open with a neutral "
+                "greeting like \"Hi,\" or \"Hi team,\", not the customer's name. If recipient_role "
+                "is \"customer\": write directly to them as the account holder, addressing them "
+                "by name is appropriate. "
                 "Write a warm, professional, non-threatening AR email -- this is a business "
-                "relationship the company wants to preserve, not a form letter. Always "
-                "include the actual invoice details (invoice number and amount, and due "
+                "relationship the company wants to preserve, not a form letter. That does NOT "
+                "mean saying so explicitly every time: avoid generic relationship-language "
+                "boilerplate like 'we appreciate your partnership', 'we value our partnership', "
+                "or 'thank you for your continued partnership' as a closing line -- warmth "
+                "should come through in how the ask is phrased, not a stock phrase tacked on "
+                "at the end. A plain 'Thank you' or a sign-off with no extra line is often "
+                "enough; only add a specific, situational line (e.g. actually thanking them "
+                "for a specific update they gave) if it's genuinely earned by what they said. "
+                "Always include the actual invoice details (invoice number and amount, and due "
                 "date/project if known) as context before asking anything, so the reader "
                 "isn't guessing what this is about. "
                 "Ask for exactly ONE concrete thing -- never bundle a second, separate "
@@ -510,6 +596,32 @@ async def llm_draft(
                 "an update?' That single either/or sentence IS the one ask -- do not add a "
                 "second question afterward (like a separate 'please let us know' question), "
                 "and do not ask the PM for a payment date as if they were the customer. "
+                "If objective is recover_missed_promise and recipient_role is \"pm\": say "
+                "plainly that the date the PM previously relayed was missed (e.g. 'The August "
+                "20th date didn't come through' -- name the actual date from latest_inbound "
+                "or context, don't just say \"the promise\" vaguely), then ask the same shape "
+                "of either/or question pm_awareness_check uses, updated for this being a "
+                "second round: is there a new date to track, or should we go ahead and reach "
+                "out to the customer directly? e.g.: 'The August 20th date didn't come "
+                "through -- is there a new date we should track, or should we reach out to "
+                "the customer directly?' That single either/or sentence is the one ask, same "
+                "rule as pm_awareness_check -- do not also ask a separate generic 'what's the "
+                "status' question alongside it. "
+                "If tactic is confirm_promise: a date is already on record (see latest_inbound "
+                "or context) and hasn't been missed yet -- this is an ACKNOWLEDGMENT, not a "
+                "re-ask. Do NOT use the pm_awareness_check either/or pattern here ('are you "
+                "already aware of...') -- that question was already answered. Simply confirm "
+                "the date you're now tracking (e.g. 'Thanks for the update -- I've noted that "
+                "Harborview is expected to pay by August 20th, and I'll follow up if anything "
+                "changes.'). If recipient_role is \"pm\", phrase it as noting what THEY told "
+                "you, not asking them to confirm it again. "
+                "GROUNDING (added 2026-08-20 -- see active_commitments in the user message): "
+                "you may state a date as something the counterparty promised to pay ONLY if "
+                "that exact date appears in active_commitments with type payment_date. Never "
+                "present the invoice's due_date as if the counterparty promised or committed "
+                "to it -- due_date is this system's own record of when payment was originally "
+                "owed, not something they said. If you have no active payment_date commitment "
+                "to acknowledge, do not invent one -- ask for a date instead. "
                 f"Call {tool_name} exactly once. Never threaten legal action or offer discounts. "
                 "Sign off as 'Accounts Receivable' with no bracketed placeholder text anywhere "
                 "in the email (never write things like [Your Name], [Company Name], or "
@@ -528,16 +640,21 @@ async def llm_draft(
                 "contact you', 'I'll have someone follow up', 'let me get a colleague to "
                 "reach out', or offer to schedule a call/meeting); and it cannot take any "
                 "action on the invoice itself -- no refunds, credits, discounts, payment "
-                "plans, or portal/payment links. If the customer wants a document, a call, "
-                "or anything else this system can't deliver, ask them to reply to this email "
-                "and say the request will be handled from there -- do not promise a specific "
-                "method or timeline for it."
+                "plans, or portal/payment links. Do not proactively offer to handle a "
+                "document, call, or anything else this system can't deliver -- if the topic "
+                "hasn't come up, don't invite it. If a prior reply already asked for one of "
+                "those (see latest_inbound), acknowledge briefly (\"noted\" / \"got it\") "
+                "without saying what will happen next or by when -- do not write \"we'll "
+                "handle it\", \"handled from there\", or any other phrase that promises "
+                "resolution, since nothing downstream actually does that. Stay focused on "
+                "the one concrete ask instead."
             ),
         },
         {
             "role": "user",
             "content": json.dumps(
                 {
+                    "recipient_role": recipient_role,
                     "invoice": inv,
                     "amount": case.get("amount"),
                     "customer": case.get("customer_name"),
@@ -550,6 +667,13 @@ async def llm_draft(
                     "policy_snippets": context.get("relevant_policy")
                     or context.get("policy_snippets")
                     or [],
+                    # Added 2026-08-20 (FIX_PLAN_commitment_grounding.md, Fix
+                    # 2): the ground-truth list the system prompt's GROUNDING
+                    # paragraph refers to -- was previously assembled into
+                    # the planner's context (llm_plan) but never actually
+                    # sent to the drafting call, so the model had no way to
+                    # check a date against it even if it wanted to.
+                    "active_commitments": context.get("active_commitments") or [],
                 }
             ),
         },
@@ -733,10 +857,14 @@ async def llm_judge(
             tokens=tokens,
             extra={"deterministic_precheck": det_dict, "fallback": True},
         )
-    # Hard fail if deterministic critic failed (safety)
-    if not det.passed:
+    # Hard fail only on safety-critical deterministic failures (see
+    # _SAFETY_CRITICAL_CHECKS above) -- content-quality checks like
+    # multi-ask are left to the LLM's own independent verdict, per this
+    # prompt's explicit instruction not to just copy the precheck through.
+    safety_failures = [f for f in failures if f in _SAFETY_CRITICAL_CHECKS]
+    if safety_failures:
         args["passed"] = False
-        args["failures"] = list(set((args.get("failures") or []) + failures))
+        args["failures"] = list(set((args.get("failures") or []) + safety_failures))
         args["regenerate"] = True
     return args, _trace_call(
         name=tool_name,

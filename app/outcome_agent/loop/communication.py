@@ -1,7 +1,7 @@
 """Communication generator Protocol + templates (P12)."""
 from __future__ import annotations
 
-from typing import Any, Dict, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 # Tactics whose recipient is the PM/internal owner, not the customer. Added
 # 2026-08-06 (user feedback): a brand-new case's very first outreach must go
@@ -11,19 +11,50 @@ from typing import Any, Dict, Protocol
 PM_DIRECTED_TACTICS = {"pm_awareness_check"}
 
 
-def resolve_recipient(case: Dict[str, Any], tactic: str) -> str:
+def resolve_recipient(case: Dict[str, Any], tactic: str) -> Optional[str]:
     """Single source of truth for who a given tactic's email goes to.
     Previously every send path (traced_loop.py, executor.py) read
     case["customer_email"] unconditionally, so there was no way for a
-    PM-directed tactic to actually reach the PM even if one existed."""
+    PM-directed tactic to actually reach the PM even if one existed.
+
+    Also checks case["target"] directly, not just tactic membership in
+    PM_DIRECTED_TACTICS (added 2026-08-06): once goals.py started letting
+    a still-PM-directed conversation use non-pm_awareness_check tactics
+    (confirm_promise, reflexion_reask, etc. after real back-and-forth with
+    the PM), routing on tactic alone would have sent those to
+    customer_email -- previously "safe" only by accident, since
+    customer_email happened to be unset for cases that never got
+    authorized. target is the actual source of truth for who we're
+    talking to; tactic membership is kept as a fallback for callers that
+    don't thread target through.
+
+    Returns None when the address for the intended party isn't actually
+    known -- callers must treat that as a hard stop (escalate to a
+    human), never send to a fallback address for the OTHER party.
+    Previously this fell back across parties: the PM branch tried
+    customer_email if pm_email was empty (and vice versa), and both
+    ended in a literal placeholder address ("pm@example.com" /
+    "customer@example.com") if everything else was missing. Either of
+    those could send a PM-directed "do you know a payment date" check
+    straight to the customer, or a customer-facing message to the PM's
+    inbox -- exactly the cross-party leak this function exists to
+    prevent. Found 2026-08-18 via user review: this must never happen,
+    even in a fallback path that "usually" doesn't get hit."""
     world = case.get("world") or {}
-    if tactic in PM_DIRECTED_TACTICS:
-        return case.get("pm_email") or world.get("internal_owner") or case.get("customer_email") or "pm@example.com"
-    return case.get("customer_email") or case.get("pm_email") or "customer@example.com"
+    if case.get("target") == "pm" or tactic in PM_DIRECTED_TACTICS:
+        return case.get("pm_email") or world.get("internal_owner") or None
+    return case.get("customer_email") or None
 
 
 class CommunicationGenerator(Protocol):
     def generate(self, case: Dict[str, Any], tactic: str, objective: str) -> str: ...
+
+
+def _last_missed_date(case: Dict[str, Any]) -> str | None:
+    for c in reversed(case.get("commitments") or []):
+        if c.get("type") in ("payment_date", "follow_up_date") and c.get("status") == "missed" and c.get("date"):
+            return c["date"]
+    return None
 
 
 class TemplateCommunicationGenerator:
@@ -32,6 +63,8 @@ class TemplateCommunicationGenerator:
         amt = case.get("amount")
         amt_s = f"${amt:,.0f}" if isinstance(amt, (int, float)) and amt else "the open balance"
         customer = case.get("customer_name") or "there"
+        missed_date = _last_missed_date(case)
+        missed_phrase = f"The {missed_date} date" if missed_date else "The date we were tracking"
 
         templates = {
             "pm_awareness_check": (
@@ -67,7 +100,10 @@ class TemplateCommunicationGenerator:
                 f"Could you share remittance details so we can verify?"
             ),
             "reflexion_reask": (
-                f"Circling back on {inv} with a different ask: what date can we expect payment?"
+                f"{missed_phrase} for {inv} didn't come through -- is there a new date we "
+                f"should track, or should we go ahead and reach out to the customer directly?"
+                if case.get("target") == "pm"
+                else f"{missed_phrase} for {inv} didn't come through -- could you confirm an updated payment date?"
             ),
             "escalation_pack": (
                 f"Internal: escalating {inv} ({amt_s}) — autonomy budget exhausted. "
