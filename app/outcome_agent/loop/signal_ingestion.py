@@ -77,6 +77,25 @@ async def apply_reply_signal(
         state = transition(state, "paid_claim") if state != "customer_responded" else transition("customer_responded", "paid_claim")
         if state == case.get("state"):
             state = "waiting_for_customer"
+    elif interp.reply_type == "payment_date" and interp.promised_date and interp.promised_date < now.date().isoformat():
+        # Fix 4 (2026-08-20, FIX_PLAN_commitment_grounding.md): a
+        # payment_date commitment whose date is already past at creation
+        # time was previously accepted silently, flipping state straight to
+        # promise_to_pay as if a genuine forward-looking promise had been
+        # made. Two real cases land here: a demo/test fixture date the sim
+        # clock has already passed, and a genuine production reply like "we
+        # paid on the 18th" arriving after the 18th -- that's really a
+        # paid-claim needing verification, not a forward commitment to
+        # track. Route to clarification instead of fabricating a
+        # forward-looking commitment out of an elapsed date; no commitment
+        # is created and no existing one is superseded.
+        dialogue.customer_promised_date = interp.promised_date
+        dialogue.interpretation_confidence = min(dialogue.interpretation_confidence, 0.4)
+        dialogue.open_questions = [
+            f"Promised date {interp.promised_date} is already past -- did you already send "
+            "payment, or did you mean a different (future) date?"
+        ]
+        state = "customer_responded"
     elif interp.reply_type == "payment_date" and interp.promised_date:
         dialogue.customer_promised_date = interp.promised_date
         cmt_id = f"cmt-{uuid4().hex[:8]}"

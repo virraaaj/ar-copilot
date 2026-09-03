@@ -17,6 +17,7 @@ import AgentCockpit from "./pages/agent/AgentCockpit";
 import AgentCaseList from "./pages/agent/AgentCaseList";
 import SeedScenarioRunner from "./pages/agent/SeedScenarioRunner";
 import Mailbox from "./pages/agent/Mailbox";
+import GuidedDemo from "./pages/GuidedDemo";
 
 function RequireSession({ children }: { children: ReactNode }) {
   const { token } = useSession();
@@ -119,6 +120,14 @@ export default function App() {
         element={
           <RequireSession>
             <Mailbox />
+          </RequireSession>
+        }
+      />
+      <Route
+        path="/guided-demo"
+        element={
+          <RequireSession>
+            <GuidedDemo />
           </RequireSession>
         }
       />

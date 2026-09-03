@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.outcome_agent.domain.types import CriticResult
+from app.outcome_agent.loop.reply_interpreter import _extract_date
 from app.services.chase_guardrails import check_message_language
 
 # Was "?" in draft or "confirm"/"share" in draft.lower() -- a substring
@@ -61,6 +63,78 @@ def _count_asks(draft: str) -> int:
     return total
 
 
+# Fix 2 (2026-08-20, FIX_PLAN_commitment_grounding.md, root cause RC2): the
+# critic had a guardrail for capability claims ("we'll issue a refund") but
+# nothing that checked whether a FACTUAL claim in the draft -- specifically,
+# a date attributed to the counterparty as something they promised -- is
+# actually on record. That's how the Silverline bug shipped a real email:
+# routing put the LLM on a tactic (confirm_promise) whose job is to
+# acknowledge an existing commitment, no commitment existed, and the LLM
+# improvised one from the invoice's due_date. Fix 1 closes the routing hole
+# that caused it; this is the backstop that catches the same *shape* of bug
+# even if routing is wrong again in some future way this file's history
+# hasn't seen yet -- "prefer a false block over a fabricated assertion."
+_COMMITMENT_ATTRIBUTION_RE = re.compile(
+    r"\b(expected to pay by|you(?:'ve| have)? committed to (?:pay(?:ing)?|paying)|"
+    r"you indicated you would pay|you agreed to pay|you promised to pay|"
+    r"i(?:'ve| have) noted that .{0,80}(?:is|are) expected to pay|"
+    r"noted that .{0,80}will pay|is expected to pay by|are expected to pay by)\b",
+    re.IGNORECASE,
+)
+
+
+def _commitment_assertions(draft: str, now: datetime) -> List[str]:
+    """Sentences in `draft` that attribute a payment commitment to the
+    counterparty, with the date (if any) asserted alongside it -- reuses
+    reply_interpreter._extract_date (2026-08-06's date parser) instead of
+    writing a second one, per FIX_PLAN_commitment_grounding.md Fix 2."""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", draft or "")
+    out: List[tuple[str, Optional[str]]] = []
+    for s in sentences:
+        if _COMMITMENT_ATTRIBUTION_RE.search(s):
+            out.append((s, _extract_date(s.lower(), now)))
+    return out
+
+
+def _month_day(iso_date: Optional[str]) -> Optional[tuple[int, int]]:
+    if not iso_date:
+        return None
+    parts = iso_date.split("-")
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+
+
+def _no_fabricated_commitment(draft: str, active_commitments: List[Dict[str, Any]]) -> tuple[bool, str]:
+    """Fail if the draft attributes a payment commitment to the counterparty
+    that has no matching active payment_date commitment on record. Matches
+    on (month, day) as well as the exact ISO date, since a sentence like
+    "expected to pay by August 20th" has no year in it and shouldn't be
+    failed just because the wall clock's default year guess differs from
+    the commitment's actual year."""
+    assertions = _commitment_assertions(draft, datetime.utcnow())
+    if not assertions:
+        return True, ""
+    active_dates = {
+        c.get("date") for c in active_commitments if c.get("type") == "payment_date" and c.get("date")
+    }
+    active_month_days = {_month_day(d) for d in active_dates if _month_day(d)}
+    for sentence, asserted_date in assertions:
+        matched = asserted_date is not None and (
+            asserted_date in active_dates or _month_day(asserted_date) in active_month_days
+        )
+        if not matched:
+            return False, (
+                f"draft attributes a payment commitment to the counterparty "
+                f"(\"{sentence.strip()}\") with no matching active payment_date "
+                f"commitment on record"
+            )
+    return True, ""
+
+
 def critique(
     draft: str,
     context: Dict[str, Any],
@@ -87,6 +161,8 @@ def critique(
     repeat_ok = tactic not in failed or tactic in ("escalation_pack", "reflexion_reask", "clarify_ask")
     add("no_repeat_failed_ask", repeat_ok, f"tactic={tactic}")
     add("no_unsupported_claims", "discount" not in draft.lower() and "waive" not in draft.lower())
+    fab_ok, fab_reason = _no_fabricated_commitment(draft, context.get("active_commitments") or [])
+    add("no_fabricated_commitment", fab_ok, fab_reason)
     # Added 2026-08-04: the mailbox has no file-attachment capability
     # anywhere in this system (MailboxStore.send and GraphEmailSender.send
     # both take a plain text/HTML body only) -- a draft that says "please
@@ -119,7 +195,19 @@ def critique(
         r"(?:give|call) you a call|schedule a (?:call|meeting)|"
         r"set up a (?:call|meeting|payment plan)|(?:someone|i) (?:will|'ll) call|"
         r"issue (?:a |an )?(?:refund|credit)|payment (?:portal|link)|"
-        r"send (?:you |over )?a link)\b",
+        r"send (?:you |over )?a link|"
+        # Added 2026-08-18 (found via guided-demo review): a draft can
+        # offer to fulfil a request without using any of the direct verbs
+        # above -- "if you need a copy of the invoice ... we'll handle it
+        # from here" promises document delivery just as concretely as
+        # "I'll send you a copy", but neither half alone matches ("need a
+        # copy" isn't a promise; "we'll handle it" isn't specific) and the
+        # deterministic check missed it entirely. This system can only
+        # send/receive plain-text email in the same thread -- it cannot
+        # actually "handle" a document, arrangement, or request open-endedly.
+        r"we('ll| will) handle (?:it|that|this) from here|"
+        r"if you need .{0,60}(?:copy|documentation|attachment)|"
+        r"want to discuss arrangements)\b",
         low,
     )
     add(

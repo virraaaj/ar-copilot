@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from app.outcome_agent.domain.dialogue_model import DialogueSnapshot
 from app.outcome_agent.domain.goals import build_goal_stack
-from app.outcome_agent.domain.types import AutonomyBudget, Uncertainty
+from app.outcome_agent.domain.types import AutonomyBudget, CommitmentType, Uncertainty
 from app.outcome_agent.domain.world_model import WorldSnapshot
 from app.outcome_agent.memory.document import recall_policy
 from app.outcome_agent.memory.episodic import recall_episodic
@@ -36,6 +36,27 @@ def _uncertainty(dialogue: DialogueSnapshot, world: WorldSnapshot) -> Uncertaint
     )
 
 
+# Priority when several active commitments exist on one case (e.g. a
+# follow_up_date left over from an earlier checkback plus a fresh
+# payment_date). Added 2026-08-20 (FIX_PLAN_commitment_grounding.md, Fix 1)
+# alongside threading the type itself through instead of collapsing to a
+# bool: a real payment promise or an open blocker's resolution date should
+# always win routing over a stale "I'll get back to you" if both happen to
+# be active at once.
+_COMMITMENT_TYPE_PRIORITY = {
+    CommitmentType.PAYMENT_DATE.value: 0,
+    CommitmentType.BLOCKER_RESOLUTION_DATE.value: 1,
+    CommitmentType.FOLLOW_UP_DATE.value: 2,
+}
+
+
+def _active_commitment_type(commitments: List[Dict[str, Any]]) -> Optional[str]:
+    if not commitments:
+        return None
+    ranked = sorted(commitments, key=lambda c: _COMMITMENT_TYPE_PRIORITY.get(c.get("type"), 99))
+    return ranked[0].get("type")
+
+
 async def build_context_packet(
     case: Dict[str, Any],
     events: List[Dict[str, Any]],
@@ -60,7 +81,7 @@ async def build_context_packet(
         dialogue,
         budget,
         uncertainty,
-        has_active_commitment=bool(commitments),
+        active_commitment_type=_active_commitment_type(commitments),
         failed_tactics=failed_tactics,
         tactic_weights=weights,
         failed_ask_count=len(failed_asks),

@@ -17,4 +17,11 @@ async def test_missed_promise_writes_weight_delta(db_path):
     assert any(r["outcome"] == "missed" and r["weight_delta"] < 0 for r in rows)
     store = CaseStore(db_path=db_path)
     case = await store.get_by_invoice("INV-8890")
-    assert case.get("failed_asks") or case.get("state") == "promise_missed"
+    # failed_asks stays empty when the blamed tactic was acknowledgment-only
+    # (confirm_promise/blocker_ack -- see judge_due_commitments); the
+    # commitment's own status is the durable signal in that case.
+    assert (
+        case.get("failed_asks")
+        or case.get("state") == "promise_missed"
+        or any(c.get("status") == "missed" for c in case.get("commitments") or [])
+    )

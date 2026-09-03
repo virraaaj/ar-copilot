@@ -8,7 +8,7 @@ from uuid import uuid4
 from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan, resolve_llm
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
-from app.outcome_agent.loop.communication import resolve_recipient
+from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
 from app.outcome_agent.loop.guardrails import check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
 from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
@@ -30,6 +30,14 @@ async def run_case_loop(
     mailbox=None,
 ) -> Dict[str, Any]:
     """Full observe→plan→simulate→critic→guard→execute for one case."""
+    if not case:
+        # Last line of defense (added 2026-08-06): every caller is
+        # supposed to guard its own case lookup before reaching here, but
+        # this used to fail as a bare `case.get(...)` AttributeError with
+        # no indication of which case_row_id was involved -- a genuinely
+        # confusing 500 when it happened (a concurrent demo reset racing
+        # an in-flight reply/tick was the real trigger).
+        raise ValueError("run_case_loop called with no case (case not found or already deleted)")
     from app.outcome_agent.config.policy_overrides import effective_policy
 
     policy = await effective_policy(case.get("project_number"), settings, db_path=store.db_path)
@@ -47,7 +55,13 @@ async def run_case_loop(
             await send_payment_notice(case, mailbox, ledger)
         return {"skipped": True, "reason": "paid"}
 
-    if state_before in ("disputed", "suppressed", "closed", "paused", "escalated_to_human"):
+    # "disputed" is deliberately NOT in this skip list -- it used to be,
+    # which silently suppressed the case forever the instant a dispute
+    # reply landed. Fixed 2026-08-06 (user feedback): a dispute must run
+    # through the normal loop so it hits the escalate_handoff check below
+    # (goals.py routes disputed -> escalate_handoff) and actually reaches
+    # a human, with a notification email, instead of going quiet.
+    if state_before in ("suppressed", "closed", "paused", "escalated_to_human"):
         return {"skipped": True, "reason": state_before}
 
     events = await ledger.list_for_case(case["id"])
@@ -127,17 +141,35 @@ async def run_case_loop(
         break
     selected_d["draft_text"] = final_draft
 
+    used_safe_fallback = False
+    original_judgment = judgment
     if not judgment.get("passed"):
+        # Both attempts failed the critic. Previously this returned here
+        # with `blocked: True` and nothing else -- no send, no Outbox
+        # entry, no further regeneration despite `regenerate` sometimes
+        # still being true on the final attempt. That silently dropped
+        # real re-engagement messages (found 2026-08-18 via guided-demo
+        # review: a missed-payment-promise follow-up vanished this way,
+        # with the case's next tick the only thing that recovered it).
+        # Fall back to the deterministic, safe-by-construction template
+        # for this tactic instead -- it still gets sent (so the case
+        # never goes quiet) and is flagged for human review in the
+        # Outbox rather than pretending it's a normal AI draft.
         principles.append("P4")
-        trace = _trace(
-            case, trigger, state_before, state_before, cand_dicts, selected_d,
-            judgment, principles,
-            "Critic blocked send — human review", context, now,
-            reflexion=reflexion_note(case),
+        await ledger.append(
+            case["id"], "critic_blocked", {"checks": judgment.get("failures"), "notes": judgment.get("notes")},
+            at=now.isoformat(), principles=["P4"],
         )
-        await store.add_decision_trace(case["id"], trace)
-        await ledger.append(case["id"], "critic_blocked", {"checks": judgment.get("failures")}, at=now.isoformat(), principles=["P4"])
-        return {"trace": trace, "blocked": True}
+        final_draft = DEFAULT_GENERATOR.generate(case, selected.tactic, selected.objective)
+        subject = f"[{case.get('subject_token')}] Invoice {case.get('invoice_no')}"
+        selected_d["draft_text"] = final_draft
+        judgment = {
+            "passed": True,
+            "failures": [],
+            "regenerate": False,
+            "notes": "Safe template fallback after critic block on the AI draft — flagged for human review.",
+        }
+        used_safe_fallback = True
 
     guard = check_before_send(
         case,
@@ -159,7 +191,29 @@ async def run_case_loop(
     # Execute
     tools = []
     ask_id = f"ask-{uuid4().hex[:8]}"
-    if selected.kind == "escalate" or selected.tactic == "escalation_pack":
+    wants_send = not (selected.kind == "escalate" or selected.tactic == "escalation_pack")
+    recipient = resolve_recipient(case, selected.tactic) if wants_send else None
+    if wants_send and recipient is None:
+        # resolve_recipient() returned None: the address for the party
+        # this tactic is meant to reach (PM or customer, per case.target)
+        # isn't actually known. Escalate instead of falling back to a
+        # placeholder or the OTHER party's address -- found 2026-08-18 via
+        # user review: never guess who to email.
+        who = "PM" if (case.get("target") == "pm" or selected.tactic in PM_DIRECTED_TACTICS) else "customer"
+        pack = EscalationPack(
+            reason=f"No known {who} email on file — cannot send tactic={selected.tactic}",
+            evidence=[f"tactic={selected.tactic}", f"target={case.get('target')}"],
+            recommended_human_move=f"Add a {who} contact email to this case, then resume",
+            case_id=case.get("case_id") or "",
+            invoice_no=case.get("invoice_no") or "",
+        )
+        case["state"] = "escalated_to_human"
+        case["escalation"] = pack.to_dict()
+        case["next_action_at"] = None
+        tools.append("escalation_pack")
+        principles.extend(["P11", "P3"])
+        await send_escalation_notice(case, mailbox, ledger)
+    elif selected.kind == "escalate" or selected.tactic == "escalation_pack":
         pack = EscalationPack(
             reason="Planner selected escalation handoff",
             evidence=[f"tactic={selected.tactic}", f"score={selected.score}"],
@@ -174,14 +228,17 @@ async def run_case_loop(
         principles.extend(["P11", "P3"])
         await send_escalation_notice(case, mailbox, ledger)
     else:
-        recipient = resolve_recipient(case, selected.tactic)
+        outbox_meta: Dict[str, Any] = {"tactic": selected.tactic, "ask_id": ask_id}
+        if used_safe_fallback:
+            outbox_meta["human_review"] = True
+            outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
         await store.add_outbox(
             case["id"],
             final_draft,
             channel="email",
             recipient=recipient,
             subject=subject,
-            meta={"tactic": selected.tactic, "ask_id": ask_id},
+            meta=outbox_meta,
         )
         tools.append("outbox")
         # Mirror into the shared Mailbox (added 2026-08-03): run_case_loop
@@ -223,6 +280,7 @@ async def run_case_loop(
                 "ask_id": ask_id,
                 "mailbox_id": mailbox_id,
                 "real_send": real_send_result,
+                **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
             },
             at=now.isoformat(),
             principles=["P4", "P12"],

@@ -652,6 +652,54 @@ export async function runAgentScenario(token: string, id: string): Promise<Recor
   return request(`/agent/demo/scenarios/${encodeURIComponent(id)}/run`, token, { method: "POST" });
 }
 
+// ---- Guided product demo (added 2026-08-06) ----
+
+export interface GuidedDemoStep {
+  index: number;
+  op: string;
+  as?: string;
+  narration: string;
+}
+
+export interface GuidedDemoScenario {
+  id: string;
+  title: string;
+  invoice_no: string;
+  project_name: string;
+  steps: GuidedDemoStep[];
+}
+
+export interface GuidedDemoStepResult {
+  scenario_id: string;
+  step_index: number;
+  op: string;
+  narration: string;
+  reply_text: string | null;
+  reply_as: string | null;
+  result: Record<string, unknown>;
+  case: AgentCase;
+  new_events: Array<Record<string, unknown>>;
+  latest_events: Array<Record<string, unknown>>;
+}
+
+export async function resetGuidedDemo(token: string): Promise<Record<string, unknown>> {
+  return request(`/agent/guided-demo/reset`, token, { method: "POST" });
+}
+
+export async function listGuidedDemoScenarios(token: string): Promise<GuidedDemoScenario[]> {
+  return request(`/agent/guided-demo/scenarios`, token);
+}
+
+export async function runGuidedDemoStep(
+  token: string,
+  scenarioId: string,
+  stepIndex: number
+): Promise<GuidedDemoStepResult> {
+  return request(`/agent/guided-demo/scenarios/${encodeURIComponent(scenarioId)}/steps/${stepIndex}`, token, {
+    method: "POST",
+  });
+}
+
 export async function runAgentTick(token: string): Promise<Record<string, unknown>> {
   return request(`/agent/run-tick`, token, { method: "POST" });
 }

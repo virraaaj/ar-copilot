@@ -11,6 +11,7 @@ from app.outcome_agent.config.collections_outcome import outcome_definition
 from app.outcome_agent.config.policies import policy_from_settings
 from app.outcome_agent.config.seed.scenarios import list_scenarios
 from app.outcome_agent.loop.explain import explain_event
+from app.outcome_agent.loop.guided_demo import list_guided_scenarios, reset_guided_demo, run_guided_step
 from app.outcome_agent.loop.scheduler import (
     advance_case_with_reply,
     create_dispute_for_case,
@@ -249,6 +250,28 @@ def build_agent_router(require_session) -> APIRouter:
             return await run_scenario(scenario_id, get_settings())
         except KeyError:
             raise HTTPException(404, f"Unknown scenario {scenario_id}")
+
+    # Guided product demo (added 2026-08-06): three presentable scenarios
+    # run step-by-step against the real agent loop, separate from the
+    # S1-S8 assertion-oriented scenario packs above.
+    @router.post("/agent/guided-demo/reset")
+    async def guided_demo_reset(_user: str = Depends(require_session)) -> Dict[str, Any]:
+        return await reset_guided_demo(get_settings())
+
+    @router.get("/agent/guided-demo/scenarios")
+    async def guided_demo_scenarios(_user: str = Depends(require_session)) -> List[Dict[str, Any]]:
+        return list_guided_scenarios()
+
+    @router.post("/agent/guided-demo/scenarios/{scenario_id}/steps/{step_index}")
+    async def guided_demo_run_step(
+        scenario_id: str, step_index: int, _user: str = Depends(require_session)
+    ) -> Dict[str, Any]:
+        try:
+            return await run_guided_step(scenario_id, step_index, get_settings())
+        except KeyError as exc:
+            raise HTTPException(404, str(exc))
+        except IndexError as exc:
+            raise HTTPException(400, str(exc))
 
     @router.get("/agent/learning/summary")
     async def learning_summary(_user: str = Depends(require_session)) -> Dict[str, Any]:

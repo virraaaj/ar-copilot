@@ -12,6 +12,20 @@ from app.outcome_agent.store.case_store import CaseStore
 from app.outcome_agent.store.trace_store import TraceStore
 
 
+def _sqlite_settings():
+    """These are hermetic golden-path tests against a tmp sqlite db_path,
+    using ScriptedLLM/force_mock_llm so no real LLM call happens either --
+    they must not depend on live infrastructure. get_settings() alone
+    isn't enough: OUTCOME_STORE_BACKEND defaults to "auto", which resolves
+    to azure mode whenever this environment's DATABASE_URL is set (true on
+    any machine configured to run the app against the real Azure backend),
+    so the ledger silently tries a real Postgres connection regardless of
+    the tmp db_path passed in. Found 2026-08-18: identical failures with
+    and without that week's uncommitted guided-demo changes, i.e. this
+    predates them and is a test-isolation gap, not a regression."""
+    return get_settings().model_copy(update={"OUTCOME_STORE_BACKEND": "sqlite"})
+
+
 REQUIRED_PHASES_OUTBOUND = {
     "signal",
     "memory.read.operational",
@@ -44,7 +58,7 @@ async def test_traced_follow_up_emits_mandatory_phases(tmp_path):
     result = await run_traced_follow_up(
         case["id"],
         trigger="manual_follow_up",
-        settings=get_settings(),
+        settings=_sqlite_settings(),
         db_path=db,
         force_mock_llm=True,
     )
@@ -76,13 +90,13 @@ async def test_mailbox_reply_starts_with_mail_receive(tmp_path):
     store = CaseStore(db_path=db)
     case = next(c for c in await store.list_all() if c.get("invoice_no") == "INV-7104")
 
-    await run_traced_follow_up(case["id"], db_path=db, force_mock_llm=True, settings=get_settings())
+    await run_traced_follow_up(case["id"], db_path=db, force_mock_llm=True, settings=_sqlite_settings())
     result = await submit_customer_reply(
         case["id"],
         "We will pay on 2026-08-01",
         db_path=db,
         force_mock_llm=True,
-        settings=get_settings(),
+        settings=_sqlite_settings(),
     )
     assert result.get("inbound_message", {}).get("direction") == "inbound"
     run = await TraceStore(db_path=db).get_run(result["run_id"])
@@ -129,7 +143,7 @@ async def test_scripted_llm_forced_tools(tmp_path):
         ]
     )
     result = await run_traced_follow_up(
-        case["id"], db_path=db, llm=llm, force_mock_llm=False, settings=get_settings()
+        case["id"], db_path=db, llm=llm, force_mock_llm=False, settings=_sqlite_settings()
     )
     assert result.get("run_id")
     run = await TraceStore(db_path=db).get_run(result["run_id"])
@@ -149,7 +163,7 @@ async def test_critic_blocks_threatening_draft(tmp_path):
         db_path=db,
         force_mock_llm=True,
         force_bad_draft="Pay INV-7104 now or we will pursue legal action and sue you?",
-        settings=get_settings(),
+        settings=_sqlite_settings(),
     )
     # Either blocked or regenerated to a safe draft — never sends the threat
     mail = await MailboxStore(db_path=db).list_for_case(case["id"])

@@ -230,6 +230,28 @@ async def advance_case_with_reply(
             return fixed_interp
 
     interp = await apply_reply_signal(case, reply_text, ledger, now=now, interpreter=_Fixed(), graph_store=graph)
+
+    # If this reply just parked the case on a genuine future date the
+    # other party gave us (a "checkback" or blocker reply with a
+    # followup_date, landing in state "follow_up_scheduled"/"blocked"),
+    # don't immediately run the loop and fire off another message --
+    # there's nothing new to say, and doing so anyway reads as ignoring
+    # what was just said (found 2026-08-18 via guided-demo review: a
+    # customer asking for a week got an immediate second email re-asking
+    # the same question). Schedule the next real tick for that date
+    # instead of "now", and let a later scheduled tick decide what (if
+    # anything) to send once it's actually due -- a fresh state check
+    # (needs_clarification, a contact redirect, etc.) can still override
+    # this by leaving next_action_at at `now`.
+    deferred_to: Optional[str] = None
+    if case.get("state") in ("follow_up_scheduled", "blocked") and not interp.needs_clarification:
+        for c in reversed(case.get("commitments") or []):
+            if c.get("type") == "follow_up_date" and c.get("status") == "active" and c.get("date"):
+                if c["date"] > now.date().isoformat():
+                    deferred_to = f"{c['date']}T{now.strftime('%H:%M:%S')}"
+                break
+
+    next_action_at = deferred_to or now.isoformat()
     await store.update(
         case["id"],
         state=case.get("state"),
@@ -238,14 +260,22 @@ async def advance_case_with_reply(
         budget=case.get("budget"),
         commitments=case.get("commitments"),
         blockers=case.get("blockers"),
-        next_action_at=now.isoformat(),
+        next_action_at=next_action_at,
         customer_email=case.get("customer_email"),
         customer_name=case.get("customer_name"),
         target=case.get("target"),
     )
     loop_result = None
-    if run_loop and case.get("state") not in ("paid", "disputed", "suppressed"):
+    if run_loop and deferred_to is None and case.get("state") not in ("paid", "disputed", "suppressed"):
         case = await store.get(case["id"])
+        if not case:
+            # Case was deleted/reset between the update above and this
+            # re-fetch (e.g. a concurrent demo reset wiping the store
+            # mid-request) -- added 2026-08-06 after this raced into an
+            # unguarded `case.get(...)` AttributeError. Report it as the
+            # same "case not found" condition the initial lookup uses,
+            # instead of crashing with a confusing stack trace.
+            raise KeyError(case_row_id)
         loop_result = await run_case_loop(
             case,
             store=store,
@@ -404,6 +434,8 @@ async def run_scenario(
             step["result"] = result
         elif op == "force_bad_draft":
             case = await store.get(case["id"])
+            if not case:
+                raise KeyError(f"case disappeared mid-scenario: {invoice}")
             now = await sim_clock.now(store.db_path)
             graph = None
             try:
@@ -467,10 +499,20 @@ def _eval_check(name: str, case: Dict[str, Any], learning, store) -> bool:
             "escalated_to_human",
         )
     if name == "promise_missed_or_learning":
-        return case.get("state") == "promise_missed" or bool(case.get("failed_asks"))
+        # failed_asks stays empty for an acknowledgment-only miss (see
+        # judge_due_commitments) -- a missed commitment is still durable
+        # evidence a promise was missed regardless of whether any tactic
+        # got blamed for it.
+        return (
+            case.get("state") == "promise_missed"
+            or bool(case.get("failed_asks"))
+            or any(c.get("status") == "missed" for c in case.get("commitments") or [])
+        )
     if name == "reflexion_present":
-        return bool(case.get("failed_asks")) or bool(
-            (case.get("last_decision") or {}).get("reflexion_note")
+        return (
+            bool(case.get("failed_asks"))
+            or bool((case.get("last_decision") or {}).get("reflexion_note"))
+            or any(c.get("status") == "missed" for c in case.get("commitments") or [])
         )
     if name == "state_disputed":
         return case.get("state") == "disputed"
