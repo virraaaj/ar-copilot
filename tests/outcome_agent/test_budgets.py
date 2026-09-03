@@ -1,6 +1,11 @@
 import pytest
 
-from app.outcome_agent.domain.budgets import consume_unanswered, default_budget, should_escalate_for_budget
+from app.outcome_agent.domain.budgets import (
+    consume_postponement,
+    consume_unanswered,
+    default_budget,
+    should_escalate_for_budget,
+)
 from app.outcome_agent.loop.scheduler import reset_demo, run_agent_tick
 from app.outcome_agent.store.case_store import CaseStore
 from tests.outcome_agent.conftest import make_settings
@@ -10,6 +15,33 @@ def test_budget_exhaustion_flag():
     b = default_budget(max_unanswered=2)
     consume_unanswered(b)
     consume_unanswered(b)
+    assert should_escalate_for_budget(b)
+
+
+def test_budget_exhausted_at_max_postponements():
+    b = default_budget(max_postponements=2)
+    consume_postponement(b)
+    consume_postponement(b)
+    assert b.postponements_used >= b.max_postponements
+    assert should_escalate_for_budget(b)
+
+
+def test_budget_not_exhausted_below_max_postponements():
+    b = default_budget(max_postponements=2)
+    consume_postponement(b)
+    assert b.postponements_used < b.max_postponements
+    assert not should_escalate_for_budget(b)
+
+
+def test_budget_exhausted_by_postponements_alone():
+    # 2026-09-03: regression guard for the bug where exhausted() ignored
+    # postponements_used entirely -- a customer who only ever postpones
+    # (never fails to answer, never misses a promise) must still escalate.
+    b = default_budget(max_postponements=2)
+    consume_postponement(b)
+    consume_postponement(b)
+    assert b.unanswered_used == 0
+    assert b.misses_used == 0
     assert should_escalate_for_budget(b)
 
 

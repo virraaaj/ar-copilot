@@ -120,7 +120,51 @@ class DeterministicReplyInterpreter:
             return InterpretedReply(ReplyType.PAID_CLAIM.value, 0.85, sentiment="assertive", summary="paid claim")
 
         if re.search(r"\b(sue|lawsuit|hostile|ridiculous|harass)\b", low):
-            return InterpretedReply(ReplyType.HOSTILE.value, 0.8, sentiment="hostile", summary="hostile")
+            # Fixed 2026-09-03 (Change 1): a hostile reply can still name a
+            # payment date ("This is ridiculous. We'll pay on the 15th.") --
+            # extract it here too (reusing _extract_date, not a second
+            # parser) so apply_reply_signal can record the commitment
+            # instead of silently losing it just because hostility routes
+            # to escalation.
+            return InterpretedReply(
+                ReplyType.HOSTILE.value,
+                0.8,
+                promised_date=_extract_date(low, now),
+                sentiment="hostile",
+                summary="hostile",
+            )
+
+        # Handoff: the customer is asking to talk to a human, or asking
+        # whether they're talking to a bot. Added 2026-09-03 -- the AI
+        # disclosure line now appended to every outbound email ("...just
+        # reply and a member of the team will pick this up") means
+        # customers WILL reply asking for a human, and per the business
+        # requirement the agent must stop chasing and hand off, never deny
+        # being automated. Placed here -- after unsubscribe/dispute/
+        # paid_claim/hostile (the other dialogue-control signals that must
+        # win over an ordinary chase reply) but *before* payment_date/
+        # blocker/checkback -- so a message like "put me through to someone,
+        # we'll pay on the 15th" escalates instead of being read as a plain
+        # payment promise. Deliberately narrow: bare "person" is common in
+        # completely innocent replies ("I'll check with our finance person
+        # and come back to you", "our accounts person is away this week"),
+        # so every alternative below requires a human-directed verb
+        # ("speak/talk to", "am I talking to", "put me through", "who am I
+        # speaking to") or an explicit bot question ("is this a bot",
+        # "are you an AI") immediately around the noun -- never the noun
+        # alone.
+        if re.search(
+            r"\b(speak (?:with |to )?(?:a |an )?(?:human|person|someone|real person|live person)|"
+            r"talk (?:with |to )?(?:a |an )?(?:human|person|someone|real person)|"
+            r"(?:is (?:this|that)|are you) (?:a |an )?(?:bot|robot|ai|artificial intelligence|automated|a machine)|"
+            r"am i (?:talking|speaking) (?:with |to )?(?:a )?(?:human|person|real person|someone)|"
+            r"i want (?:to speak (?:with |to )?)?(?:a |an )?(?:human|person|someone|real person)|"
+            r"put me through (?:to )?(?:a |an )?(?:human|person|someone|real person)|"
+            r"can (?:someone|a person|somebody) call me|"
+            r"who am i (?:speaking|talking) (?:with|to))\b",
+            low,
+        ):
+            return InterpretedReply(ReplyType.HANDOFF.value, 0.85, sentiment="neutral", summary="handoff requested")
 
         date = _extract_date(low, now)
         if re.search(r"\b(will pay|pay(?:ment)? (?:on|by)|promise to pay)\b", low) and date:

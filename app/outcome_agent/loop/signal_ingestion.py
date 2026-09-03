@@ -14,6 +14,52 @@ from app.outcome_agent.memory.temporal_graph import supersede_blocker_with_commi
 from app.outcome_agent.domain.budgets import consume_postponement, reset_unanswered_on_reply
 
 
+async def _record_payment_date_commitment(
+    case: Dict[str, Any],
+    dialogue: DialogueSnapshot,
+    commitments: list,
+    blockers: list,
+    graph_store,
+    interp: InterpretedReply,
+) -> None:
+    """Create/supersede an active payment_date commitment for interp.promised_date.
+
+    Factored out 2026-09-03 (Change 1) so the hostile-with-date branch in
+    apply_reply_signal below can record a payment date exactly the way the
+    plain payment_date branch does -- same commitment shape, same
+    supersede-existing-commitments behaviour, same
+    dialogue.customer_promised_date -- instead of a second, drifting copy.
+    """
+    dialogue.customer_promised_date = interp.promised_date
+    cmt_id = f"cmt-{uuid4().hex[:8]}"
+    for b in blockers:
+        if b.get("status") == "open":
+            b["status"] = "closed"
+            await supersede_blocker_with_commitment(
+                graph_store,
+                case.get("invoice_no") or "",
+                b["id"],
+                cmt_id,
+                {"date": interp.promised_date, "type": "payment_date"},
+            )
+    for c in commitments:
+        if c.get("status") == "active":
+            c["status"] = "superseded"
+    commitments.append(
+        {
+            "id": cmt_id,
+            "case_id": case.get("case_id"),
+            "type": "payment_date",
+            "date": interp.promised_date,
+            "owner": "customer",
+            "status": "active",
+            "source": "customer",
+            "confidence": interp.confidence,
+            "miss_consequence": "re-engage or escalate",
+        }
+    )
+
+
 async def apply_reply_signal(
     case: Dict[str, Any],
     text: str,
@@ -70,8 +116,65 @@ async def apply_reply_signal(
         world.consent_ok = False
         world.status = "opted_out"
     elif interp.reply_type == "dispute":
+        # Fixed 2026-09-03 (Change 2): a dispute reply is the CUSTOMER'S
+        # CLAIM, not a world-truth fact -- writing world.status = "disputed"
+        # here recorded an unverified assertion straight into world truth,
+        # contradicting this codebase's own P1 principle (world_model.py:1,
+        # "World truth fields only -- never inferred from conversation
+        # alone") and inconsistent with how a paid-claim is already handled
+        # (dialogue.customer_claimed_paid = True, never world.status =
+        # "paid"). Mirror that pattern instead. Escalation and
+        # send-suppression are unaffected: transition(state, "dispute") is
+        # a hard rule (state_machine.py) that always returns DISPUTED
+        # regardless of from_state, and both goals.choose_objective
+        # ("world.is_disputed or state == 'disputed'") and
+        # guardrails.dispute_check ("world.get('status') == 'disputed' or
+        # state == 'disputed'") already gate on case state as well as world
+        # status, so they still escalate / suppress the send off
+        # case["state"] alone -- verified by tracing both call sites.
         state = transition(state, "dispute")
-        world.status = "disputed"
+        dialogue.customer_claimed_disputed = True
+    elif interp.reply_type == "hostile":
+        # Fixed 2026-09-03: hostile replies had no branch here and fell
+        # through to the generic `else` below (state="customer_responded"),
+        # which choose_objective/choose_tactic then treat as an ordinary
+        # engaged customer -- confidence 0.8 also clears the <0.55
+        # clarify_date safety-net in goals.py, so it fell all the way to the
+        # default establish_contact objective and offered a chase tactic
+        # (polite_outreach/soft_nudge/firm_reminder) in reply to hostility.
+        # Mirror the dispute branch above: drive state via transition() to
+        # the deterministic state machine's hostile -> escalation_required
+        # rule so goals.choose_objective's existing escalation branch takes
+        # over. No world.status write here -- hostility is a dialogue fact
+        # about how the customer is behaving, not a world-truth fact about
+        # the invoice (see world_model.py:1), so it must not be conflated
+        # with e.g. "disputed".
+        state = transition(state, "hostile")
+        if interp.promised_date:
+            # Fixed 2026-09-03 (Change 1): a hostile reply can still name a
+            # payment date ("This is ridiculous. We'll pay on the 15th.").
+            # Record it as a normal active payment_date commitment (same
+            # helper the payment_date branch below uses) so it isn't lost --
+            # escalation still wins for routing, state stays
+            # ESCALATION_REQUIRED (set just above), never promise_to_pay.
+            await _record_payment_date_commitment(case, dialogue, commitments, blockers, graph_store, interp)
+    elif interp.reply_type == "handoff":
+        # Added 2026-09-03: the outbound disclosure line ("...just reply
+        # and a member of the team will pick this up") means customers now
+        # reply asking for a human, or asking outright whether they're
+        # talking to a bot. Same mechanism as the hostile branch just
+        # above -- drive state via transition() so the deterministic
+        # state_machine's "hostile" -> ESCALATION_REQUIRED hard rule takes
+        # over (reused rather than adding a second event/rule, since a
+        # handoff request needs exactly the same "stop chasing, hand off
+        # to a human" outcome hostility does) and goals.choose_objective's
+        # existing escalation branch routes to escalate_handoff instead of
+        # a chase tactic. No world.status write here -- like hostility,
+        # "the customer wants a human" is a dialogue fact about this
+        # conversation, not a world-truth fact about the invoice (see
+        # world_model.py:1), so it must not be conflated with e.g.
+        # "disputed".
+        state = transition(state, "hostile")
     elif interp.reply_type == "paid_claim":
         dialogue.customer_claimed_paid = True
         state = transition(state, "paid_claim") if state != "customer_responded" else transition("customer_responded", "paid_claim")
@@ -97,35 +200,7 @@ async def apply_reply_signal(
         ]
         state = "customer_responded"
     elif interp.reply_type == "payment_date" and interp.promised_date:
-        dialogue.customer_promised_date = interp.promised_date
-        cmt_id = f"cmt-{uuid4().hex[:8]}"
-        # close open blockers (memory supersession)
-        for b in blockers:
-            if b.get("status") == "open":
-                b["status"] = "closed"
-                await supersede_blocker_with_commitment(
-                    graph_store,
-                    case.get("invoice_no") or "",
-                    b["id"],
-                    cmt_id,
-                    {"date": interp.promised_date, "type": "payment_date"},
-                )
-        for c in commitments:
-            if c.get("status") == "active":
-                c["status"] = "superseded"
-        commitments.append(
-            {
-                "id": cmt_id,
-                "case_id": case.get("case_id"),
-                "type": "payment_date",
-                "date": interp.promised_date,
-                "owner": "customer",
-                "status": "active",
-                "source": "customer",
-                "confidence": interp.confidence,
-                "miss_consequence": "re-engage or escalate",
-            }
-        )
+        await _record_payment_date_commitment(case, dialogue, commitments, blockers, graph_store, interp)
         state = "promise_to_pay"
     elif interp.reply_type == "blocker":
         blk_id = f"blk-{uuid4().hex[:8]}"

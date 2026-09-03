@@ -9,6 +9,7 @@ from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan,
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
 from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
+from app.outcome_agent.loop.disclosure import append_disclosure, has_disclosure, is_customer_bound
 from app.outcome_agent.loop.guardrails import check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
 from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
@@ -235,6 +236,37 @@ async def run_traced_follow_up(
         "rationale": plan.get("rationale") or selected.rationale,
     }
 
+    # Escalate-kind selection (added 2026-09-03): action_simulator.py sets
+    # kind="escalate" for the escalation_pack tactic -- a real, non-hypothetical
+    # planner outcome (see plan_next_action / CandidateAction). executor.py
+    # already special-cases this (its `wants_send` check + the
+    # `elif selected.kind == "escalate" or selected.tactic == "escalation_pack"`
+    # branch), but this traced path had no matching branch: it fell straight
+    # through to draft -> judge -> send and emailed the resolved recipient --
+    # which for a non-PM-directed tactic is the CUSTOMER -- at the exact
+    # moment the agent decided it must stop and hand off to a human. Mirrors
+    # executor.py's handling and this function's own "recipient is None ->
+    # escalate" branch below: build the EscalationPack, mark the case
+    # escalated, notify, and return without ever drafting/sending outreach.
+    if selected.kind == "escalate" or selected.tactic == "escalation_pack":
+        s = await next_seq()
+        async with traces.step(run_id, s, "state.transition", "Escalate — planner selected escalation handoff", principles=["P3", "P11"]) as bag:
+            pack = EscalationPack(
+                reason="Planner selected escalation handoff",
+                evidence=[f"tactic={selected.tactic}", f"score={selected.score}"],
+                recommended_human_move="Owner call + payment plan options",
+                case_id=case.get("case_id") or "",
+                invoice_no=case.get("invoice_no") or "",
+            )
+            case["state"] = "escalated_to_human"
+            case["escalation"] = pack.to_dict()
+            case["next_action_at"] = None
+            bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
+        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        await send_escalation_notice(case, mailbox, ledger)
+        await traces.finish_run(run_id, "ok", "escalated: planner selected escalation handoff")
+        return {"run_id": run_id, "escalated": True, "case": case}
+
     # Draft + judge (with regen)
     subject = ""
     body = ""
@@ -331,6 +363,15 @@ async def run_traced_follow_up(
         await traces.finish_run(run_id, "ok", "escalated: no known recipient")
         return {"run_id": run_id, "escalated": True, "case": case}
 
+    # Customer disclosure (added 2026-09-03): appended here, deterministically
+    # in code, BEFORE the guardrail/language check below so the disclosure
+    # text itself is covered by check_message_language and every copy of
+    # this draft (mailbox, outbox, real send, ledger) is identical -- see
+    # executor.py's matching fix (same date) for the full rationale. PM-
+    # bound sends are untouched. append_disclosure() is idempotent.
+    if is_customer_bound(case, selected.tactic):
+        body = append_disclosure(body)
+
     # Guardrails
     s = await next_seq()
     guard = None
@@ -348,6 +389,21 @@ async def run_traced_follow_up(
     if guard and not guard.allowed:
         await traces.finish_run(run_id, "ok", f"guard blocked: {guard.reason}")
         return {"run_id": run_id, "blocked": True, "reason": guard.reason, "case": case}
+
+    # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
+    # already appended above for every customer-bound draft, but this is
+    # the last check before the actual send below -- if some future change
+    # to this function ever drops the disclosure off a customer-bound body,
+    # we must not silently send it as if a person wrote it. Mirrors the
+    # matching gate in executor.py (same date).
+    if is_customer_bound(case, selected.tactic) and not has_disclosure(body):
+        await traces.finish_run(run_id, "ok", "blocked: customer-bound draft missing disclosure")
+        return {
+            "run_id": run_id,
+            "blocked": True,
+            "reason": "customer-bound draft missing disclosure",
+            "case": case,
+        }
 
     # Send mail
     state_before = case.get("state")

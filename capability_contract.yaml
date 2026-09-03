@@ -1,0 +1,507 @@
+# =============================================================================
+# CAPABILITY CONTRACT — outcome agent (app/outcome_agent/)
+# =============================================================================
+# Single source of truth for what the agent may assert, promise, ask, record,
+# and escalate. Structured by COUNTERPARTY because authority differs by who is
+# reading the message.
+#
+# Every clause is machine-checkable: `check` names a hook a test or code path
+# can assert on. `enforced_by` cites where it is enforced TODAY (file:line), or
+# GAP if nothing enforces it yet. Phase 2 confirms every GAP with a citation.
+#
+# `source` on each clause:
+#   repo    — derived from behavior already in the codebase
+#   stated  — stated by the business owner (2026-09-03 sign-off session)
+#   ASSUMED — I guessed. Every ASSUMED clause needs explicit human sign-off.
+#
+# Scope decisions (2026-09-03):
+#   - The agent is READ-ONLY against the real AR system of record.
+#   - Its ONLY objective is: obtain a payment date for an overdue invoice.
+#     Anything else is out of scope and escalates.
+#   - app/agent/ (conversational copilot) is NOT covered by this contract.
+# =============================================================================
+
+version: 1
+applies_to: app/outcome_agent/
+last_reviewed: 2026-09-03
+
+# -----------------------------------------------------------------------------
+# Tunable business policy. The contract's SHAPE is fixed; these values are not.
+# Changing a number here must not require a code change.
+# -----------------------------------------------------------------------------
+policy_knobs:
+  max_unanswered_before_escalation: 3        # source: repo (config/policies.py:11)
+  max_postponements_before_escalation: 3     # source: repo (config/policies.py:13)
+  max_missed_promises_before_escalation: 3   # source: repo (config/policies.py:12)
+  min_days_between_emails: 3                 # source: repo (config/policies.py:18)
+  max_commitment_days_ahead: 90              # source: repo (config/policies.py:14)
+  high_dollar_threshold: 50000.0             # source: repo (config/policies.py:22)
+  external_send_allowlist_enforced: true     # source: repo (loop/guardrails.py:71)
+
+# -----------------------------------------------------------------------------
+# THE SINGLE OBJECTIVE. Everything below is a refinement of this one sentence.
+# -----------------------------------------------------------------------------
+mission:
+  id: MISSION
+  rule: >
+    Obtain a payment date for an overdue invoice — by asking the internal PM
+    first, and the customer only once the PM has authorized it. Nothing else.
+    When things drag on past the limits set on the policy page, the agent stops
+    chasing, escalates, and the PM is emailed that it has been escalated.
+  source: stated
+  check: goals:objective_in_allowed_set
+  enforced_by: GAP(suspected)   # goals.py has objectives beyond date-chasing
+  notes: >
+    Any objective, tactic, assertion or offer that is not "ask for / confirm /
+    record a payment date" or "escalate to a human" is out of authority. The
+    agent has NO authority to change the terms of the debt in any way — only to
+    ask when it will be paid.
+
+# -----------------------------------------------------------------------------
+# All escalation limits are business-configurable, never hardcoded. They resolve
+# per project, then per default, then from settings.
+#   config/policy_overrides.py:38 OVERRIDABLE_FIELDS (12 fields)
+# -----------------------------------------------------------------------------
+escalation_limits_are_policy_driven:
+  id: POLICY-01
+  rule: >
+    Every threshold that decides "chase again vs escalate" must be read from the
+    resolved AgentPolicy (policy page), not hardcoded in agent logic.
+  source: stated
+  check: policy:thresholds_read_from_resolved_policy
+  enforced_by: config/policy_overrides.py:38 + config/policies.py
+
+# =============================================================================
+# COUNTERPARTY: internal_pm
+# The PM is a colleague, not a debtor. Widest authority, but still bounded.
+# =============================================================================
+internal_pm:
+
+  allowed:
+    - id: PM-A-01
+      rule: Ask whether the PM already knows an expected payment date for this invoice.
+      source: repo
+      check: tactic:pm_awareness_check
+      enforced_by: domain/goals.py + adapters/llm_tools.py:588-601
+
+    - id: PM-A-02
+      rule: >
+        Ask whether the agent should contact the customer directly — as ONE
+        either/or question, never as a second separate ask.
+      source: repo
+      check: critic:no_multiple_asks
+      enforced_by: loop/critic.py:158 (_count_asks)
+
+    - id: PM-A-03
+      rule: >
+        State that a previously-relayed date was missed, naming the actual date
+        from the record.
+      source: repo
+      check: critic:no_fabricated_commitment
+      enforced_by: loop/critic.py:104 (_no_fabricated_commitment)
+
+    - id: PM-A-04
+      rule: Acknowledge a payment date the PM supplied, attributing it to the PM.
+      source: repo
+      check: provenance:commitment_source == "pm"
+      enforced_by: GAP(suspected)   # Commitment.source defaults to "customer"
+
+    - id: PM-A-05
+      rule: Refer to the customer in the third person; never address the PM as the debtor.
+      source: repo
+      check: draft:recipient_role == "pm"
+      enforced_by: adapters/llm_tools.py:527-531 (prompt-only — see Phase 2)
+
+    - id: PM-A-06
+      rule: Notify the PM when the case escalates to a human.
+      source: repo
+      check: notify:escalation_notice_sent
+      enforced_by: loop/notifications.py + loop/executor.py:214
+
+  requires_human_approval:
+    - id: PM-H-01
+      rule: >
+        Switching a case from PM-directed to customer-directed without an
+        explicit authorization or a distinct customer address from the PM.
+      source: repo
+      check: routing:target_flip_requires_authorization
+      enforced_by: loop/signal_ingestion.py:56-62
+
+  forbidden:
+    - id: PM-F-01
+      rule: >
+        Asking the PM for a payment date as if the PM personally owes the money.
+      source: repo
+      check: draft:recipient_role == "pm"
+      enforced_by: adapters/llm_tools.py:600-601 (prompt-only)
+
+    - id: PM-F-02
+      rule: Sending a PM-directed message to the customer's address, or vice versa.
+      source: repo
+      check: routing:resolve_recipient_no_cross_party_fallback
+      enforced_by: loop/communication.py:14-45 (returns None, never falls back)
+
+    - id: PM-F-03
+      rule: Emailing any address for a party whose address is not actually known.
+      source: repo
+      check: routing:resolve_recipient_none_escalates
+      enforced_by: loop/executor.py:195-214
+
+  escalate_on:
+    - id: PM-E-01
+      rule: No PM email on file for a PM-directed tactic.
+      source: repo
+      check: escalate:no_known_recipient
+      enforced_by: loop/executor.py:195-214
+
+    - id: PM-E-02
+      rule: >
+        PM declines to authorize customer contact and gives no date — the agent
+        has nowhere left to go, so it stops and hands off to a human.
+      source: stated       # confirmed by business owner 2026-09-03
+      check: escalate:pm_refusal
+      enforced_by: GAP
+
+# =============================================================================
+# COUNTERPARTY: external_customer
+# Narrowest authority. Every clause here is a reputational/legal surface.
+# =============================================================================
+external_customer:
+
+  allowed:
+    - id: CUST-A-01
+      rule: >
+        State invoice facts sourced from the system of record: invoice number,
+        amount, due date, project. Provenance must be system_of_record.
+      source: repo
+      check: provenance:asserted_facts_are_system_of_record
+      enforced_by: GAP(suspected)
+
+    - id: CUST-A-02
+      rule: Ask for exactly ONE thing — an expected payment date (or a status update that includes one).
+      source: stated
+      check: critic:no_multiple_asks
+      enforced_by: loop/critic.py:158
+
+    - id: CUST-A-03
+      rule: >
+        Acknowledge a payment date the customer themselves gave, only if that
+        exact date is an active payment_date commitment on record.
+      source: repo
+      check: critic:no_fabricated_commitment
+      enforced_by: loop/critic.py:104 (SAFETY-CRITICAL, llm_tools.py:47)
+
+    - id: CUST-A-04
+      rule: Honor explicit customer instructions about tone, name, and preferred address.
+      source: repo
+      check: draft:special_instructions_applied
+      enforced_by: loop/signal_ingestion.py:47-50
+
+    - id: CUST-A-05
+      rule: >
+        Every outbound message to an EXTERNAL party must disclose that the
+        sender is an automated AI assistant, and must offer the recipient a way
+        to ask for a human.
+      source: stated
+      check: disclosure:ai_disclosure_present
+      enforced_by: GAP                # NOTHING implements this today
+      implementation_requirement: >
+        Appended deterministically at send time, NOT left to the LLM to include,
+        AND asserted by a check that fails closed if absent. Prompt-only
+        disclosure is not acceptable — the model will eventually omit it.
+        Internal PM messages are EXCLUDED (decided 2026-09-03: PMs are inside
+        the organisation and already know the system is automated). The
+        "reach a human" route publishes no address — the customer simply
+        replies, and that reply triggers CUST-E-09.
+      approved_text: |
+        This message was sent by an automated assistant on behalf of the
+        Accounts Receivable team. If you'd prefer to speak with someone
+        directly, just reply and a member of the team will pick this up.
+      channel: email only (confirmed 2026-09-03 — no other channel in scope)
+
+  requires_human_approval:
+    - id: CUST-H-01
+      rule: Any first contact with a customer that the PM has not authorized.
+      source: repo
+      check: routing:customer_contact_requires_pm_authorization
+      enforced_by: loop/signal_ingestion.py:56-62 + domain/goals.py
+
+    # (A hardcoded "high dollar after one miss" rule was proposed and REJECTED
+    # by the business owner 2026-09-03: escalation is governed by the policy
+    # page, not by a rule baked into agent logic. See POLICY-01.)
+    - id: CUST-H-02
+      rule: >
+        Continuing to chase after any policy-page limit is reached
+        (max_unanswered, max_missed_promises, max_postponements). At that point
+        the agent must escalate and notify the PM instead of sending again.
+      source: stated
+      check: escalate:policy_limit_reached
+      enforced_by: domain/goals.py:82 + domain/budgets.py (limits resolve via config/policy_overrides.py)
+
+  forbidden:
+    - id: CUST-F-01
+      rule: >
+        Asserting a payment date the counterparty did not give — including
+        presenting the invoice's own due_date as something they promised.
+      source: repo
+      check: critic:no_fabricated_commitment
+      enforced_by: loop/critic.py:104 (SAFETY-CRITICAL)
+
+    - id: CUST-F-02
+      rule: >
+        Changing the terms of the debt in any way, or implying it could be
+        changed. Covers: discounts, waivers, write-offs, reduced balances,
+        extensions, "more time", revised or pushed-back due dates, payment
+        plans, instalments, part-payment arrangements, changes to credit terms,
+        and open invitations to negotiate ("let us know what works", "we can
+        work something out"). The agent asks WHEN it will be paid. It has no
+        authority over WHAT is owed or WHEN it is due.
+        PARTIAL PAYMENT IS NOT ACCEPTED on an overdue invoice (stated
+        2026-09-03) — the agent must never propose, accept, or acknowledge
+        part-payment, "pay half now", or splitting the balance.
+      source: stated
+      check: guard:banned_language + critic:no_unsupported_claims
+      enforced_by: >
+        services/chase_guardrails.py:44 covers discount / waive / reduced only.
+        PARTIAL — extension, more time, payment plan, instalment, credit terms,
+        revised due date, and negotiation-invite phrasing are NOT covered.
+        Confirmed in scope by the business owner 2026-09-03. See Phase 2.
+
+    - id: CUST-F-03
+      rule: >
+        Any statement that reads as a legal, collections, or consequence threat:
+        legal action, lawsuit, attorney, collections agency, credit bureau,
+        suspending or withholding service or work, putting the account on hold,
+        or any other stated/implied consequence of not paying.
+      source: stated
+      check: guard:banned_language + critic:relationship_tone
+      enforced_by: >
+        services/chase_guardrails.py:44 covers legal action, sue, lawsuit,
+        attorney, collections agency, credit bureau. PARTIAL — service
+        suspension, withholding work, account hold, and general
+        consequence framing are NOT covered. Confirmed forbidden by the
+        business owner 2026-09-03. See Phase 2.
+
+    - id: CUST-F-04
+      rule: >
+        Promising any capability this system does not have: attachments, phone
+        calls, meetings, human callbacks, refunds, credits, portal/payment
+        links, or open-ended "we'll handle it".
+      source: repo
+      check: critic:no_unsupported_promise + critic:no_attachment_promise
+      enforced_by: loop/critic.py:180-215 (SAFETY-CRITICAL)
+
+    - id: CUST-F-05
+      rule: Contacting a customer who has opted out, disputed, or already paid.
+      source: repo
+      check: guard:paid_check + guard:opt_out_check + guard:dispute_check
+      enforced_by: loop/guardrails.py:38-55
+
+    - id: CUST-F-06
+      rule: >
+        Answering a question outside the payment-date mission (contract terms,
+        scope of work, pricing, quality complaints, service issues, legal
+        questions). The agent acknowledges receipt, states a human will pick it
+        up, asks nothing further, and escalates.
+      source: stated
+      check: scope:out_of_scope_question_escalates
+      enforced_by: GAP
+
+    - id: CUST-F-07
+      rule: >
+        Concealing or denying that the sender is automated if asked directly.
+      source: stated
+      check: disclosure:ai_disclosure_present
+      enforced_by: GAP
+
+  escalate_on:
+    - id: CUST-E-01
+      rule: Customer disputes the invoice (amount, validity, delivery, quality).
+      source: repo
+      check: escalate:dispute_routes_to_human
+      enforced_by: domain/goals.py:76-81 + loop/reply_interpreter.py:64
+
+    - id: CUST-E-02
+      rule: Customer mentions legal counsel, attorney, or litigation.
+      source: stated
+      check: escalate:legal_counsel_mentioned
+      enforced_by: GAP        # "attorney" is banned OUTBOUND, not detected INBOUND
+
+    - id: CUST-E-03
+      rule: >
+        Insolvency signal — bankruptcy, administration, receivership, liquidation,
+        "can't pay", creditors' arrangement.
+      source: stated
+      check: escalate:insolvency_signal
+      enforced_by: GAP
+
+    - id: CUST-E-04
+      rule: Customer disagrees about what the contract says or what was owed.
+      source: stated
+      check: escalate:contract_disagreement
+      enforced_by: GAP(suspected)   # may partially route via dispute
+
+    - id: CUST-E-05
+      rule: >
+        Hostility or abusive language from the customer. Escalate to a human
+        and notify the PM — but if the same message also contains a payment
+        date, that date MUST still be recorded, not discarded (stated
+        2026-09-03). Escalation is not permanent suppression: a human may
+        return the case to the chase loop.
+      source: stated
+      check: escalate:hostile_reply_escalates
+      enforced_by: GAP(suspected)   # ReplyType.HOSTILE exists (reply_interpreter.py:122); routing unverified
+
+    - id: CUST-E-06
+      rule: Repeated non-response beyond max_unanswered_before_escalation.
+      source: repo
+      check: escalate:budget_exhausted
+      enforced_by: domain/goals.py:82 + domain/budgets.py
+
+    - id: CUST-E-07
+      rule: Request to stop contact / unsubscribe — suppress immediately, then escalate.
+      source: repo
+      check: guard:opt_out_check
+      enforced_by: loop/signal_ingestion.py:70-73 + loop/guardrails.py:45-48
+
+    - id: CUST-E-08
+      rule: Customer claims already paid — never dun again on that thread until verified.
+      source: repo
+      check: provenance:paid_claim_not_written_as_fact
+      enforced_by: loop/signal_ingestion.py:78-82
+
+    - id: CUST-E-09
+      rule: >
+        Customer asks to speak to a human, or asks whether they are talking to
+        a bot/AI. The agent stops chasing, escalates, and the existing
+        escalation notice brings a human in. It must never deny being automated
+        (see CUST-F-07). The PM must be notified by email that it escalated.
+      source: stated       # decided 2026-09-03 alongside CUST-A-05
+      check: escalate:human_requested + notify:pm_emailed_on_escalation
+      enforced_by: GAP
+
+# =============================================================================
+# COUNTERPARTY: system_of_record
+# The agent is READ-ONLY against the real AR ledger (confirmed 2026-09-03).
+# Its own case store is a WORKING record, not the books.
+# =============================================================================
+system_of_record:
+
+  allowed:
+    - id: SOR-A-01
+      rule: Read invoices, cases, project contacts from the AR backend.
+      source: repo
+      check: sor:read_only_client_surface
+      enforced_by: loop/invoice_sync.py (list_* calls only)
+
+    - id: SOR-A-02
+      rule: >
+        Write to the agent's OWN case store / event ledger: dialogue, state,
+        commitments, blockers, decision traces, outbox.
+      source: repo
+      check: sor:writes_confined_to_agent_store
+      enforced_by: store/case_store.py + store/event_ledger.py
+
+    - id: SOR-A-03
+      rule: >
+        Record a commitment with explicit provenance: who stated it
+        (customer | pm), when, at what confidence, from which message.
+      source: repo
+      check: provenance:commitment_has_source_and_confidence
+      enforced_by: domain/types.py:96-105 (fields exist; population unverified)
+
+  requires_human_approval:
+    - id: SOR-H-01
+      rule: >
+        Any write to the real AR system of record. There is currently no such
+        path, and none may be added without a contract revision.
+      source: stated
+      check: sor:no_backend_write_calls
+      enforced_by: GAP   # no test asserts the absence of write calls
+
+  forbidden:
+    - id: SOR-F-01
+      rule: >
+        Recording an unverified counterparty claim as fact in the world model.
+        A claim is dialogue until a system-of-record signal confirms it.
+      source: repo
+      check: provenance:world_model_not_written_from_dialogue
+      enforced_by: >
+        PARTIAL. paid_claim correctly stays in dialogue
+        (loop/signal_ingestion.py:78-82), but a customer-stated dispute writes
+        world.status="disputed" directly (loop/signal_ingestion.py:73-75).
+        Needs an explicit ruling — see open_questions.
+
+    - id: SOR-F-02
+      rule: >
+        Creating a forward-looking payment commitment from a date that is
+        already in the past.
+      source: repo
+      check: provenance:no_backdated_commitment
+      enforced_by: loop/signal_ingestion.py:85-105
+
+    - id: SOR-F-03
+      rule: >
+        Storing a commitment without provenance, or defaulting provenance to
+        "customer" when the statement came from the PM.
+      source: repo
+      check: provenance:commitment_source_matches_speaker
+      enforced_by: GAP(suspected)   # Commitment.source defaults "customer"
+
+  escalate_on:
+    - id: SOR-E-01
+      rule: World model and dialogue contradict each other (e.g. claims paid, balance open).
+      source: repo
+      check: escalate:world_dialogue_conflict
+      enforced_by: domain/world_model.py:36 (conflicts_with_paid_claim; routing unverified)
+
+# =============================================================================
+# CROSS-CUTTING ENFORCEMENT RULES
+# =============================================================================
+enforcement_principles:
+  - id: ENF-01
+    rule: >
+      A FORBIDDEN clause may never be enforced by prompt text alone. Every
+      FORBIDDEN clause requires a deterministic code path that fails closed.
+    source: stated
+
+  - id: ENF-02
+    rule: >
+      Every FORBIDDEN and ESCALATE_ON clause requires a test that FAILS if the
+      guardrail is deleted.
+    source: stated
+
+  - id: ENF-03
+    rule: >
+      Safety-critical checks may not be waived by the LLM judge. The current
+      waivable/non-waivable split lives in adapters/llm_tools.py:34 and must be
+      kept in sync with this contract.
+    source: repo
+
+  - id: ENF-04
+    rule: >
+      Both send paths (loop/executor.py and loop/traced_loop.py) must enforce an
+      identical guardrail set. A guardrail present in one and absent in the
+      other is a contract violation.
+    source: stated       # confirmed by business owner 2026-09-03
+
+# =============================================================================
+# OPEN QUESTIONS FOR THE BUSINESS OWNER
+# =============================================================================
+# =============================================================================
+# OPEN QUESTIONS — all closed as of 2026-09-03. Kept as a decision log.
+# =============================================================================
+open_questions: []
+
+  # OQ-01 — CLOSED 2026-09-03: a customer-stated dispute is recorded as their
+  #   CLAIM, not as fact. The agent still stops chasing and escalates, and the
+  #   PM is notified by email.
+
+  # OQ-02 (disclosure scope) — CLOSED 2026-09-03: external customers only.
+  #   PMs are internal and are excluded.
+  # OQ-03 (who "reach a human" resolves to) — CLOSED 2026-09-03: no address is
+  #   published. The customer replies asking for a human; that reply triggers
+  #   CUST-E-09, which escalates and fires the existing PM notification.
+
+  # OQ-04 (dollar-threshold trigger) — CLOSED 2026-09-03: rejected. Escalation
+  # is driven by the policy page, not a hardcoded dollar rule. See POLICY-01.
