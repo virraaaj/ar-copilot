@@ -9,7 +9,8 @@ from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan,
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
 from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
-from app.outcome_agent.loop.guardrails import check_before_send
+from app.outcome_agent.loop.disclosure import append_disclosure, has_disclosure, is_customer_bound
+from app.outcome_agent.loop.guardrails import AgentGuardrailResult, check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
 from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
 from app.outcome_agent.loop.post_outcome import reflexion_note
@@ -171,28 +172,58 @@ async def run_case_loop(
         }
         used_safe_fallback = True
 
-    guard = check_before_send(
-        case,
-        final_draft,
-        now=now,
-        allowlist=policy.to_address_allowlist,
-        recipient=case.get("customer_email"),
-    )
-    if not guard.allowed:
-        trace = _trace(
-            case, trigger, state_before, state_before, cand_dicts, selected_d,
-            judgment, principles + ["P4"],
-            f"Guardrail blocked: {guard.reason}", context, now,
-            policies=guard.policies_checked,
-        )
-        await store.add_decision_trace(case["id"], trace)
-        return {"trace": trace, "blocked": True, "reason": guard.reason}
-
     # Execute
     tools = []
     ask_id = f"ask-{uuid4().hex[:8]}"
     wants_send = not (selected.kind == "escalate" or selected.tactic == "escalation_pack")
+    # Resolve the recipient BEFORE the guardrail check (fixed 2026-09-03):
+    # this used to call check_before_send(recipient=case.get("customer_email"))
+    # while the address actually used for sending -- resolved below via
+    # resolve_recipient() -- can be the PM's address for a PM-directed
+    # tactic. That meant the allowlist validated an address the message
+    # was never even going to, letting an off-allowlist PM send through
+    # unchecked. Mirrors the ordering already used in traced_loop.py:
+    # resolve the real recipient first, then guard on it. The guard is
+    # only invoked once we know we're actually about to send to a real,
+    # resolved address -- the "no known email" and planner-escalate paths
+    # below never send, so there's nothing for the allowlist to validate
+    # (and guardrails.check_before_send now fails closed on an
+    # unknown/empty recipient, so calling it here with recipient=None
+    # would wrongly block a legitimate escalation once an allowlist is
+    # configured).
     recipient = resolve_recipient(case, selected.tactic) if wants_send else None
+
+    # Customer disclosure (added 2026-09-03): appended here, deterministically
+    # in code, BEFORE the guardrail/language check below so the disclosure
+    # text itself is covered by check_message_language and so every copy of
+    # this draft (outbox, mailbox, real send, ledger) is identical -- an
+    # LLM prompt alone would eventually omit this, so it can never be the
+    # only mechanism. append_disclosure() is idempotent. PM-bound sends are
+    # untouched -- PMs are internal and already know an agent is running
+    # this.
+    if wants_send and is_customer_bound(case, selected.tactic):
+        final_draft = append_disclosure(final_draft)
+        selected_d["draft_text"] = final_draft
+
+    guard = AgentGuardrailResult(True, None, [])
+    if wants_send and recipient is not None:
+        guard = check_before_send(
+            case,
+            final_draft,
+            now=now,
+            allowlist=policy.to_address_allowlist,
+            recipient=recipient,
+        )
+        if not guard.allowed:
+            trace = _trace(
+                case, trigger, state_before, state_before, cand_dicts, selected_d,
+                judgment, principles + ["P4"],
+                f"Guardrail blocked: {guard.reason}", context, now,
+                policies=guard.policies_checked,
+            )
+            await store.add_decision_trace(case["id"], trace)
+            return {"trace": trace, "blocked": True, "reason": guard.reason}
+
     if wants_send and recipient is None:
         # resolve_recipient() returned None: the address for the party
         # this tactic is meant to reach (PM or customer, per case.target)
@@ -228,6 +259,25 @@ async def run_case_loop(
         principles.extend(["P11", "P3"])
         await send_escalation_notice(case, mailbox, ledger)
     else:
+        # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
+        # already appended above for every customer-bound draft, but this
+        # is the last check before the actual send calls below -- if some
+        # future change to this function (or a code path that mutates
+        # final_draft after the block above) ever drops the disclosure off
+        # a customer-bound body, we must not silently send it as if a
+        # person wrote it. This blocks the same way the allowlist guard
+        # above does, rather than only appending-and-hoping.
+        if is_customer_bound(case, selected.tactic) and not has_disclosure(final_draft):
+            trace = _trace(
+                case, trigger, state_before, state_before, cand_dicts, selected_d,
+                judgment, principles + ["P4"],
+                "Guardrail blocked: customer-bound draft missing automated-assistant disclosure",
+                context, now,
+                policies=(guard.policies_checked or []) + ["disclosure_check"],
+            )
+            await store.add_decision_trace(case["id"], trace)
+            return {"trace": trace, "blocked": True, "reason": "customer-bound draft missing disclosure"}
+
         outbox_meta: Dict[str, Any] = {"tactic": selected.tactic, "ask_id": ask_id}
         if used_safe_fallback:
             outbox_meta["human_review"] = True

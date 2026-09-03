@@ -48,6 +48,7 @@ def can_transition(from_state: str, event: str) -> bool:
         "resume",
         "suppress",
         "dispute",
+        "hostile",
     )
 
 
@@ -63,6 +64,20 @@ def transition(from_state: str, event: str) -> str:
         return CaseState.SUPPRESSED.value
     if event == "dispute":
         return CaseState.DISPUTED.value
+    if event == "hostile":
+        # Fixed 2026-09-03: a hostile reply ("this is ridiculous", "we'll sue")
+        # previously had no branch in signal_ingestion, fell through to the
+        # generic customer_responded state, and choose_objective's default
+        # establish_contact path then offered polite_outreach/soft_nudge/
+        # firm_reminder -- i.e. the agent answered hostility with another
+        # chase email. Route straight to escalation_required (the same state
+        # budget-exhaustion uses) so choose_objective's existing
+        # `state in ("escalation_required", ...)` branch (goals.py) hands
+        # off to a human via escalate_handoff/escalation_pack instead of
+        # continuing to chase. Unlike "dispute" this does not go to the
+        # terminal DISPUTED state -- hostility isn't a claim about the
+        # invoice being wrong, just a signal that a human needs to take over.
+        return CaseState.ESCALATION_REQUIRED.value
     if event == "resume":
         if from_state == CaseState.PAUSED.value:
             return CaseState.OUTREACH_READY.value

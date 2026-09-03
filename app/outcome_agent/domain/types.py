@@ -143,9 +143,13 @@ class AutonomyBudget:
         return max(0, self.max_missed_promises - self.misses_used)
 
     def exhausted(self) -> bool:
+        # 2026-09-03: postponements_used/max_postponements were tracked (see
+        # consume_postponement) but never checked here, so a customer could
+        # postpone indefinitely and the agent would never escalate.
         return (
             self.unanswered_used >= self.max_unanswered
             or self.misses_used >= self.max_missed_promises
+            or self.postponements_used >= self.max_postponements
         )
 
     def to_dict(self) -> Dict[str, Any]:

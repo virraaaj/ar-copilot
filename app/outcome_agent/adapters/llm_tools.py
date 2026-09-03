@@ -362,7 +362,7 @@ _REPLY_TYPE_REMAP = {
 }
 _KNOWN_REPLY_TYPES = (
     "payment_date", "blocker", "checkback", "dispute", "paid_claim",
-    "vague", "unsubscribe", "hostile", "unknown",
+    "vague", "unsubscribe", "hostile", "handoff", "unknown",
 )
 
 

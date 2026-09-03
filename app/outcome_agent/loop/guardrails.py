@@ -69,7 +69,16 @@ def check_before_send(
         return AgentGuardrailResult(False, f"draft contains an unfilled placeholder: {m.group(0)}", checked)
 
     checked.append("allowlist")
-    if allowlist and recipient and recipient.lower() not in allowlist:
+    # Fail closed (fixed 2026-09-03): this used to be
+    # `if allowlist and recipient and recipient.lower() not in allowlist`,
+    # so a configured allowlist with an unknown/empty recipient short-
+    # circuited the whole condition and let the send through completely
+    # unchecked. On the automatic/unattended send path (executor.py)
+    # `customer_email` is commonly empty for a case's first PM-directed
+    # contact -- exactly when this fence matters most. An allowlist that
+    # is configured must block an unresolved recipient, not silently wave
+    # it through.
+    if allowlist and (not recipient or recipient.lower() not in allowlist):
         return AgentGuardrailResult(False, "recipient not on allowlist", checked)
 
     return AgentGuardrailResult(True, None, checked)

@@ -15,6 +15,12 @@ class DialogueSnapshot:
     last_ask_tactic: Optional[str] = None
     open_questions: List[str] = field(default_factory=list)
     customer_claimed_paid: bool = False
+    # Fixed 2026-09-03 (Change 2, apply_reply_signal dispute branch): a
+    # dispute reply is the customer's CLAIM, not a world-truth fact -- this
+    # mirrors customer_claimed_paid (which never writes world.status =
+    # "paid") instead of writing world.status = "disputed" straight from an
+    # unverified customer message (see world_model.py:1, P1).
+    customer_claimed_disputed: bool = False
     customer_promised_date: Optional[str] = None
     interpretation_confidence: float = 1.0
     awaiting_interpretation: bool = False
@@ -43,6 +49,7 @@ class DialogueSnapshot:
             last_ask_tactic=data.get("last_ask_tactic"),
             open_questions=list(data.get("open_questions") or []),
             customer_claimed_paid=bool(data.get("customer_claimed_paid", False)),
+            customer_claimed_disputed=bool(data.get("customer_claimed_disputed", False)),
             customer_promised_date=data.get("customer_promised_date"),
             interpretation_confidence=float(data.get("interpretation_confidence", 1.0)),
             awaiting_interpretation=bool(data.get("awaiting_interpretation", False)),
