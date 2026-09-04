@@ -236,3 +236,50 @@ async def test_log_response_event_uses_real_schema_field_names(client: BackendCl
     assert b"response_category" not in sent_body
     assert b"raw_text" not in sent_body
     await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_aging_table_paginates_past_the_5000_row_server_cap(client: BackendClient) -> None:
+    """Regression test, fixed 2026-09-04: the real endpoint caps its `limit`
+    query param at 5000 (le=5000 server-side) and returns 200 either way, so
+    a book bigger than one page used to truncate silently -- no exception,
+    nothing to signal it. list_aging_table must now keep requesting
+    successive `skip` pages until a short page comes back."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+
+    page_size = 3  # small so the test doesn't need to build 5000+ rows
+    all_rows = [{"invoice_number": f"INV-{i}", "open_amount": i} for i in range(7)]  # 3 + 3 + 1
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        skip = int(params.get("skip", 0))
+        limit = int(params.get("limit", page_size))
+        page = all_rows[skip : skip + limit]
+        return httpx.Response(200, json=page)
+
+    route = respx.get(f"{BASE}/api/v1/dunning/aging-table").mock(side_effect=responder)
+
+    rows = await client.list_aging_table(limit=page_size)
+
+    assert rows == all_rows
+    assert route.call_count == 3  # skip=0, skip=3, skip=6 (short page ends it)
+    requested_skips = sorted(int(dict(c.request.url.params).get("skip", 0)) for c in route.calls)
+    assert requested_skips == [0, 3, 6]
+    await client.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_aging_table_single_short_page_makes_one_request(client: BackendClient) -> None:
+    """The common case (a book that fits in one page) must not send a
+    needless second request."""
+    respx.post(f"{BASE}/api/v1/auth/login").mock(return_value=httpx.Response(200, json={"access_token": "tok"}))
+    rows_page = [{"invoice_number": "INV-1", "open_amount": 100}]
+    route = respx.get(f"{BASE}/api/v1/dunning/aging-table").mock(return_value=httpx.Response(200, json=rows_page))
+
+    rows = await client.list_aging_table()
+
+    assert rows == rows_page
+    assert route.call_count == 1
+    await client.close()

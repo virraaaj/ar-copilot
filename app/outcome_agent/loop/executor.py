@@ -9,6 +9,7 @@ from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan,
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
 from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
+from app.outcome_agent.loop.concurrency_guard import get_case_lock, guarded_case_update
 from app.outcome_agent.loop.disclosure import append_disclosure, has_disclosure, is_customer_bound
 from app.outcome_agent.loop.guardrails import AgentGuardrailResult, check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
@@ -205,179 +206,206 @@ async def run_case_loop(
         final_draft = append_disclosure(final_draft)
         selected_d["draft_text"] = final_draft
 
-    guard = AgentGuardrailResult(True, None, [])
-    if wants_send and recipient is not None:
-        guard = check_before_send(
-            case,
-            final_draft,
-            now=now,
-            allowlist=policy.to_address_allowlist,
-            recipient=recipient,
-        )
-        if not guard.allowed:
-            trace = _trace(
-                case, trigger, state_before, state_before, cand_dicts, selected_d,
-                judgment, principles + ["P4"],
-                f"Guardrail blocked: {guard.reason}", context, now,
-                policies=guard.policies_checked,
-            )
-            await store.add_decision_trace(case["id"], trace)
-            return {"trace": trace, "blocked": True, "reason": guard.reason}
+    # Hold the per-case lock across guard -> send -> persist only
+    # (added 2026-09-04): this is the tail that actually decides "send or
+    # not" and writes the outcome back to the DB. It must NOT wrap the
+    # plan/draft/judge LLM calls above -- those take seconds and an aging
+    # upload marking this case paid must never block behind them. The
+    # registry is shared with traced_loop.py (concurrency_guard.py) so
+    # the tick/poller path and the manual-follow-up/reply path serialize
+    # against EACH OTHER on the same case, not just against themselves.
+    lock = get_case_lock(case["id"])
+    async with lock:
+        guard = AgentGuardrailResult(True, None, [])
+        if wants_send and recipient is not None:
+            # Re-read the case immediately before the guard (added 2026-09-04):
+            # everything above this point -- effective_policy, context build,
+            # and especially the plan/draft/judge LLM calls -- has awaited
+            # repeatedly since `case` was first fetched by the caller. A
+            # concurrent AR-aging upload (sync_invoices_to_cases) can mark this
+            # case paid and closed during that window; check_before_send()'s
+            # paid/opt-out checks must see that current DB state, not the
+            # stale in-memory `case` this function was called with. recipient
+            # and the allowlist are unaffected -- those were resolved above
+            # from the (still-valid) case identity/tactic, not from anything
+            # that can go stale this way.
+            fresh = await store.get(case["id"])
+            if fresh is None:
+                # Row vanished entirely (e.g. a demo reset raced this tick) --
+                # treat exactly like a failed guard: do not send.
+                guard = AgentGuardrailResult(False, "case no longer exists in store", ["existence_check"])
+            else:
+                guard = check_before_send(
+                    fresh,
+                    final_draft,
+                    now=now,
+                    allowlist=policy.to_address_allowlist,
+                    recipient=recipient,
+                )
+            if not guard.allowed:
+                trace = _trace(
+                    case, trigger, state_before, state_before, cand_dicts, selected_d,
+                    judgment, principles + ["P4"],
+                    f"Guardrail blocked: {guard.reason}", context, now,
+                    policies=guard.policies_checked,
+                )
+                await store.add_decision_trace(case["id"], trace)
+                return {"trace": trace, "blocked": True, "reason": guard.reason}
 
-    if wants_send and recipient is None:
-        # resolve_recipient() returned None: the address for the party
-        # this tactic is meant to reach (PM or customer, per case.target)
-        # isn't actually known. Escalate instead of falling back to a
-        # placeholder or the OTHER party's address -- found 2026-08-18 via
-        # user review: never guess who to email.
-        who = "PM" if (case.get("target") == "pm" or selected.tactic in PM_DIRECTED_TACTICS) else "customer"
-        pack = EscalationPack(
-            reason=f"No known {who} email on file — cannot send tactic={selected.tactic}",
-            evidence=[f"tactic={selected.tactic}", f"target={case.get('target')}"],
-            recommended_human_move=f"Add a {who} contact email to this case, then resume",
-            case_id=case.get("case_id") or "",
-            invoice_no=case.get("invoice_no") or "",
-        )
-        case["state"] = "escalated_to_human"
-        case["escalation"] = pack.to_dict()
-        case["next_action_at"] = None
-        tools.append("escalation_pack")
-        principles.extend(["P11", "P3"])
-        await send_escalation_notice(case, mailbox, ledger)
-    elif selected.kind == "escalate" or selected.tactic == "escalation_pack":
-        pack = EscalationPack(
-            reason="Planner selected escalation handoff",
-            evidence=[f"tactic={selected.tactic}", f"score={selected.score}"],
-            recommended_human_move="Owner call + payment plan options",
-            case_id=case.get("case_id") or "",
-            invoice_no=case.get("invoice_no") or "",
-        )
-        case["state"] = "escalated_to_human"
-        case["escalation"] = pack.to_dict()
-        case["next_action_at"] = None
-        tools.append("escalation_pack")
-        principles.extend(["P11", "P3"])
-        await send_escalation_notice(case, mailbox, ledger)
-    else:
-        # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
-        # already appended above for every customer-bound draft, but this
-        # is the last check before the actual send calls below -- if some
-        # future change to this function (or a code path that mutates
-        # final_draft after the block above) ever drops the disclosure off
-        # a customer-bound body, we must not silently send it as if a
-        # person wrote it. This blocks the same way the allowlist guard
-        # above does, rather than only appending-and-hoping.
-        if is_customer_bound(case, selected.tactic) and not has_disclosure(final_draft):
-            trace = _trace(
-                case, trigger, state_before, state_before, cand_dicts, selected_d,
-                judgment, principles + ["P4"],
-                "Guardrail blocked: customer-bound draft missing automated-assistant disclosure",
-                context, now,
-                policies=(guard.policies_checked or []) + ["disclosure_check"],
+        if wants_send and recipient is None:
+            # resolve_recipient() returned None: the address for the party
+            # this tactic is meant to reach (PM or customer, per case.target)
+            # isn't actually known. Escalate instead of falling back to a
+            # placeholder or the OTHER party's address -- found 2026-08-18 via
+            # user review: never guess who to email.
+            who = "PM" if (case.get("target") == "pm" or selected.tactic in PM_DIRECTED_TACTICS) else "customer"
+            pack = EscalationPack(
+                reason=f"No known {who} email on file — cannot send tactic={selected.tactic}",
+                evidence=[f"tactic={selected.tactic}", f"target={case.get('target')}"],
+                recommended_human_move=f"Add a {who} contact email to this case, then resume",
+                case_id=case.get("case_id") or "",
+                invoice_no=case.get("invoice_no") or "",
             )
-            await store.add_decision_trace(case["id"], trace)
-            return {"trace": trace, "blocked": True, "reason": "customer-bound draft missing disclosure"}
+            case["state"] = "escalated_to_human"
+            case["escalation"] = pack.to_dict()
+            case["next_action_at"] = None
+            tools.append("escalation_pack")
+            principles.extend(["P11", "P3"])
+            await send_escalation_notice(case, mailbox, ledger)
+        elif selected.kind == "escalate" or selected.tactic == "escalation_pack":
+            pack = EscalationPack(
+                reason="Planner selected escalation handoff",
+                evidence=[f"tactic={selected.tactic}", f"score={selected.score}"],
+                recommended_human_move="Owner call + payment plan options",
+                case_id=case.get("case_id") or "",
+                invoice_no=case.get("invoice_no") or "",
+            )
+            case["state"] = "escalated_to_human"
+            case["escalation"] = pack.to_dict()
+            case["next_action_at"] = None
+            tools.append("escalation_pack")
+            principles.extend(["P11", "P3"])
+            await send_escalation_notice(case, mailbox, ledger)
+        else:
+            # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
+            # already appended above for every customer-bound draft, but this
+            # is the last check before the actual send calls below -- if some
+            # future change to this function (or a code path that mutates
+            # final_draft after the block above) ever drops the disclosure off
+            # a customer-bound body, we must not silently send it as if a
+            # person wrote it. This blocks the same way the allowlist guard
+            # above does, rather than only appending-and-hoping.
+            if is_customer_bound(case, selected.tactic) and not has_disclosure(final_draft):
+                trace = _trace(
+                    case, trigger, state_before, state_before, cand_dicts, selected_d,
+                    judgment, principles + ["P4"],
+                    "Guardrail blocked: customer-bound draft missing automated-assistant disclosure",
+                    context, now,
+                    policies=(guard.policies_checked or []) + ["disclosure_check"],
+                )
+                await store.add_decision_trace(case["id"], trace)
+                return {"trace": trace, "blocked": True, "reason": "customer-bound draft missing disclosure"}
 
-        outbox_meta: Dict[str, Any] = {"tactic": selected.tactic, "ask_id": ask_id}
-        if used_safe_fallback:
-            outbox_meta["human_review"] = True
-            outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
-        await store.add_outbox(
-            case["id"],
-            final_draft,
-            channel="email",
-            recipient=recipient,
-            subject=subject,
-            meta=outbox_meta,
-        )
-        tools.append("outbox")
-        # Mirror into the shared Mailbox (added 2026-08-03): run_case_loop
-        # (the tick/poller path) previously only wrote to the case's own
-        # oa_outbox, so anything the poller sent never appeared on the
-        # Mailbox tab -- only outreach sent via the traced run-follow-up
-        # loop did. Both paths now write to the same place.
-        mailbox_id = None
-        if mailbox is not None:
-            thread_id = case.get("subject_token") or case["id"]
-            msg = await mailbox.send(
-                case_id=case["id"],
-                thread_id=thread_id,
-                to_addr=recipient,
-                from_addr="ar-agent@local.mailbox",
+            outbox_meta: Dict[str, Any] = {"tactic": selected.tactic, "ask_id": ask_id}
+            if used_safe_fallback:
+                outbox_meta["human_review"] = True
+                outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
+            await store.add_outbox(
+                case["id"],
+                final_draft,
+                channel="email",
+                recipient=recipient,
                 subject=subject,
-                body=final_draft,
-                headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
+                meta=outbox_meta,
             )
-            mailbox_id = msg["id"]
-            tools.append("mailbox")
-        # Real send (added 2026-08-04): same wiring as traced_loop.py --
-        # get_email_sender() returns GraphEmailSender the moment
-        # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
-        from app.services.email_sender import get_email_sender
+            tools.append("outbox")
+            # Mirror into the shared Mailbox (added 2026-08-03): run_case_loop
+            # (the tick/poller path) previously only wrote to the case's own
+            # oa_outbox, so anything the poller sent never appeared on the
+            # Mailbox tab -- only outreach sent via the traced run-follow-up
+            # loop did. Both paths now write to the same place.
+            mailbox_id = None
+            if mailbox is not None:
+                thread_id = case.get("subject_token") or case["id"]
+                msg = await mailbox.send(
+                    case_id=case["id"],
+                    thread_id=thread_id,
+                    to_addr=recipient,
+                    from_addr="ar-agent@local.mailbox",
+                    subject=subject,
+                    body=final_draft,
+                    headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
+                )
+                mailbox_id = msg["id"]
+                tools.append("mailbox")
+            # Real send (added 2026-08-04): same wiring as traced_loop.py --
+            # get_email_sender() returns GraphEmailSender the moment
+            # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
+            from app.services.email_sender import get_email_sender
 
-        try:
-            real_send_result = await get_email_sender().send(recipient, subject, f"<p>{final_draft}</p>", [])
-            tools.append("email")
-        except Exception as exc:  # noqa: BLE001
-            real_send_result = {"success": False, "error": str(exc)}
-        await ledger.append(
-            case["id"],
-            "outreach_sent",
-            {
-                "body": final_draft,
-                "recipient": recipient,
-                "tactic": selected.tactic,
-                "ask_id": ask_id,
-                "mailbox_id": mailbox_id,
-                "real_send": real_send_result,
-                **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
-            },
-            at=now.isoformat(),
-            principles=["P4", "P12"],
+            try:
+                real_send_result = await get_email_sender().send(recipient, subject, f"<p>{final_draft}</p>", [])
+                tools.append("email")
+            except Exception as exc:  # noqa: BLE001
+                real_send_result = {"success": False, "error": str(exc)}
+            await ledger.append(
+                case["id"],
+                "outreach_sent",
+                {
+                    "body": final_draft,
+                    "recipient": recipient,
+                    "tactic": selected.tactic,
+                    "ask_id": ask_id,
+                    "mailbox_id": mailbox_id,
+                    "real_send": real_send_result,
+                    **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
+                },
+                at=now.isoformat(),
+                principles=["P4", "P12"],
+            )
+            consume_unanswered(budget)
+            case["budget"] = budget.to_dict()
+            dialogue = dict(case.get("dialogue") or {})
+            dialogue["latest_outbound"] = final_draft
+            dialogue["last_ask_id"] = ask_id
+            dialogue["last_ask_tactic"] = selected.tactic
+            case["dialogue"] = dialogue
+            case["last_outreach_at"] = now.isoformat()
+            # State after outreach
+            if selected.objective == "verify_payment":
+                case["state"] = "waiting_for_customer"
+                principles.append("P1")
+            elif selected.objective == "clarify_date":
+                case["state"] = "waiting_for_customer"
+                principles.append("P7")
+            elif case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due"):
+                case["state"] = "waiting_for_customer"
+            case["next_action_at"] = (now + timedelta(days=policy.nudge_interval_days)).isoformat()
+            if budget.exhausted():
+                case["state"] = "escalation_required"
+                principles.append("P3")
+
+        goals = GoalStack.from_dict(context.get("goal_stack"))
+        goals.selected_tactic = selected.tactic
+        goals.current_objective = selected.objective
+        case["goals"] = goals.to_dict()
+
+        note = reflexion_note(case)
+        if note:
+            principles.append("P13")
+
+        if regenerated:
+            principles.append("P4")
+
+        state_after = case.get("state")
+        trace = _trace(
+            case, trigger, state_before, state_after, cand_dicts, selected_d,
+            judgment, sorted(set(principles)),
+            f"Selected {selected.tactic} ({selected.objective}) score={selected.score}",
+            context, now, policies=guard.policies_checked, tools=tools, reflexion=note,
         )
-        consume_unanswered(budget)
-        case["budget"] = budget.to_dict()
-        dialogue = dict(case.get("dialogue") or {})
-        dialogue["latest_outbound"] = final_draft
-        dialogue["last_ask_id"] = ask_id
-        dialogue["last_ask_tactic"] = selected.tactic
-        case["dialogue"] = dialogue
-        case["last_outreach_at"] = now.isoformat()
-        # State after outreach
-        if selected.objective == "verify_payment":
-            case["state"] = "waiting_for_customer"
-            principles.append("P1")
-        elif selected.objective == "clarify_date":
-            case["state"] = "waiting_for_customer"
-            principles.append("P7")
-        elif case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due"):
-            case["state"] = "waiting_for_customer"
-        case["next_action_at"] = (now + timedelta(days=policy.nudge_interval_days)).isoformat()
-        if budget.exhausted():
-            case["state"] = "escalation_required"
-            principles.append("P3")
-
-    goals = GoalStack.from_dict(context.get("goal_stack"))
-    goals.selected_tactic = selected.tactic
-    goals.current_objective = selected.objective
-    case["goals"] = goals.to_dict()
-
-    note = reflexion_note(case)
-    if note:
-        principles.append("P13")
-
-    if regenerated:
-        principles.append("P4")
-
-    state_after = case.get("state")
-    trace = _trace(
-        case, trigger, state_before, state_after, cand_dicts, selected_d,
-        judgment, sorted(set(principles)),
-        f"Selected {selected.tactic} ({selected.objective}) score={selected.score}",
-        context, now, policies=guard.policies_checked, tools=tools, reflexion=note,
-    )
-    await _persist(store, ledger, case, trace, sorted(set(principles)))
-    return {"trace": trace, "case": case}
+        await _persist(store, ledger, case, trace, sorted(set(principles)))
+        return {"trace": trace, "case": case}
 
 
 def _trace(
@@ -411,8 +439,20 @@ def _trace(
 
 
 async def _persist(store, ledger, case, trace, principles) -> None:
-    await store.update(
-        case["id"],
+    # Terminal-state guard (added 2026-09-04): `case` here can be the same
+    # stale in-memory dict that was already the subject of the race this
+    # module now guards against above -- a concurrent AR-aging upload can
+    # have paid-and-closed this case in the DB while the plan/draft/judge
+    # LLM calls above were in flight. Without this, the plain
+    # `store.update(state=case.get("state"), ...)` below would blindly
+    # overwrite the DB's terminal state/world/next_action_at with this
+    # stale copy, un-closing a case that was just correctly closed.
+    # guarded_case_update() re-reads the DB and drops just those three
+    # fields when that's detected; everything else here (decision trace +
+    # ledger entry) still runs so the tick stays fully auditable.
+    await guarded_case_update(
+        store,
+        case,
         state=case.get("state"),
         world=case.get("world"),
         dialogue=case.get("dialogue"),

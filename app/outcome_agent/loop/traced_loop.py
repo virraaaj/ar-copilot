@@ -9,8 +9,9 @@ from app.outcome_agent.adapters.llm_tools import llm_draft, llm_judge, llm_plan,
 from app.outcome_agent.domain.budgets import consume_unanswered, hard_stop_reason
 from app.outcome_agent.domain.types import AutonomyBudget, EscalationPack, GoalStack
 from app.outcome_agent.loop.communication import DEFAULT_GENERATOR, PM_DIRECTED_TACTICS, resolve_recipient
+from app.outcome_agent.loop.concurrency_guard import get_case_lock, guarded_case_update
 from app.outcome_agent.loop.disclosure import append_disclosure, has_disclosure, is_customer_bound
-from app.outcome_agent.loop.guardrails import check_before_send
+from app.outcome_agent.loop.guardrails import AgentGuardrailResult, check_before_send
 from app.outcome_agent.loop.next_best_action import plan_next_action
 from app.outcome_agent.loop.notifications import send_escalation_notice, send_payment_notice
 from app.outcome_agent.loop.post_outcome import reflexion_note
@@ -204,7 +205,13 @@ async def run_traced_follow_up(
             case["escalation"] = pack.to_dict()
             case["next_action_at"] = None
             bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
-        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        # Terminal-state guard (added 2026-09-04): a concurrent AR-aging
+        # upload can have paid-and-closed this case in the DB during the
+        # LLM plan/draft calls above -- guarded_case_update() re-reads the
+        # DB first and drops state/world/next_action_at from this write if
+        # so, instead of blindly overwriting the DB's closure with this
+        # escalation branch's stale-relative-to-now state.
+        await guarded_case_update(store, case, state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
         await send_escalation_notice(case, mailbox, ledger)
         await traces.finish_run(run_id, "ok", "escalated")
         return {"run_id": run_id, "escalated": True, "case": case}
@@ -262,7 +269,13 @@ async def run_traced_follow_up(
             case["escalation"] = pack.to_dict()
             case["next_action_at"] = None
             bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
-        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        # Terminal-state guard (added 2026-09-04): a concurrent AR-aging
+        # upload can have paid-and-closed this case in the DB during the
+        # LLM plan/draft calls above -- guarded_case_update() re-reads the
+        # DB first and drops state/world/next_action_at from this write if
+        # so, instead of blindly overwriting the DB's closure with this
+        # escalation branch's stale-relative-to-now state.
+        await guarded_case_update(store, case, state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
         await send_escalation_notice(case, mailbox, ledger)
         await traces.finish_run(run_id, "ok", "escalated: planner selected escalation handoff")
         return {"run_id": run_id, "escalated": True, "case": case}
@@ -358,7 +371,13 @@ async def run_traced_follow_up(
             case["escalation"] = pack.to_dict()
             case["next_action_at"] = None
             bag["writes"].append(io("case", "escalation", pack.reason, pack.to_dict()))
-        await store.update(case["id"], state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
+        # Terminal-state guard (added 2026-09-04): a concurrent AR-aging
+        # upload can have paid-and-closed this case in the DB during the
+        # LLM plan/draft calls above -- guarded_case_update() re-reads the
+        # DB first and drops state/world/next_action_at from this write if
+        # so, instead of blindly overwriting the DB's closure with this
+        # escalation branch's stale-relative-to-now state.
+        await guarded_case_update(store, case, state=case["state"], escalation=case["escalation"], next_action_at=None, dialogue=case.get("dialogue"), commitments=case.get("commitments"), blockers=case.get("blockers"), target=case.get("target"), customer_email=case.get("customer_email"), customer_name=case.get("customer_name"))
         await send_escalation_notice(case, mailbox, ledger)
         await traces.finish_run(run_id, "ok", "escalated: no known recipient")
         return {"run_id": run_id, "escalated": True, "case": case}
@@ -372,179 +391,208 @@ async def run_traced_follow_up(
     if is_customer_bound(case, selected.tactic):
         body = append_disclosure(body)
 
-    # Guardrails
-    s = await next_seq()
-    guard = None
-    async with traces.step(run_id, s, "guardrails", "Policy guardrails before send", principles=["P4"]) as bag:
-        guard = check_before_send(
-            case,
-            body,
-            now=now,
-            allowlist=policy.to_address_allowlist,
-            recipient=recipient,
-        )
-        bag["reads"].append(io("policy", "guard", "allowed" if guard.allowed else guard.reason, {"allowed": guard.allowed, "checked": guard.policies_checked}))
-        if not guard.allowed:
-            bag["status"] = "skipped"
-    if guard and not guard.allowed:
-        await traces.finish_run(run_id, "ok", f"guard blocked: {guard.reason}")
-        return {"run_id": run_id, "blocked": True, "reason": guard.reason, "case": case}
+    # Hold the per-case lock across guard -> send -> persist only
+    # (added 2026-09-04): mirrors executor.py's matching lock -- shared
+    # registry (concurrency_guard.py) so the tick/poller path and this
+    # manual-follow-up/reply path serialize against EACH OTHER on the
+    # same case. Deliberately does NOT wrap the signal/memory reads or
+    # plan/draft/judge LLM calls above -- those must never block behind
+    # another in-flight send for this case.
+    lock = get_case_lock(case["id"])
+    async with lock:
+        # Guardrails
+        s = await next_seq()
+        guard = None
+        async with traces.step(run_id, s, "guardrails", "Policy guardrails before send", principles=["P4"]) as bag:
+            # Re-read the case immediately before the guard (added 2026-09-04):
+            # by this point the run has awaited through signal ingestion,
+            # several memory reads, and the plan/draft/judge LLM calls --
+            # plenty of yield points for a concurrent AR-aging upload to have
+            # marked this case paid and closed. check_before_send() must see
+            # that current DB state, not the stale `case` this function has
+            # been carrying since its own fetch at the top. recipient/
+            # allowlist are unaffected -- resolved above from case identity/
+            # tactic, which don't go stale this way.
+            fresh = await store.get(case["id"])
+            if fresh is None:
+                # Row vanished entirely -- treat like a failed guard: no send.
+                guard = AgentGuardrailResult(False, "case no longer exists in store", ["existence_check"])
+            else:
+                guard = check_before_send(
+                    fresh,
+                    body,
+                    now=now,
+                    allowlist=policy.to_address_allowlist,
+                    recipient=recipient,
+                )
+            bag["reads"].append(io("policy", "guard", "allowed" if guard.allowed else guard.reason, {"allowed": guard.allowed, "checked": guard.policies_checked}))
+            if not guard.allowed:
+                bag["status"] = "skipped"
+        if guard and not guard.allowed:
+            await traces.finish_run(run_id, "ok", f"guard blocked: {guard.reason}")
+            return {"run_id": run_id, "blocked": True, "reason": guard.reason, "case": case}
 
-    # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
-    # already appended above for every customer-bound draft, but this is
-    # the last check before the actual send below -- if some future change
-    # to this function ever drops the disclosure off a customer-bound body,
-    # we must not silently send it as if a person wrote it. Mirrors the
-    # matching gate in executor.py (same date).
-    if is_customer_bound(case, selected.tactic) and not has_disclosure(body):
-        await traces.finish_run(run_id, "ok", "blocked: customer-bound draft missing disclosure")
-        return {
-            "run_id": run_id,
-            "blocked": True,
-            "reason": "customer-bound draft missing disclosure",
-            "case": case,
-        }
+        # Fail-closed disclosure gate (added 2026-09-03): the disclosure is
+        # already appended above for every customer-bound draft, but this is
+        # the last check before the actual send below -- if some future change
+        # to this function ever drops the disclosure off a customer-bound body,
+        # we must not silently send it as if a person wrote it. Mirrors the
+        # matching gate in executor.py (same date).
+        if is_customer_bound(case, selected.tactic) and not has_disclosure(body):
+            await traces.finish_run(run_id, "ok", "blocked: customer-bound draft missing disclosure")
+            return {
+                "run_id": run_id,
+                "blocked": True,
+                "reason": "customer-bound draft missing disclosure",
+                "case": case,
+            }
 
-    # Send mail
-    state_before = case.get("state")
-    ask_id = f"ask-{uuid4().hex[:8]}"
-    from_addr = "ar-agent@local.mailbox"
-    thread_id = case.get("subject_token") or case["id"]
+        # Send mail
+        state_before = case.get("state")
+        ask_id = f"ask-{uuid4().hex[:8]}"
+        from_addr = "ar-agent@local.mailbox"
+        thread_id = case.get("subject_token") or case["id"]
 
-    s = await next_seq()
-    msg: Dict[str, Any] = {}
-    real_send_result: Optional[Dict[str, Any]] = None
-    async with traces.step(run_id, s, "mail.send", "Send email to local mailbox", principles=["P2", "P12"]) as bag:
-        msg = await mailbox.send(
-            case_id=case["id"],
-            thread_id=thread_id,
-            to_addr=recipient,
-            from_addr=from_addr,
-            subject=subject,
-            body=body,
-            headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
-        )
-        outbox_meta: Dict[str, Any] = {"ask_id": ask_id, "mailbox_id": msg["id"], "tactic": selected.tactic}
-        if used_safe_fallback:
-            outbox_meta["human_review"] = True
-            outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
-        await store.add_outbox(
-            case["id"],
-            body,
-            channel="email",
-            recipient=recipient,
-            subject=subject,
-            meta=outbox_meta,
-        )
-        bag["writes"].append(io("mailbox", msg["id"], f"to {recipient}", msg))
-        # Real send: mirrors master's chase_engine.py wiring --
-        # get_email_sender() returns GraphEmailSender the moment
-        # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
-        from app.services.email_sender import get_email_sender
-
-        try:
-            real_send_result = await get_email_sender().send(recipient, subject, f"<p>{body}</p>", [])
-            bag["writes"].append(io("email", recipient, real_send_result.get("provider", "email"), real_send_result))
-        except Exception as exc:  # noqa: BLE001
-            real_send_result = {"success": False, "error": str(exc)}
-            bag["writes"].append(io("email", recipient, "real send failed", real_send_result))
-        await ledger.append(
-            case["id"],
-            "outreach_sent",
-            {
-                "body": body,
-                "subject": subject,
-                "recipient": recipient,
-                "mailbox_id": msg["id"],
-                "ask_id": ask_id,
-                "real_send": real_send_result,
-                **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
-            },
-            at=now.isoformat(),
-            principles=["P4", "P12"],
-        )
-
-    # Memory / graph writes
-    s = await next_seq()
-    async with traces.step(run_id, s, "memory.write", "Write operational + semantic memory", principles=["P6", "P13"]) as bag:
-        consume_unanswered(budget)
-        case["budget"] = budget.to_dict()
-        dialogue = dict(case.get("dialogue") or {})
-        dialogue["latest_outbound"] = body
-        dialogue["last_ask_id"] = ask_id
-        dialogue["last_ask_tactic"] = selected.tactic
-        case["dialogue"] = dialogue
-        case["last_outreach_at"] = now.isoformat()
-        # "blocked" deliberately excluded (found via mass conversation
-        # testing, 2026-08-04): this used to reset a just-classified
-        # blocker straight back to waiting_for_customer the moment the
-        # blocker_ack email was sent, so the blocker only "existed" for
-        # the duration of this one function call -- by the next turn it
-        # was gone, and the no-firm-tactics-while-blocked protection no
-        # longer applied. A blocker should stay open until the customer
-        # actually resolves it (apply_reply_signal's payment_date branch
-        # already closes it correctly when that happens).
-        if case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due"):
-            if case.get("state") != "promise_to_pay":
-                case["state"] = "waiting_for_customer"
-        case["next_action_at"] = (now + timedelta(days=policy.nudge_interval_days)).isoformat()
-        goals = GoalStack.from_dict(context.get("goal_stack") or {})
-        goals.selected_tactic = selected.tactic
-        goals.current_objective = selected.objective
-        case["goals"] = goals.to_dict()
-        note = reflexion_note(case)
-        fact = await facts.upsert(case["id"], "outreach", "last_ask_tactic", selected.tactic, confidence=1.0)
-        bag["writes"].append(io("semantic", fact["key"], selected.tactic, fact))
-        bag["writes"].append(
-            io(
-                "case",
-                "state",
-                f"{state_before} -> {case.get('state')}",
-                {"before": state_before, "after": case.get("state"), "reflexion": note},
+        s = await next_seq()
+        msg: Dict[str, Any] = {}
+        real_send_result: Optional[Dict[str, Any]] = None
+        async with traces.step(run_id, s, "mail.send", "Send email to local mailbox", principles=["P2", "P12"]) as bag:
+            msg = await mailbox.send(
+                case_id=case["id"],
+                thread_id=thread_id,
+                to_addr=recipient,
+                from_addr=from_addr,
+                subject=subject,
+                body=body,
+                headers={"X-Ask-Id": ask_id, "X-Tactic": selected.tactic},
             )
-        )
+            outbox_meta: Dict[str, Any] = {"ask_id": ask_id, "mailbox_id": msg["id"], "tactic": selected.tactic}
+            if used_safe_fallback:
+                outbox_meta["human_review"] = True
+                outbox_meta["fallback_reason"] = original_judgment.get("notes") or "; ".join(original_judgment.get("failures") or [])
+            await store.add_outbox(
+                case["id"],
+                body,
+                channel="email",
+                recipient=recipient,
+                subject=subject,
+                meta=outbox_meta,
+            )
+            bag["writes"].append(io("mailbox", msg["id"], f"to {recipient}", msg))
+            # Real send: mirrors master's chase_engine.py wiring --
+            # get_email_sender() returns GraphEmailSender the moment
+            # GRAPH_MAIL_* + EMAIL_FROM_ADDRESS are set.
+            from app.services.email_sender import get_email_sender
 
-    s = await next_seq()
-    async with traces.step(run_id, s, "graph.write", "Update temporal graph", principles=["P6"]) as bag:
-        if graph and case.get("invoice_no"):
-            inv = f"invoice:{case.get('invoice_no')}"
-            await graph.upsert_node(inv, "Invoice", label=case.get("invoice_no"))
-            for cmt in case.get("commitments") or []:
-                if cmt.get("status") == "active" and cmt.get("date"):
-                    cid = f"commitment:{cmt.get('id')}"
-                    await graph.upsert_node(cid, "Commitment", label=cmt.get("date"))
-                    await graph.supersede_edge(inv, "INVOICE_HAS_COMMITMENT", cid)
-                    bag["writes"].append(io("graph", "INVOICE_HAS_COMMITMENT", cmt.get("date"), cmt))
-            for blk in case.get("blockers") or []:
-                if blk.get("status") == "open":
-                    bid = f"blocker:{blk.get('id')}"
-                    await graph.upsert_node(bid, "Blocker", label=blk.get("type"))
-                    await graph.supersede_edge(inv, "INVOICE_BLOCKED_BY", bid)
-                    bag["writes"].append(io("graph", "INVOICE_BLOCKED_BY", blk.get("type"), blk))
-        else:
-            bag["status"] = "skipped"
+            try:
+                real_send_result = await get_email_sender().send(recipient, subject, f"<p>{body}</p>", [])
+                bag["writes"].append(io("email", recipient, real_send_result.get("provider", "email"), real_send_result))
+            except Exception as exc:  # noqa: BLE001
+                real_send_result = {"success": False, "error": str(exc)}
+                bag["writes"].append(io("email", recipient, "real send failed", real_send_result))
+            await ledger.append(
+                case["id"],
+                "outreach_sent",
+                {
+                    "body": body,
+                    "subject": subject,
+                    "recipient": recipient,
+                    "mailbox_id": msg["id"],
+                    "ask_id": ask_id,
+                    "real_send": real_send_result,
+                    **({"human_review": True, "fallback_reason": outbox_meta["fallback_reason"]} if used_safe_fallback else {}),
+                },
+                at=now.isoformat(),
+                principles=["P4", "P12"],
+            )
 
-    s = await next_seq()
-    async with traces.step(run_id, s, "state.transition", "Persist state transition", principles=["P2", "P8"]) as bag:
-        await store.update(
-            case["id"],
-            state=case.get("state"),
-            world=case.get("world"),
-            dialogue=case.get("dialogue"),
-            budget=case.get("budget"),
-            goals=case.get("goals"),
-            commitments=case.get("commitments"),
-            blockers=case.get("blockers"),
-            failed_asks=case.get("failed_asks"),
-            escalation=case.get("escalation"),
-            next_action_at=case.get("next_action_at"),
-            last_outreach_at=case.get("last_outreach_at"),
-            last_decision={"run_id": run_id, "tactic": selected.tactic, "objective": selected.objective},
-            customer_email=case.get("customer_email"),
-            customer_name=case.get("customer_name"),
-            target=case.get("target"),
-        )
-        bag["writes"].append(io("case", case["id"], f"{state_before} → {case.get('state')}", {"before": state_before, "after": case.get("state"), "next_action_at": case.get("next_action_at")},))
+        # Memory / graph writes
+        s = await next_seq()
+        async with traces.step(run_id, s, "memory.write", "Write operational + semantic memory", principles=["P6", "P13"]) as bag:
+            consume_unanswered(budget)
+            case["budget"] = budget.to_dict()
+            dialogue = dict(case.get("dialogue") or {})
+            dialogue["latest_outbound"] = body
+            dialogue["last_ask_id"] = ask_id
+            dialogue["last_ask_tactic"] = selected.tactic
+            case["dialogue"] = dialogue
+            case["last_outreach_at"] = now.isoformat()
+            # "blocked" deliberately excluded (found via mass conversation
+            # testing, 2026-08-04): this used to reset a just-classified
+            # blocker straight back to waiting_for_customer the moment the
+            # blocker_ack email was sent, so the blocker only "existed" for
+            # the duration of this one function call -- by the next turn it
+            # was gone, and the no-firm-tactics-while-blocked protection no
+            # longer applied. A blocker should stay open until the customer
+            # actually resolves it (apply_reply_signal's payment_date branch
+            # already closes it correctly when that happens).
+            if case.get("state") in ("customer_responded", "promise_missed", "outreach_ready", "overdue", "due"):
+                if case.get("state") != "promise_to_pay":
+                    case["state"] = "waiting_for_customer"
+            case["next_action_at"] = (now + timedelta(days=policy.nudge_interval_days)).isoformat()
+            goals = GoalStack.from_dict(context.get("goal_stack") or {})
+            goals.selected_tactic = selected.tactic
+            goals.current_objective = selected.objective
+            case["goals"] = goals.to_dict()
+            note = reflexion_note(case)
+            fact = await facts.upsert(case["id"], "outreach", "last_ask_tactic", selected.tactic, confidence=1.0)
+            bag["writes"].append(io("semantic", fact["key"], selected.tactic, fact))
+            bag["writes"].append(
+                io(
+                    "case",
+                    "state",
+                    f"{state_before} -> {case.get('state')}",
+                    {"before": state_before, "after": case.get("state"), "reflexion": note},
+                )
+            )
+
+        s = await next_seq()
+        async with traces.step(run_id, s, "graph.write", "Update temporal graph", principles=["P6"]) as bag:
+            if graph and case.get("invoice_no"):
+                inv = f"invoice:{case.get('invoice_no')}"
+                await graph.upsert_node(inv, "Invoice", label=case.get("invoice_no"))
+                for cmt in case.get("commitments") or []:
+                    if cmt.get("status") == "active" and cmt.get("date"):
+                        cid = f"commitment:{cmt.get('id')}"
+                        await graph.upsert_node(cid, "Commitment", label=cmt.get("date"))
+                        await graph.supersede_edge(inv, "INVOICE_HAS_COMMITMENT", cid)
+                        bag["writes"].append(io("graph", "INVOICE_HAS_COMMITMENT", cmt.get("date"), cmt))
+                for blk in case.get("blockers") or []:
+                    if blk.get("status") == "open":
+                        bid = f"blocker:{blk.get('id')}"
+                        await graph.upsert_node(bid, "Blocker", label=blk.get("type"))
+                        await graph.supersede_edge(inv, "INVOICE_BLOCKED_BY", bid)
+                        bag["writes"].append(io("graph", "INVOICE_BLOCKED_BY", blk.get("type"), blk))
+            else:
+                bag["status"] = "skipped"
+
+        s = await next_seq()
+        async with traces.step(run_id, s, "state.transition", "Persist state transition", principles=["P2", "P8"]) as bag:
+            # Terminal-state guard (added 2026-09-04): see guarded_case_update()
+            # docstring -- refuses to let this stale-relative-to-now `case`
+            # overwrite a paid/closed/escalated state a concurrent AR-aging
+            # upload already wrote to the DB while this run's earlier awaits
+            # (LLM calls, mail.send) were in flight.
+            await guarded_case_update(
+                store,
+                case,
+                state=case.get("state"),
+                world=case.get("world"),
+                dialogue=case.get("dialogue"),
+                budget=case.get("budget"),
+                goals=case.get("goals"),
+                commitments=case.get("commitments"),
+                blockers=case.get("blockers"),
+                failed_asks=case.get("failed_asks"),
+                escalation=case.get("escalation"),
+                next_action_at=case.get("next_action_at"),
+                last_outreach_at=case.get("last_outreach_at"),
+                last_decision={"run_id": run_id, "tactic": selected.tactic, "objective": selected.objective},
+                customer_email=case.get("customer_email"),
+                customer_name=case.get("customer_name"),
+                target=case.get("target"),
+            )
+            bag["writes"].append(io("case", case["id"], f"{state_before} → {case.get('state')}", {"before": state_before, "after": case.get("state"), "next_action_at": case.get("next_action_at")},))
 
     s = await next_seq()
     async with traces.step(run_id, s, "schedule", "Schedule next wake-up", principles=["P2", "P3"]) as bag:

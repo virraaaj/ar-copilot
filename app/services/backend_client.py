@@ -23,7 +23,8 @@ Endpoint references (from the main repo):
                     PATCH/DELETE /api/v1/dunning/project-contacts/{id}
   - Reference:      GET  /api/v1/dunning/business-units
   - Comms:          GET  /api/v1/communications/jobs
-  - Aging:          POST /api/v1/dunning/aging-table/sync   (multipart)
+  - Aging:          GET  /api/v1/dunning/aging-table
+                    POST /api/v1/dunning/aging-table/sync   (multipart)
   - Engine tick:    POST /api/v1/test/trigger-tick          (test-mode only)
 
 Ported from lummus-teams-bot/services/backend_client.py — see PLAN.md §1.
@@ -344,6 +345,48 @@ class BackendClient:
         body = {"reference_date": reference_date} if reference_date else {}
         resp = await self._request("POST", "/api/v1/test/trigger-tick", json=body)
         return self._ok_or_raise(resp, "Trigger engine tick")
+
+    async def list_aging_table(self, limit: int = 5000, bu_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Latest aging snapshot row per invoice — the only place the real AR
+        open balance lives.
+
+        `/api/v1/dunning/invoices` deliberately does NOT carry it: Lummus keeps
+        `invoices.amount` as the invoice *face* amount and refuses to let the
+        open balance overwrite it (see `_invoice_amount_from_row` in the Lummus
+        repo), and `InvoiceResponse` has no open_amount field at all. Reading
+        the balance from `amount` therefore overstates every partially-paid
+        invoice — a $3.27M invoice with $318k still outstanding reads as
+        $3.27M. Rows here are keyed by `invoice_number`.
+
+        Note this endpoint returns the *latest* row per invoice, which survives
+        payment — a fully paid invoice keeps its last snapshot row with a
+        stale open_amount. Paid must therefore be read from the invoice's
+        status, not inferred from this feed. Added 2026-09-04.
+
+        Paginated (2026-09-04): the endpoint caps its own `limit` query param
+        at 5000 (`le=5000` server-side) and returns 200 OK either way, so a
+        book larger than one page used to truncate silently -- no exception,
+        no signal -- and the missing invoices fell through to the per-invoice
+        face-amount fallback with nothing to flag it. Loops on `skip` until a
+        short page comes back, capped so a misbehaving backend (e.g. always
+        returning a full page) can't spin forever.
+        """
+        page_size = min(limit, 5000)
+        params: Dict[str, Any] = {}
+        if bu_id:
+            params["bu_id"] = bu_id
+        rows: List[Dict[str, Any]] = []
+        skip = 0
+        max_pages = 200  # 200 * 5000 = 1,000,000 rows -- far beyond any real book
+        for _ in range(max_pages):
+            page_params = dict(params, skip=skip, limit=page_size)
+            resp = await self._request("GET", "/api/v1/dunning/aging-table", params=page_params)
+            page = self._unwrap_list(self._ok_or_raise(resp, "List aging table"))
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            skip += page_size
+        return rows
 
     async def sync_aging_excel(self, filename: str, content: bytes) -> Dict[str, Any]:
         files = {

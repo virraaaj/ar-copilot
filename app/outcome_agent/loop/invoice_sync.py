@@ -15,6 +15,10 @@ from app.agent.tools_read import list_invoices as list_invoices_tool
 from app.outcome_agent.runtime.stores import build_runtime_stores
 from app.services.backend_client import BackendClient
 from app.services import sim_clock
+from app.outcome_agent.loop.notifications import (
+    send_partial_payment_notice,
+    send_payment_notice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +85,148 @@ def _initial_state_and_wake(due_date: Optional[str], today: str) -> tuple[str, O
     return "overdue", None
 
 
+def _cents(amount: Any) -> int:
+    """Round a money value to integer cents for comparison. Fixed 2026-09-04:
+    balances arrive from JSON as floats, and comparing two backend responses
+    with exact `==` risks a spurious changed/unchanged verdict on a bare
+    representation difference (e.g. 318825.0 vs 318824.9999999998)."""
+    return round(float(amount or 0) * 100)
+
+
+async def _open_amounts_by_invoice_no(backend: BackendClient) -> tuple[Dict[str, float], bool]:
+    """True AR open balance per invoice, from the latest aging snapshot.
+
+    Must not come from the invoice's `amount`: Lummus keeps that as the face
+    amount on purpose and never lets the open balance overwrite it, so a
+    partially-paid invoice reads at full value there.
+
+    Returns (amounts, aging_ok). aging_ok is False when the aging feed could
+    not be read. Fixed 2026-09-04: this used to swallow the exception and
+    return {}, and the caller then fell back to the invoice's face amount --
+    which is always >= the true balance, so a transient outage took the
+    "balance increased" branch in _refresh_existing_case and permanently
+    inflated world["balance_due"], with nothing to ever correct it. Callers
+    must now fail closed: on aging_ok=False, leave existing balances alone
+    for that pass rather than trusting the face amount.
+    """
+    try:
+        rows = await backend.list_aging_table()
+    except Exception:
+        logger.exception("invoice_sync: aging-table read failed, skipping balance refresh this pass")
+        return {}, False
+    out: Dict[str, float] = {}
+    for row in rows:
+        inv_no = row.get("invoice_number")
+        if not inv_no:
+            continue
+        try:
+            out[str(inv_no)] = float(row.get("open_amount") or 0)
+        except (TypeError, ValueError):
+            continue
+    return out, True
+
+
+async def _refresh_existing_case(
+    case: Dict[str, Any],
+    *,
+    open_amount: float,
+    is_paid: bool,
+    aging_ok: bool,
+    today: str,
+    store: Any,
+    ledger: Any,
+    mailbox: Any,
+) -> str:
+    """Bring an already-open case back in line with the backend after an
+    aging upload. Returns what happened, for the sync summary.
+
+    Before this existed the sync was create-only ("existing cases are left
+    untouched"), which froze a case's view of its invoice at creation time:
+    an invoice could be paid in full and the agent would carry on chasing
+    someone who had already paid. The paid-stop itself was never missing --
+    executor.py's hard terminal and send_payment_notice have always been
+    there -- nothing was refreshing the world snapshot they read.
+
+    Paid is taken from the invoice status, which Lummus sets when the
+    invoice drops out of the weekly Hubble file. It cannot be inferred from
+    the aging feed, whose last row survives payment.
+    """
+    world = dict(case.get("world") or {})
+    previous_open = float(world.get("balance_due") or 0)
+
+    # `open_amount <= 0` is only trustworthy when it came from the aging feed
+    # itself -- when aging_ok is False, open_amount is the caller's face-amount
+    # fallback, which says nothing about whether the invoice is actually paid.
+    # `is_paid` (from the invoice feed, not aging) still applies either way.
+    if is_paid or (aging_ok and open_amount <= 0):
+        if world.get("status") == "paid" or case.get("state") == "paid":
+            return "already_paid"
+        world["status"] = "paid"
+        world["balance_due"] = 0.0
+        world["paid_at"] = today
+        # Closed here rather than left for the next poller tick: the upload is
+        # manual and the chase must stop the moment it lands, and a case parked
+        # in "not_due" may have no next_action_at to tick on at all.
+        await store.update(case["id"], state="paid", next_action_at=None, world=world, amount=0.0)
+        case["state"] = "paid"
+        case["world"] = world
+        await ledger.append(case["id"], "payment_posted", {"paid_at": today, "source": "invoice_sync"})
+        await send_payment_notice(case, mailbox, ledger)
+        return "closed_paid"
+
+    if not aging_ok:
+        # Fixed 2026-09-04: fail closed on a transient aging-feed outage --
+        # do NOT refresh balance_due from the invoice's face amount here. The
+        # face amount is always >= the true open balance, so trusting it
+        # would take the "balance increased" branch below and permanently
+        # inflate the chased amount, with nothing that ever corrects it.
+        # Leave the case's balance exactly as it was for this pass.
+        return "aging_unavailable"
+
+    if _cents(open_amount) == _cents(previous_open):
+        return "unchanged"
+
+    world["balance_due"] = open_amount
+    if _cents(open_amount) > _cents(previous_open):
+        # Balance went up (re-issue, FX, a correction in the sheet). Record it,
+        # but there is nothing to tell anyone about -- no money moved to us.
+        await store.update(case["id"], world=world, amount=open_amount)
+        return "balance_increased"
+
+    # Balance dropped without the invoice closing == part-payment. Notified
+    # every time this branch is reached; the "unchanged" check above already
+    # covers a same-snapshot re-upload (balance_due already matches, so we
+    # never get here), and a dedup marker here only ever fired on a
+    # drop -> rise -> drop-back-to-the-same-figure sequence, where it wrongly
+    # swallowed a second, genuinely new payment. Removed 2026-09-04.
+    await store.update(case["id"], world=world, amount=open_amount)
+    case["world"] = world
+    await ledger.append(
+        case["id"],
+        "partial_payment_detected",
+        {"previous_open": previous_open, "current_open": open_amount, "paid_delta": previous_open - open_amount},
+    )
+    await send_partial_payment_notice(
+        case, mailbox, ledger, previous_open=previous_open, current_open=open_amount
+    )
+    return "partial_payment"
+
+
 async def sync_invoices_to_cases(
     backend: BackendClient,
     settings=None,
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Fetch real invoices from Lummus and create an oa_cases row for any
-    that don't already have one. Idempotent -- safe to call after every
-    upload or on a schedule; existing cases are left untouched."""
+    """Fetch real invoices from Lummus, create an oa_cases row for any that
+    don't have one, and bring existing cases back in line with the backend.
+
+    Idempotent -- safe to call after every upload. Existing cases used to be
+    left untouched, which meant a case never learned its invoice had been
+    paid and the agent kept chasing settled invoices; see
+    _refresh_existing_case. Payment is read from the backend rather than
+    re-derived here: Lummus already does the weekly-snapshot diff on ingest
+    (an invoice absent from the new Hubble file is marked Paid), so this
+    keeps that logic in one place."""
     from app.config import get_settings
 
     settings = settings or get_settings()
@@ -96,8 +234,10 @@ async def sync_invoices_to_cases(
     store = bundle.case
     ledger = bundle.ledger
     graph = bundle.graph
+    mailbox = bundle.mailbox
 
     invoices = await list_invoices_tool(backend, limit=500)
+    open_by_invoice_no, aging_ok = await _open_amounts_by_invoice_no(backend)
     today = (await sim_clock.now(store.db_path)).date().isoformat()
 
     contacts_by_project: Dict[str, List[Dict[str, Any]]] = {}
@@ -109,19 +249,37 @@ async def sync_invoices_to_cases(
 
     created: List[str] = []
     skipped: List[str] = []
+    refreshed: Dict[str, str] = {}
 
     for inv in invoices:
         invoice_no = inv.get("invoice_no")
         if not invoice_no:
             continue
-        open_amount = float(inv.get("open_amount") or 0)
-        if open_amount <= 0:
-            skipped.append(invoice_no)
-            continue
+        # The aging snapshot carries the real AR balance; the invoice figure is
+        # the face amount and only stands in when the aging feed is unavailable.
+        open_amount = float(open_by_invoice_no.get(invoice_no, inv.get("open_amount") or 0))
+        is_paid = inv.get("status") == "closed_paid"
 
         case_id = f"case:{invoice_no}"
         existing = await store.get_open_for_case(case_id)
         if existing:
+            # Checked before the zero-balance skip below: a fully paid invoice
+            # is exactly the case that most needs its open case closed, and
+            # skipping on balance first meant it never got looked at.
+            outcome = await _refresh_existing_case(
+                existing,
+                open_amount=open_amount,
+                is_paid=is_paid,
+                aging_ok=aging_ok,
+                today=today,
+                store=store,
+                ledger=ledger,
+                mailbox=mailbox,
+            )
+            refreshed[invoice_no] = outcome
+            continue
+
+        if is_paid or open_amount <= 0:
             skipped.append(invoice_no)
             continue
 
@@ -194,7 +352,14 @@ async def sync_invoices_to_cases(
         "created": created,
         "created_count": len(created),
         "skipped_count": len(skipped),
+        "refreshed": refreshed,
+        "closed_paid_count": sum(1 for v in refreshed.values() if v == "closed_paid"),
+        "partial_payment_count": sum(1 for v in refreshed.values() if v == "partial_payment"),
         "contact_changes": contact_change_result,
+        # Surfaced 2026-09-04 so an operator can see when existing-case
+        # balance refresh was skipped for this pass because the aging feed
+        # could not be read (see _open_amounts_by_invoice_no).
+        "aging_unavailable": not aging_ok,
     }
 
 

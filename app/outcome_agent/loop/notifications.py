@@ -104,3 +104,46 @@ async def send_payment_notice(case: Dict[str, Any], mailbox: Any, ledger: Any) -
         "Thank you,\nAccounts Receivable"
     )
     await _send(case, mailbox, ledger, to_addrs=to_addrs, subject=subject, body=body, kind="payment_notice_sent")
+
+
+async def send_partial_payment_notice(
+    case: Dict[str, Any],
+    mailbox: Any,
+    ledger: Any,
+    *,
+    previous_open: float,
+    current_open: float,
+) -> None:
+    """Tell the PM and BU finance that a part-payment landed, once.
+
+    The agent keeps chasing the remaining balance afterwards (user decision,
+    2026-09-04) -- this is a heads-up, not a handoff. Callers are responsible
+    for firing it only on an actual downward change: invoice_sync records the
+    notified balance on the case so a re-uploaded snapshot can't re-send it.
+
+    A part-payment is only ever visible as a drop in the aging snapshot's
+    open_amount. Lummus never sets the "Partially Paid" status its schema
+    allows -- a part-paid invoice stays "Open" -- so there is no status flag
+    to key off.
+    """
+    pm_email = case.get("pm_email")
+    finance_email = await _resolve_bu_finance_email(case.get("project_number"))
+    to_addrs = list({addr for addr in (pm_email, finance_email) if addr})
+    if not to_addrs or mailbox is None:
+        return
+    invoice_no = case.get("invoice_no") or case.get("case_id")
+    paid_delta = previous_open - current_open
+    subject = f"[{case.get('subject_token')}] Invoice {invoice_no} — part-payment received"
+    body = (
+        "Hello,\n\n"
+        f"A part-payment of {paid_delta:,.2f} has been recorded against invoice "
+        f"{invoice_no}. The outstanding balance has gone from {previous_open:,.2f} "
+        f"to {current_open:,.2f}.\n\n"
+        "The invoice remains open, so follow-up will continue for the remaining "
+        "balance. Reply to this email if that isn't what you expect.\n\n"
+        "Thank you,\nAccounts Receivable"
+    )
+    await _send(
+        case, mailbox, ledger, to_addrs=to_addrs, subject=subject, body=body,
+        kind="partial_payment_notice_sent",
+    )
