@@ -5,17 +5,20 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { getOutbox, type OutboxEntry } from "../api";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { Eyebrow } from "../components/ui/Eyebrow";
 
 function formatWhen(iso: string): string {
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
   return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-const CHANNEL_STYLES: Record<string, string> = {
-  email: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  teams: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  email_failed: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+const CHANNEL_TONE: Record<string, BadgeTone> = {
+  email: "positive",
+  teams: "positive",
+  email_failed: "critical",
+  blocked: "warning",
 };
 
 export default function Outbox() {
@@ -28,54 +31,62 @@ export default function Outbox() {
     getOutbox(token).then(setEntries).catch((e) => setError(String(e)));
   }, [token]);
 
-  if (error) return <p className="px-6 py-8 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>;
-  if (!entries) return <p className="px-6 py-8 text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>;
+  if (error) {
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">
+          {error}
+        </p>
+      </div>
+    );
+  }
+  if (!entries) {
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
-      <h1 className="mb-1 font-display text-[20px] font-semibold text-zinc-900 dark:text-zinc-100">Outbox</h1>
-      <p className="mb-6 text-[13px] text-zinc-400 dark:text-zinc-500">Every message the agent has generated, newest first.</p>
+    <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <PageHeader eyebrow="Outcome agent" title="Outbox" description="Every message the agent has generated, newest first." />
 
-      {entries.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Nothing sent yet.</p>}
+      {entries.length === 0 && <p className="text-sm text-muted-foreground">Nothing sent yet.</p>}
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {entries.map((e) => (
-          <div key={e.id} className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-[13px]">
-                <Link to={`/invoices/${e.case_id}`} className="font-medium text-zinc-900 dark:text-zinc-100 hover:underline">
+          <div key={e.id} className="border border-border p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm">
+                <Link
+                  to={`/invoices/${e.case_id}`}
+                  className="font-mono font-medium text-foreground underline decoration-border decoration-1 underline-offset-4 hover:decoration-accent"
+                >
                   {e.invoice_no ?? e.case_key ?? e.case_id}
                 </Link>
-                <span className="text-zinc-300 dark:text-zinc-600">·</span>
-                <span className="text-zinc-500 dark:text-zinc-400">{e.project_number ?? "No project"}</span>
+                <span className="text-muted-foreground">&middot;</span>
+                <span className="font-mono text-xs text-muted-foreground">{e.project_number ?? "No project"}</span>
               </div>
-              <span className="text-[11.5px] text-zinc-400 dark:text-zinc-500">{formatWhen(e.at)}</span>
+              <span className="font-mono text-xs text-muted-foreground">{formatWhen(e.at)}</span>
             </div>
 
-            <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[12px]">
-              <span className={`rounded-full px-2 py-0.5 font-medium ${CHANNEL_STYLES[e.channel ?? ""] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"}`}>
-                {e.channel ?? "unknown"}
-              </span>
-              <span className="text-zinc-400 dark:text-zinc-500">
-                → {e.target === "pm" ? "PM" : e.target === "customer" ? "Customer" : e.target ?? "?"}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge tone={CHANNEL_TONE[e.channel ?? ""] ?? "neutral"}>{e.channel ?? "unknown"}</Badge>
+              <Eyebrow>
+                &rarr; {e.target === "pm" ? "PM" : e.target === "customer" ? "Customer" : e.target ?? "?"}
                 {e.recipient ? ` (${e.recipient})` : ""}
-              </span>
-              {e.composed && (
-                <span className="rounded-full bg-violet-50 dark:bg-violet-950/40 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:text-violet-300">AI-composed</span>
-              )}
-              {e.requires_human_review && (
-                <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">needs review</span>
-              )}
-              {e.policy_blocked && (
-                <span className="rounded-full bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">blocked by policy</span>
-              )}
+              </Eyebrow>
+              {e.composed && <Badge tone="neutral">AI-composed</Badge>}
+              {e.requires_human_review && <Badge tone="warning">Needs review</Badge>}
+              {e.policy_blocked && <Badge tone="critical">Blocked by policy</Badge>}
             </div>
 
-            {e.subject && <p className="mb-0.5 text-[12.5px] font-medium text-zinc-700 dark:text-zinc-300">{e.subject}</p>}
-            {e.body && <p className="text-[13px] text-zinc-600 dark:text-zinc-300">{e.body}</p>}
-            {e.policy_reason && <p className="mt-1 text-[12px] text-rose-600 dark:text-rose-400">{e.policy_reason}</p>}
+            {e.subject && <p className="mb-1 text-sm font-medium text-foreground">{e.subject}</p>}
+            {e.body && <p className="text-sm leading-normal text-muted-foreground">{e.body}</p>}
+            {e.policy_reason && <p className="mt-2 text-sm text-accent">{e.policy_reason}</p>}
             {e.evaluation_failures.length > 0 && (
-              <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">Evaluation flags: {e.evaluation_failures.join(", ")}</p>
+              <p className="mt-2 font-mono text-xs text-[#facc15]">Evaluation flags: {e.evaluation_failures.join(", ")}</p>
             )}
           </div>
         ))}

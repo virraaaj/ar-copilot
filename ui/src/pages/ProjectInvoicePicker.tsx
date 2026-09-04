@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { listProjectInvoices, type Invoice } from "../api";
 import { useSession } from "../context/SessionContext";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Eyebrow } from "../components/ui/Eyebrow";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -29,34 +31,41 @@ export default function ProjectInvoicePicker() {
   }, [token, projectNumber]);
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="font-display text-[20px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-        Which invoice would you like to {action}?
-      </h1>
-      <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">
-        Showing invoices for {projectNumber} -- the same project pooled into this Teams chat.
-      </p>
+    <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+      <PageHeader
+        eyebrow="Pick an invoice"
+        title={`Which invoice would you like to ${action}?`}
+        description={`Showing invoices for ${projectNumber} -- the same project pooled into this Teams chat.`}
+      />
 
-      {error && <p className="mt-6 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
-      {!error && invoices === null && <p className="mt-6 text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
+      {error && (
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">
+          {error}
+        </p>
+      )}
+      {!error && invoices === null && <p className="text-sm text-muted-foreground">Loading…</p>}
       {invoices !== null && invoices.length === 0 && (
-        <p className="mt-6 text-[13px] text-zinc-400 dark:text-zinc-500">No invoices found for this project.</p>
+        <div className="border border-border px-5 py-16 text-center">
+          <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No invoices found for this project.</p>
+        </div>
       )}
 
-      <div className="mt-6 space-y-2">
+      <div className="space-y-2">
         {invoices?.map((inv) => (
           <button
             key={inv.invoice_id}
             onClick={() => navigate(`/invoices/${inv.invoice_id}?action=${action}`)}
-            className="flex w-full items-center justify-between rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:border-zinc-300 dark:hover:border-zinc-600"
+            className="flex w-full items-center justify-between border border-border px-5 py-4 text-left transition-colors duration-150 ease-bold hover:border-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <div>
-              <div className="text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{inv.case_key}</div>
-              <div className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">
-                {inv.stage ?? "unknown stage"} &middot; {inv.aging_status ?? "unknown aging"}
+            <div className="min-w-0">
+              <p className="truncate font-mono text-sm font-medium text-foreground">{inv.case_key}</p>
+              <div className="mt-1.5">
+                <Eyebrow>
+                  {inv.stage ?? "unknown stage"} &middot; {inv.aging_status ?? "unknown aging"}
+                </Eyebrow>
               </div>
             </div>
-            <div className="text-[14px] font-medium text-zinc-800 dark:text-zinc-200">{money(inv.open_amount)}</div>
+            <div className="shrink-0 pl-4 font-mono text-sm font-medium tabular-nums text-foreground">{money(inv.open_amount)}</div>
           </button>
         ))}
       </div>

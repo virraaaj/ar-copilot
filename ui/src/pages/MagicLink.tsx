@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { exchangeMagicLink, ApiError } from "../api";
 import { useSession } from "../context/SessionContext";
+import { Eyebrow } from "../components/ui/Eyebrow";
 
 export default function MagicLink() {
   const [searchParams] = useSearchParams();
@@ -31,17 +32,29 @@ export default function MagicLink() {
   }, []);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#fafafa] dark:bg-zinc-950 px-4">
-      <div className="w-full max-w-[380px] text-center">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm text-center">
+        <Eyebrow tone="accent" as="p" className="mb-4">
+          AR Copilot
+        </Eyebrow>
         {error ? (
           <>
-            <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
-            <a href="/login" className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">
+            <h1 className="mb-4 font-display text-3xl font-semibold tracking-tight text-foreground">Link expired</h1>
+            <p className="mb-6 border border-accent px-4 py-3 text-sm text-accent" role="alert">
+              {error}
+            </p>
+            <a
+              href="/login"
+              className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground underline decoration-border decoration-1 underline-offset-4 transition-colors duration-150 ease-bold hover:text-foreground hover:decoration-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
               Go to sign in
             </a>
           </>
         ) : (
-          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Signing you in...</p>
+          <>
+            <h1 className="mb-3 font-display text-3xl font-semibold tracking-tight text-foreground">Signing you in</h1>
+            <p className="text-sm text-muted-foreground">Exchanging your link for a session…</p>
+          </>
         )}
       </div>
     </div>
