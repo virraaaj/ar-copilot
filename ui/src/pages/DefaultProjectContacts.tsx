@@ -18,6 +18,9 @@ import {
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { ContactCard, AddContactTile, EmptyContactsState, ContactFormModal, type ContactFormValues } from "../components/ContactCard";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 
 type ModalState = { bu: string | null; contact: Contact | null } | null;
 
@@ -88,14 +91,14 @@ export default function DefaultProjectContacts() {
   if (error) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   }
   if (!scopes) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
@@ -105,64 +108,62 @@ export default function DefaultProjectContacts() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="mb-8 flex items-start justify-between gap-4 border-b border-border pb-6">
         <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Default Project Contacts</h1>
-          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
+          <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Default Project Contacts</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
             Applied to every new project unless a business unit override exists below.
           </p>
         </div>
-        <button
-          onClick={() => setShowAddBu(true)}
+        <Button
+          variant="secondary"
+          size="sm"
+          className="shrink-0"
           disabled={availableBusForOverride.length === 0}
-          className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() => setShowAddBu(true)}
         >
           Add BU override
-        </button>
+        </Button>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-8">
         {scopes.map((scope) => {
           const usedRoles = scope.contacts.map((c) => c.contact_type);
           const hasUnassignedRole = usedRoles.length < CONTACT_TYPES.length;
           const isGlobal = scope.bu === null;
           return (
-            <div
-              key={scope.bu ?? "global"}
-              className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-            >
-              <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-5 py-3.5">
+            <div key={scope.bu ?? "global"} className="border border-border">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white ${
-                      isGlobal ? "bg-zinc-900 dark:bg-zinc-700" : "bg-indigo-500"
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center border font-mono text-xs font-semibold uppercase ${
+                      isGlobal ? "border-foreground text-foreground" : "border-accent text-accent"
                     }`}
+                    aria-hidden
                   >
                     {isGlobal ? "G" : (scope.bu_name ?? scope.bu ?? "?").slice(0, 1).toUpperCase()}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{isGlobal ? "Global" : scope.bu_name ?? `BU ${scope.bu}`}</p>
-                    <p className="text-[12px] text-zinc-400 dark:text-zinc-500">
+                    <p className="truncate text-base font-medium text-foreground">{isGlobal ? "Global" : scope.bu_name ?? `BU ${scope.bu}`}</p>
+                    <p className="text-sm text-muted-foreground">
                       {isGlobal ? "Applied to all new projects unless a BU override exists." : `Overrides global defaults for BU ${scope.bu}`}
                     </p>
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                <div className="flex shrink-0 items-center gap-3">
+                  <Badge tone="neutral">
                     {scope.contacts.length} contact{scope.contacts.length === 1 ? "" : "s"}
-                  </span>
+                  </Badge>
                   {hasUnassignedRole && (
-                    <button
-                      onClick={() => setModal({ bu: scope.bu, contact: null })}
-                      className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-white dark:hover:bg-zinc-800"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => setModal({ bu: scope.bu, contact: null })}>
                       Add contact
-                    </button>
+                    </Button>
                   )}
                   {!isGlobal && (
                     <button
                       onClick={() => handleRemoveOverride(scope)}
-                      className="rounded-full border border-rose-200 dark:border-rose-800 px-3 py-1.5 text-[12px] font-medium text-rose-600 dark:text-rose-400 transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                      className="min-h-11 border border-accent px-4 font-mono text-xs font-semibold uppercase tracking-wider text-accent transition-colors duration-150 ease-bold hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     >
                       Remove override
                     </button>
@@ -175,11 +176,10 @@ export default function DefaultProjectContacts() {
                   <EmptyContactsState onAddFirst={() => setModal({ bu: scope.bu, contact: null })} />
                 ) : (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {scope.contacts.map((c, i) => (
+                    {scope.contacts.map((c) => (
                       <ContactCard
                         key={c.contact_id}
                         contact={c}
-                        accentIndex={i}
                         onEdit={() => setModal({ bu: scope.bu, contact: c })}
                         onDelete={() => handleDelete(c.contact_id)}
                       />
@@ -194,14 +194,11 @@ export default function DefaultProjectContacts() {
       </div>
 
       {showAddBu && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4" onClick={() => setShowAddBu(false)}>
-          <div
-            className="w-full max-w-sm rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Add BU override</h2>
-            <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">Pick a business unit to override the global defaults for.</p>
-            <div className="mt-4 space-y-1.5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4" onClick={() => setShowAddBu(false)}>
+          <div className="w-full max-w-sm border border-border bg-card p-7" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">Add BU override</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Pick a business unit to override the global defaults for.</p>
+            <div className="mt-4 space-y-2">
               {availableBusForOverride.map((bu) => (
                 <button
                   key={bu.bu_id}
@@ -209,21 +206,20 @@ export default function DefaultProjectContacts() {
                     setShowAddBu(false);
                     setModal({ bu: bu.bu_id, contact: null });
                   }}
-                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-left text-[14px] text-zinc-800 dark:text-zinc-200 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                  className="min-h-11 w-full border border-border px-3.5 py-2.5 text-left text-sm text-foreground transition-colors duration-150 ease-bold hover:border-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   {bu.bu_name ?? bu.bu_id}
                 </button>
               ))}
               {availableBusForOverride.length === 0 && (
-                <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Every business unit already has an override.</p>
+                <p className="text-sm text-muted-foreground">Every business unit already has an override.</p>
               )}
             </div>
-            <button
-              onClick={() => setShowAddBu(false)}
-              className="mt-4 rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-            >
-              Cancel
-            </button>
+            <div className="mt-4">
+              <Button variant="ghost" size="sm" onClick={() => setShowAddBu(false)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         </div>
       )}

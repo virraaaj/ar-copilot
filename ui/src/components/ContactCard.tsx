@@ -1,66 +1,63 @@
 // Shared building blocks for the Project Contacts and Default Project
-// Contacts pages (added 2026-07-16) -- deliberately mirrors the design of
-// Lummus's own equivalent pages: a colored-accent card grid per contact
-// (rotating through a fixed palette by position), a dashed "add" tile, and
-// a simple modal form for add/edit.
+// Contacts pages (added 2026-07-16, converted to Bold Typography
+// 2026-09-04) -- a bordered card per contact (role shown as a mono
+// Eyebrow, not a color-coded accent -- this system reserves color for
+// state/accent, not for arbitrary role identity), a dashed "add" tile,
+// and a simple modal form for add/edit built on the shared Input/Button
+// primitives.
 import { useState } from "react";
+import { Pencil, Trash2, Plus } from "lucide-react";
 import { CONTACT_TYPE_LABELS, CONTACT_TYPES, type Contact } from "../api";
-
-export const CONTACT_ACCENTS = [
-  { border: "border-blue-200", text: "text-blue-600" },
-  { border: "border-amber-200 dark:border-amber-800", text: "text-amber-600 dark:text-amber-400" },
-  { border: "border-emerald-200 dark:border-emerald-800", text: "text-emerald-600 dark:text-emerald-400" },
-  { border: "border-purple-200", text: "text-purple-600" },
-  { border: "border-rose-200 dark:border-rose-800", text: "text-rose-600 dark:text-rose-400" },
-];
+import { Card } from "./ui/Card";
+import { Button } from "./ui/Button";
+import { Input, Select } from "./ui/Input";
+import { Eyebrow } from "./ui/Eyebrow";
 
 export function ContactCard({
   contact,
-  accentIndex,
   onEdit,
   onDelete,
 }: {
   contact: Contact;
-  accentIndex: number;
+  accentIndex?: number;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const accent = CONTACT_ACCENTS[accentIndex % CONTACT_ACCENTS.length];
   return (
-    <div className={`flex flex-col rounded-xl border ${accent.border} bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]`}>
+    <Card className="p-4 md:p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className={`text-[11px] font-semibold uppercase tracking-wide ${accent.text}`}>
-            {CONTACT_TYPE_LABELS[contact.contact_type] ?? contact.contact_type}
-          </div>
-          <div className="mt-0.5 truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{contact.name || "Unnamed"}</div>
+          <Eyebrow tone="accent">{CONTACT_TYPE_LABELS[contact.contact_type] ?? contact.contact_type}</Eyebrow>
+          <p className="mt-1 truncate text-base font-medium text-foreground">{contact.name || "Unnamed"}</p>
         </div>
         <div className="flex shrink-0 gap-1">
           <button
             onClick={onEdit}
-            className="rounded-md px-2 py-1 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-700 dark:hover:text-zinc-300"
+            aria-label="Edit contact"
+            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Edit
+            <Pencil size={16} strokeWidth={1.5} aria-hidden />
           </button>
           <button
             onClick={onDelete}
-            className="rounded-md px-2 py-1 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400"
+            aria-label="Delete contact"
+            className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-colors duration-150 ease-bold hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Delete
+            <Trash2 size={16} strokeWidth={1.5} aria-hidden />
           </button>
         </div>
       </div>
-      <div className="mt-3 space-y-1.5 border-t border-zinc-100 dark:border-zinc-800 pt-3 text-[12px]">
+      <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-sm">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-zinc-400 dark:text-zinc-500">Email</span>
-          <span className="truncate text-zinc-700 dark:text-zinc-300">{contact.email || "—"}</span>
+          <span className="text-muted-foreground">Email</span>
+          <span className="truncate text-foreground">{contact.email || "--"}</span>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-zinc-400 dark:text-zinc-500">Phone</span>
-          <span className="truncate text-zinc-700 dark:text-zinc-300">{contact.phone || "—"}</span>
+          <span className="text-muted-foreground">Phone</span>
+          <span className="truncate text-foreground">{contact.phone || "--"}</span>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -68,24 +65,23 @@ export function AddContactTile({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex min-h-[104px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-600 dark:hover:text-zinc-300"
+      className="flex min-h-[112px] flex-col items-center justify-center gap-1.5 border border-dashed border-border text-muted-foreground transition-colors duration-150 ease-bold hover:border-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      <span className="text-[20px] leading-none">+</span>
-      <span className="text-[12px] font-medium">Add contact</span>
+      <Plus size={18} strokeWidth={1.5} aria-hidden />
+      <span className="font-mono text-xs font-medium uppercase tracking-wider">Add contact</span>
     </button>
   );
 }
 
 export function EmptyContactsState({ onAddFirst }: { onAddFirst: () => void }) {
   return (
-    <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-700 py-8 text-center">
-      <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No contacts yet.</p>
-      <button
-        onClick={onAddFirst}
-        className="mt-3 rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-1.5 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-      >
-        Add first contact
-      </button>
+    <div className="border border-dashed border-border py-8 text-center">
+      <p className="text-sm text-muted-foreground">No contacts yet.</p>
+      <div className="mt-3 flex justify-center">
+        <Button variant="secondary" size="sm" onClick={onAddFirst}>
+          Add first contact
+        </Button>
+      </div>
     </div>
   );
 }
@@ -122,63 +118,64 @@ export function ContactFormModal({
   const availableRoles = CONTACT_TYPES.filter((t) => isEdit || t === initial.contact_type || !usedRoles.includes(t));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
+        className="w-full max-w-md border border-border bg-card p-7"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{title}</h2>
-        {subtitle && <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">{subtitle}</p>}
+        <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">{title}</h2>
+        {subtitle && <p className="mt-1 font-mono text-xs uppercase tracking-wide text-muted-foreground">{subtitle}</p>}
 
-        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Role</label>
-        <select
+        <Eyebrow as="label" className="mb-1.5 mt-5 block">Role</Eyebrow>
+        <Select
+          dense
           disabled={isEdit}
           value={values.contact_type}
           onChange={(e) => setValues((v) => ({ ...v, contact_type: e.target.value }))}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10 disabled:bg-zinc-50 disabled:text-zinc-400"
+          className="mb-4"
         >
           {availableRoles.map((t) => (
             <option key={t} value={t}>
               {CONTACT_TYPE_LABELS[t]}
             </option>
           ))}
-        </select>
+        </Select>
 
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Name</label>
-        <input
+        <Eyebrow as="label" className="mb-1.5 block">Name</Eyebrow>
+        <Input
+          dense
           autoFocus={!isEdit}
           value={values.name}
           onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
+          className="mb-4"
         />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Email</label>
-        <input
+        <Eyebrow as="label" className="mb-1.5 block">Email</Eyebrow>
+        <Input
+          dense
           type="email"
           value={values.email}
           onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
+          className="mb-4"
         />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Phone</label>
-        <input
+        <Eyebrow as="label" className="mb-1.5 block">Phone</Eyebrow>
+        <Input
+          dense
           value={values.phone}
           onChange={(e) => setValues((v) => ({ ...v, phone: e.target.value }))}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
+          className="mb-4"
         />
-        {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            onClick={() => onSubmit(values)}
-            disabled={submitting}
-            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? "Saving..." : "Save"}
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-          >
+        {error && (
+          <p className="mb-4 border border-accent px-3 py-2 text-sm text-accent" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="flex gap-3">
+          <Button variant="secondary" size="sm" onClick={() => onSubmit(values)} disabled={submitting}>
+            {submitting ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>
