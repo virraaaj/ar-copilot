@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { ExternalLink } from "lucide-react";
 import {
   getInvoice,
   getInvoiceTimeline,
@@ -17,6 +18,10 @@ import {
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
+import { Button, buttonVariants } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge, type BadgeTone } from "../components/ui/Badge";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -58,6 +63,26 @@ function parseCommentAuthor(text: string | null): { author: string | null; body:
   return { author: match[1], body: match[2] };
 }
 
+const STATUS_TONE: Record<string, BadgeTone> = {
+  active: "positive",
+  closed_paid: "neutral",
+  closed_other: "neutral",
+  snoozed: "warning",
+};
+
+function ModalShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md border border-border bg-card p-7"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function SnoozeModal({
   onClose,
   onConfirm,
@@ -73,50 +98,35 @@ function SnoozeModal({
   const [resumeDate, setResumeDate] = useState("");
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Snooze a follow-up</h2>
-        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">Pauses dunning outreach on this invoice until you resume it.</p>
+    <ModalShell onClose={onClose}>
+      <h2 className="font-display text-xl font-semibold tracking-tight text-foreground">Snooze a follow-up</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Pauses dunning outreach on this invoice until you resume it.</p>
 
-        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Reason</label>
-        <input
-          autoFocus
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. customer disputing amount"
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
-        />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Resume on (optional)</label>
-        <input
-          type="date"
-          value={resumeDate}
-          onChange={(e) => setResumeDate(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
-        />
-        {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            onClick={() => onConfirm(reason, resumeDate)}
-            disabled={submitting || !reason.trim()}
-            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? "Snoozing..." : "Confirm snooze"}
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-          >
-            Cancel
-          </button>
-        </div>
+      <Eyebrow as="p" className="mb-1.5 mt-5">Reason</Eyebrow>
+      <Input
+        autoFocus
+        dense
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g. customer disputing amount"
+        className="mb-4"
+      />
+      <Eyebrow as="p" className="mb-1.5">Resume on (optional)</Eyebrow>
+      <Input type="date" dense value={resumeDate} onChange={(e) => setResumeDate(e.target.value)} className="mb-4" />
+      {error && (
+        <p className="mb-4 border border-accent px-3 py-2 text-sm text-accent" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-3">
+        <Button variant="secondary" size="sm" disabled={submitting || !reason.trim()} onClick={() => onConfirm(reason, resumeDate)}>
+          {submitting ? "Snoozing..." : "Confirm snooze"}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -138,58 +148,40 @@ function FollowUpModal({
   const canSubmit = email.trim().length > 0 && Number.isFinite(cadence) && cadence >= 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 dark:bg-black/60 px-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_8px_24px_-4px_rgba(0,0,0,0.15)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Follow up with the customer</h2>
-        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
-          Sends a follow-up email now, then repeats on the schedule below until you cancel it or the end date passes.
-        </p>
+    <ModalShell onClose={onClose}>
+      <h2 className="font-display text-xl font-semibold tracking-tight text-foreground">Follow up with the customer</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Sends a follow-up email now, then repeats on the schedule below until you cancel it or the end date passes.
+      </p>
 
-        <label className="mb-1.5 mt-5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Customer email</label>
-        <input
-          autoFocus
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="customer@example.com"
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
-        />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Every how many days</label>
-        <input
-          type="number"
-          min={1}
-          value={cadenceDays}
-          onChange={(e) => setCadenceDays(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
-        />
-        <label className="mb-1.5 block text-[13px] font-medium text-zinc-600 dark:text-zinc-300">Until (optional)</label>
-        <input
-          type="date"
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3.5 py-2.5 text-[14px] text-zinc-900 dark:text-zinc-100 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
-        />
-        {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            onClick={() => onConfirm(email.trim(), cadence, endDate)}
-            disabled={submitting || !canSubmit}
-            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? "Starting..." : "Start follow-ups"}
-          </button>
-          <button
-            onClick={onClose}
-            className="rounded-full px-4 py-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-          >
-            Cancel
-          </button>
-        </div>
+      <Eyebrow as="p" className="mb-1.5 mt-5">Customer email</Eyebrow>
+      <Input
+        autoFocus
+        dense
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="customer@example.com"
+        className="mb-4"
+      />
+      <Eyebrow as="p" className="mb-1.5">Every how many days</Eyebrow>
+      <Input dense type="number" min={1} value={cadenceDays} onChange={(e) => setCadenceDays(e.target.value)} className="mb-4" />
+      <Eyebrow as="p" className="mb-1.5">Until (optional)</Eyebrow>
+      <Input dense type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="mb-4" />
+      {error && (
+        <p className="mb-4 border border-accent px-3 py-2 text-sm text-accent" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-3">
+        <Button variant="secondary" size="sm" disabled={submitting || !canSubmit} onClick={() => onConfirm(email.trim(), cadence, endDate)}>
+          {submitting ? "Starting..." : "Start follow-ups"}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
       </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -368,14 +360,14 @@ export default function InvoiceDetail() {
 
   if (error)
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+      <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   if (!invoice)
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
+      <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
 
@@ -402,86 +394,81 @@ export default function InvoiceDetail() {
     ["Case key", invoice.case_key],
     ["Business unit", invoice.business_unit_id],
     ["Stage", invoice.stage],
-    ["Status", invoice.status],
     ["Due date", invoice.due_date],
     ["Aging status", invoice.aging_status],
     ["Open amount", money(invoice.open_amount)],
   ];
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <Link to="/" className="text-[13px] font-medium text-zinc-400 dark:text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">
+    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+      <Link to="/" className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground">
         &larr; Back to dashboard
       </Link>
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="font-display text-[20px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            {invoice.project_name ?? invoice.project_number ?? "Invoice"}
-          </h1>
-          <div className="flex gap-2">
+      <div className="mt-6 border border-border p-6 md:p-8">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Eyebrow as="p" className="mb-2">Invoice</Eyebrow>
+            <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+              {invoice.project_name ?? invoice.project_number ?? "Invoice"}
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
             {isSnoozed ? (
-              <button
-                onClick={handleResume}
-                disabled={resuming}
-                className="rounded-full border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-2 text-[13px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:cursor-not-allowed disabled:opacity-40"
-              >
+              <Button variant="secondary" size="sm" disabled={resuming} onClick={handleResume}>
                 {resuming ? "Resuming..." : "Resume"}
-              </button>
+              </Button>
             ) : (
-              <button
-                onClick={() => setShowSnoozeModal(true)}
-                className="rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-              >
+              <Button variant="secondary" size="sm" onClick={() => setShowSnoozeModal(true)}>
                 Snooze
-              </button>
+              </Button>
             )}
             {!activeCampaign && (
-              <button
-                onClick={() => setShowFollowUpModal(true)}
-                className="rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-[13px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
-              >
+              <Button variant="secondary" size="sm" onClick={() => setShowFollowUpModal(true)}>
                 Follow up
-              </button>
+              </Button>
             )}
-            <button
-              onClick={askAboutThis}
-              className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800"
-            >
+            <Button variant="primary" size="sm" onClick={askAboutThis}>
               Ask about this
-            </button>
+            </Button>
           </div>
         </div>
-        <dl className="grid grid-cols-2 gap-y-4 text-[14px]">
+
+        {invoice.status && (
+          <div className="mb-5">
+            <Badge tone={STATUS_TONE[invoice.status] ?? "neutral"}>{invoice.status.replace(/_/g, " ")}</Badge>
+          </div>
+        )}
+
+        <dl className="grid grid-cols-2 gap-4 border-y border-border py-4 text-xs sm:grid-cols-3">
           {fields.map(([label, value]) => (
-            <div key={label} className="contents">
-              <dt className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{label}</dt>
-              <dd className="text-right font-medium text-zinc-800 dark:text-zinc-200">{value ?? "--"}</dd>
+            <div key={label}>
+              <dt className="mb-1"><Eyebrow>{label}</Eyebrow></dt>
+              <dd className="font-mono tabular-nums text-foreground">{value ?? "--"}</dd>
             </div>
           ))}
         </dl>
+
         {isSnoozed && (
-          <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
+          <div className="mt-4 border border-[#a3660a] px-4 py-3 text-sm text-[#facc15]">
             Snoozed &mdash; reminders are paused until this is resumed.
           </div>
         )}
-        {resumeError && <p className="mt-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{resumeError}</p>}
+        {resumeError && (
+          <p className="mt-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{resumeError}</p>
+        )}
 
         {activeCampaign && (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-3 py-2 text-[13px] text-blue-700">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border border-border px-4 py-3 text-sm text-foreground">
             <span>
               Following up with {activeCampaign.customer_email} every {activeCampaign.cadence_days} day
               {activeCampaign.cadence_days === 1 ? "" : "s"}
               {activeCampaign.end_date ? ` until ${activeCampaign.end_date}` : ""}
               {activeCampaign.send_count > 0 ? ` (${activeCampaign.send_count} sent)` : ""}
             </span>
-            <button
-              onClick={handleCancelFollowUp}
-              disabled={cancellingFollowUp}
-              className="shrink-0 rounded-full border border-blue-200 px-3 py-1 text-[12px] font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-40"
-            >
+            <Button variant="ghost" size="sm" disabled={cancellingFollowUp} onClick={handleCancelFollowUp}>
               {cancellingFollowUp ? "Cancelling..." : "Cancel"}
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -505,101 +492,91 @@ export default function InvoiceDetail() {
       )}
 
       {agentCase && (
-        <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <div className="flex items-start justify-between gap-4">
+        <div className="mt-4 border border-border p-6 md:p-8">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                Outcome agent
-              </h2>
-              <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
-                Long-horizon pursuit state for this invoice.
-              </p>
+              <Eyebrow as="p" className="mb-2">Outcome agent</Eyebrow>
+              <p className="text-sm text-muted-foreground">Long-horizon pursuit state for this invoice.</p>
             </div>
-            <Link
-              to={`/agent/cases/${agentCase.id}`}
-              className="shrink-0 rounded-full bg-green-700 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-green-800"
-            >
+            <Link to={`/agent/cases/${agentCase.id}`} className={buttonVariants("primary", "sm")}>
               Open cockpit
+              <ExternalLink size={14} strokeWidth={1.5} aria-hidden />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -bottom-0.5 left-0 h-0.5 w-full origin-left scale-x-100 bg-accent transition-transform duration-150 ease-bold group-hover:scale-x-110"
+              />
             </Link>
           </div>
-          <div className="mt-6">
-            <AgentPhaseRail state={agentCase.state} target={agentCase.target} />
-          </div>
+          <AgentPhaseRail state={agentCase.state} target={agentCase.target} tone="bold" />
         </div>
       )}
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Comments</h2>
-        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">
+      <div className="mt-4 border border-border p-6 md:p-8">
+        <Eyebrow as="p" className="mb-2">Comments</Eyebrow>
+        <p className="text-sm text-muted-foreground">
           Comments posted from Teams and the web -- both land in the same timeline.
         </p>
 
-        <div className="mt-5 flex gap-2">
-          <input
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <Input
             ref={commentInputRef}
+            dense
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !posting) submitComment();
             }}
             placeholder="Add a comment..."
-            className="flex-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/40 px-4 py-2 text-[13px] text-zinc-800 dark:text-zinc-200 outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-300 dark:focus:border-zinc-500 focus:bg-white"
+            className="flex-1"
           />
-          <button
-            onClick={submitComment}
-            disabled={posting || !commentText.trim()}
-            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
+          <Button variant="secondary" size="sm" disabled={posting || !commentText.trim()} onClick={submitComment}>
             {posting ? "Posting..." : "Post"}
-          </button>
+          </Button>
         </div>
-        {commentError && <p className="mt-2 text-[12px] text-rose-600 dark:text-rose-400">{commentError}</p>}
+        {commentError && <p className="mt-2 text-xs text-accent">{commentError}</p>}
 
         <ul className="mt-6 space-y-4">
-          {timelineLoading && <li className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</li>}
+          {timelineLoading && <li className="text-sm text-muted-foreground">Loading…</li>}
           {!timelineLoading && comments.length === 0 && (
-            <li className="text-[13px] text-zinc-400 dark:text-zinc-500">No comments yet.</li>
+            <li className="text-sm text-muted-foreground">No comments yet.</li>
           )}
           {!timelineLoading &&
             comments.map((event, i) => {
               const { author, body } = parseCommentAuthor(event.summary ?? event.title);
               return (
-                <li key={i} className="border-l-2 border-zinc-100 dark:border-zinc-800 pl-4">
+                <li key={i} className="border-l-2 border-border pl-4">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-semibold text-zinc-700 dark:text-zinc-300">{author ?? "Unknown user"}</span>
-                    <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{when(event.at)}</span>
+                    <span className="font-mono text-xs font-medium uppercase tracking-wide text-foreground">{author ?? "Unknown user"}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{when(event.at)}</span>
                   </div>
-                  <p className="mt-1 text-[13px] text-zinc-800 dark:text-zinc-200">{body}</p>
+                  <p className="mt-1 text-sm leading-normal text-foreground">{body}</p>
                 </li>
               );
             })}
         </ul>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-7 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        <h2 className="font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Activity</h2>
-        <p className="mt-1 text-[12px] text-zinc-400 dark:text-zinc-500">Stage changes, outreach sent, and other system events.</p>
+      <div className="mt-4 border border-border p-6 md:p-8">
+        <Eyebrow as="p" className="mb-2">Activity</Eyebrow>
+        <p className="text-sm text-muted-foreground">Stage changes, outreach sent, and other system events.</p>
 
         <ul className="mt-6 space-y-4">
-          {timelineLoading && <li className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</li>}
+          {timelineLoading && <li className="text-sm text-muted-foreground">Loading…</li>}
           {!timelineLoading && activity.length === 0 && (
-            <li className="text-[13px] text-zinc-400 dark:text-zinc-500">No activity yet.</li>
+            <li className="text-sm text-muted-foreground">No activity yet.</li>
           )}
           {!timelineLoading &&
             activity.map((event, i) => (
-              <li key={i} className="border-l-2 border-zinc-100 dark:border-zinc-800 pl-4">
+              <li key={i} className="border-l-2 border-border pl-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                    {humanizeEventType(event.event_type)}
-                  </span>
-                  <span className="text-[11px] text-zinc-300 dark:text-zinc-600">{when(event.at)}</span>
+                  <Eyebrow>{humanizeEventType(event.event_type)}</Eyebrow>
+                  <span className="font-mono text-xs text-muted-foreground">{when(event.at)}</span>
                 </div>
-                <p className="mt-1 text-[13px] text-zinc-800 dark:text-zinc-200">{event.summary ?? event.title ?? "--"}</p>
+                <p className="mt-1 text-sm leading-normal text-foreground">{event.summary ?? event.title ?? "--"}</p>
               </li>
             ))}
         </ul>
       </div>
-
     </div>
   );
 }

@@ -8,6 +8,7 @@
 // in Trace Studio" link on the detail panel.
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ChevronRight, ExternalLink } from "lucide-react";
 import {
   closeAgentCase,
   editAgentCommitment,
@@ -24,6 +25,11 @@ import {
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
 import { ChaseEventRow } from "../components/ChaseEventRow";
+import { Button, buttonVariants } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { PageHeader } from "../components/ui/PageHeader";
 
 const STATE_LABELS: Record<string, string> = {
   not_due: "Not due",
@@ -45,17 +51,17 @@ const STATE_LABELS: Record<string, string> = {
   paused: "Paused",
 };
 
-const STATE_STYLES: Record<string, string> = {
-  blocked: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  promise_missed: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  promise_to_pay: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  paid: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  escalation_required: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  escalated_to_human: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  disputed: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300",
-  paused: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-  closed: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-  suppressed: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
+const STATE_TONE: Record<string, BadgeTone> = {
+  blocked: "warning",
+  promise_missed: "warning",
+  promise_to_pay: "positive",
+  paid: "positive",
+  escalation_required: "critical",
+  escalated_to_human: "critical",
+  disputed: "critical",
+  paused: "neutral",
+  closed: "neutral",
+  suppressed: "neutral",
 };
 
 const OPEN_STATES = new Set([
@@ -150,141 +156,117 @@ function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => v
   const isTerminal = chase.state === "paid" || chase.state === "closed";
 
   return (
-    <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <div className="mb-4 flex items-start justify-between gap-4">
+    <div className="border border-border p-6 md:p-8">
+      <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <p className="font-display text-[16px] font-semibold text-zinc-900 dark:text-zinc-100">
+          <p className="font-mono text-lg font-semibold text-foreground">
             {chase.invoice_no ?? chase.case_key ?? chase.case_id}
           </p>
-          <p className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">{chase.project_number ?? "No project"}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{chase.project_number ?? "No project"}</p>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-            STATE_STYLES[chase.state] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
-          }`}
-        >
+        <Badge tone={STATE_TONE[chase.state] ?? "neutral"} className="shrink-0">
           {stateLabel(chase.state)}
-        </span>
+        </Badge>
       </div>
 
-      <div className="mb-4">
-        <AgentPhaseRail state={chase.state} target={chase.target} />
+      <div className="mb-5">
+        <AgentPhaseRail state={chase.state} target={chase.target} tone="bold" />
       </div>
 
-      <dl className="mb-4 grid grid-cols-2 gap-3 text-[12px]">
+      <dl className="mb-5 grid grid-cols-2 gap-4 border-y border-border py-4 text-xs sm:grid-cols-3">
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Target</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">
+          <dt className="mb-1"><Eyebrow>Target</Eyebrow></dt>
+          <dd className="font-mono text-foreground">
             {chase.target === "pm" ? "PM" : chase.target === "customer" ? "Customer" : chase.target ?? "--"}
           </dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Promised date</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{promisedDate ?? "--"}</dd>
+          <dt className="mb-1"><Eyebrow>Promised date</Eyebrow></dt>
+          <dd className="font-mono text-foreground">{promisedDate ?? "--"}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Amount</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300 tabular-nums">
+          <dt className="mb-1"><Eyebrow>Amount</Eyebrow></dt>
+          <dd className="font-mono tabular-nums text-foreground">
             {chase.amount != null ? `$${Number(chase.amount).toLocaleString()}` : "--"}
           </dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Open blockers</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">
+          <dt className="mb-1"><Eyebrow>Open blockers</Eyebrow></dt>
+          <dd className="font-mono text-foreground">
             {chase.blockers.filter((b) => b.status === "open").length}
           </dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Last outreach</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{formatWhen(chase.last_outreach_at)}</dd>
+          <dt className="mb-1"><Eyebrow>Last outreach</Eyebrow></dt>
+          <dd className="font-mono text-foreground">{formatWhen(chase.last_outreach_at)}</dd>
         </div>
         <div>
-          <dt className="text-zinc-400 dark:text-zinc-500">Next action</dt>
-          <dd className="text-zinc-700 dark:text-zinc-300">{formatWhen(chase.next_action_at)}</dd>
+          <dt className="mb-1"><Eyebrow>Next action</Eyebrow></dt>
+          <dd className="font-mono text-foreground">{formatWhen(chase.next_action_at)}</dd>
         </div>
       </dl>
 
       {error && (
-        <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">
+        <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">
           {error}
         </p>
       )}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Link
-          to={`/agent/cases/${chase.id}`}
-          className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800"
-        >
+      <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <Link to={`/agent/cases/${chase.id}`} className={buttonVariants("primary", "sm")}>
           Open in Trace Studio
+          <ExternalLink size={14} strokeWidth={1.5} aria-hidden />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -bottom-0.5 left-0 h-0.5 w-full origin-left scale-x-100 bg-accent transition-transform duration-150 ease-bold group-hover:scale-x-110"
+          />
         </Link>
         {chase.state !== "paused" && !isTerminal && (
-          <button
-            disabled={busy}
-            onClick={() => run(() => pauseAgentCase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => pauseAgentCase(token!, chase.id))}>
             Pause
-          </button>
+          </Button>
         )}
         {(chase.state === "paused" || chase.state === "escalated_to_human") && (
-          <button
-            disabled={busy}
-            onClick={() => run(() => resumeAgentCase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => resumeAgentCase(token!, chase.id))}>
             Resume
-          </button>
+          </Button>
         )}
         {(chase.state === "escalated_to_human" || chase.state === "closed") && (
-          <button
-            disabled={busy}
-            onClick={() => run(() => restartAgentCase(token!, chase.id))}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => restartAgentCase(token!, chase.id))}>
             Restart from scratch
-          </button>
+          </Button>
         )}
         {!isTerminal && (
-          <button
-            disabled={busy}
-            onClick={() => setShowEditDate((s) => !s)}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setShowEditDate((s) => !s)}>
             Set payment date
-          </button>
+          </Button>
         )}
         {!isTerminal && (
-          <button
-            disabled={busy}
-            onClick={() => run(() => simulateAgentPayment(token!, chase.id))}
-            className="rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 px-3 py-1.5 text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => run(() => simulateAgentPayment(token!, chase.id))}>
             Simulate payment
-          </button>
+          </Button>
         )}
         {!isTerminal && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={closeBusy}
             onClick={() => {
               setCloseBusy(true);
               run(() => closeAgentCase(token!, chase.id)).finally(() => setCloseBusy(false));
             }}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
           >
             Close
-          </button>
+          </Button>
         )}
       </div>
 
       {showEditDate && (
-        <div className="mb-4 flex items-center gap-2">
-          <input
-            type="date"
-            value={newDate}
-            onChange={(e) => setNewDate(e.target.value)}
-            className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[13px]"
-          />
-          <button
+        <div className="mb-5 flex items-center gap-3">
+          <Input type="date" dense value={newDate} onChange={(e) => setNewDate(e.target.value)} className="w-auto" />
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={busy || !newDate}
             onClick={() =>
               run(async () => {
@@ -292,17 +274,16 @@ function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => v
                 setShowEditDate(false);
               })
             }
-            className="rounded-full bg-green-700 px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
           >
             Save
-          </button>
+          </Button>
         </div>
       )}
 
       <div>
-        <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">History</h3>
-        {!events && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
-        {events && events.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No events yet.</p>}
+        <Eyebrow as="p" className="mb-3">History</Eyebrow>
+        {!events && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {events && events.length === 0 && <p className="text-sm text-muted-foreground">No events yet.</p>}
         <div>
           {(() => {
             let blockedSeen = 0;
@@ -315,6 +296,7 @@ function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => v
                   event={e}
                   trace={trace}
                   isLast={i === events.length - 1}
+                  tone="bold"
                 />
               );
             });
@@ -393,31 +375,31 @@ export default function Chases() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chases</h1>
-        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
-          Every invoice the agent is actively pursuing, or has escalated for review. Open a case in Trace Studio to
-          send a follow-up or inject a reply.
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <PageHeader
+        eyebrow="Outcome agent"
+        title="Chases"
+        description="Every invoice the agent is actively pursuing, or has escalated for review. Open a case in Trace Studio to send a follow-up or inject a reply."
+      />
 
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Filter chases">
         {(["open", "escalated", "all"] as const).map((f) => (
           <button
             key={f}
+            role="tab"
+            aria-selected={filter === f}
             onClick={() => setFilter(f)}
-            className={`rounded-full px-3.5 py-1.5 text-[13px] font-medium capitalize transition-colors ${
+            className={`border px-3.5 py-2 font-mono text-xs font-medium uppercase tracking-wider capitalize transition-colors duration-150 ease-bold ${
               filter === f
-                ? "bg-green-700 text-white"
-                : "border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                ? "border-accent text-accent"
+                : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
             }`}
           >
             {f}
@@ -425,10 +407,10 @@ export default function Chases() {
         ))}
       </div>
 
-      {!chases && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
-      {chases && visible.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No chases here.</p>}
+      {!chases && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {chases && visible.length === 0 && <p className="text-sm text-muted-foreground">No chases here.</p>}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.3fr]">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[5fr_7fr]">
         <div className="space-y-2">
           {projectGroups.map((group) => {
             const key = group.project_number ?? "unknown";
@@ -436,47 +418,45 @@ export default function Chases() {
             const escalatedCount = group.chases.filter((c) => c.state === "escalated_to_human").length;
 
             return (
-              <div key={key} className="overflow-hidden rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+              <div key={key} className="border border-border">
                 <button
                   onClick={() => toggleExpanded(key)}
-                  className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors duration-150 ease-bold hover:bg-muted"
+                  aria-expanded={isOpen}
                 >
-                  <span className={`shrink-0 text-zinc-400 dark:text-zinc-500 transition-transform ${isOpen ? "rotate-90" : ""}`} aria-hidden>
-                    &#9656;
-                  </span>
+                  <ChevronRight
+                    size={14}
+                    strokeWidth={1.5}
+                    aria-hidden
+                    className={`shrink-0 text-muted-foreground transition-transform duration-150 ease-bold ${isOpen ? "rotate-90" : ""}`}
+                  />
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
+                    <p className="truncate text-sm font-medium text-foreground">
                       {group.project_number ? projectNames.get(group.project_number) ?? group.project_number : "No project"}
                     </p>
-                    {group.project_number && <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
+                    {group.project_number && <p className="font-mono text-xs text-muted-foreground">{group.project_number}</p>}
                   </div>
                   <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                    {escalatedCount > 0 && (
-                      <span className="rounded-full bg-rose-50 dark:bg-rose-950/40 px-2 py-0.5 text-[11px] font-medium text-rose-700 dark:text-rose-300">
-                        {escalatedCount} escalated
-                      </span>
-                    )}
-                    <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                      {group.chases.length}
-                    </span>
+                    {escalatedCount > 0 && <Badge tone="critical">{escalatedCount} escalated</Badge>}
+                    <Badge tone="neutral">{group.chases.length}</Badge>
                   </span>
                 </button>
 
                 {isOpen && (
-                  <div className="space-y-1 border-t border-zinc-100 dark:border-zinc-800 p-2">
+                  <div className="space-y-1 border-t border-border p-2">
                     {group.chases.map((c) => (
                       <button
                         key={c.id}
                         onClick={() => setSelectedId(c.id)}
-                        className={`block w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                          selectedId === c.id ? "border-green-700 bg-zinc-50 dark:bg-zinc-800/40" : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+                        className={`block w-full border px-3 py-2.5 text-left transition-colors duration-150 ease-bold ${
+                          selectedId === c.id ? "border-accent bg-muted" : "border-transparent hover:bg-muted"
                         }`}
                       >
-                        <p className="truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-200">
+                        <p className="truncate font-mono text-sm font-medium text-foreground">
                           {c.invoice_no ?? c.case_key ?? c.case_id}
                         </p>
-                        <div className="mt-1">
-                          <AgentPhaseRail state={c.state} target={c.target} compact />
+                        <div className="mt-1.5">
+                          <AgentPhaseRail state={c.state} target={c.target} compact tone="bold" />
                         </div>
                       </button>
                     ))}
@@ -491,7 +471,7 @@ export default function Chases() {
           {selected ? (
             <CaseDetail chase={selected} onChanged={refresh} />
           ) : (
-            <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Select a chase to see its details.</p>
+            <p className="text-sm text-muted-foreground">Select a chase to see its details.</p>
           )}
         </div>
       </div>

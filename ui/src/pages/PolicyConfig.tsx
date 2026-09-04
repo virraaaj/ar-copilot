@@ -5,7 +5,13 @@
 // escalation) are live toggles backed by runtime_flags.py -- the only
 // two CHASE_* flags an operator can flip without editing .env and
 // restarting; everything else here stays read-only by design.
+//
+// Converted to Bold Typography (2026-09-04): this is a config/settings
+// screen, not a marketing page, so the system's poster-scale type is
+// deliberately dialed back -- labeled rows, mono for every numeric/boolean
+// value, and Card used only to group related fields, not for decoration.
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useSession } from "../context/SessionContext";
 import {
   clearDefaultPolicyOverride,
@@ -22,22 +28,23 @@ import {
   type PolicyDocument,
   type Project,
 } from "../api";
+import { Card } from "../components/ui/Card";
+import { Button } from "../components/ui/Button";
+import { Input, Select } from "../components/ui/Input";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge } from "../components/ui/Badge";
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 py-2 text-[13px] last:border-0">
-      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
-      <span className="font-medium text-zinc-800 dark:text-zinc-200">{value}</span>
+    <div className="flex items-center justify-between gap-3 border-b border-border py-2.5 text-sm last:border-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono text-foreground">{value}</span>
     </div>
   );
 }
 
 function Bool({ value }: { value: boolean }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${value ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"}`}>
-      {value ? "On" : "Off"}
-    </span>
-  );
+  return <Badge tone={value ? "positive" : "neutral"}>{value ? "On" : "Off"}</Badge>;
 }
 
 function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boolean; onToggle: () => void }) {
@@ -45,8 +52,10 @@ function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boole
     <button
       disabled={disabled}
       onClick={onToggle}
-      className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-50 ${
-        value ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+      className={`min-h-11 border px-3 font-mono text-xs font-medium uppercase tracking-wide transition-colors duration-150 ease-bold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+        value
+          ? "border-[#2f8f4e] text-[#4ade80] hover:bg-[#2f8f4e]/10"
+          : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
       }`}
     >
       {value ? "On" : "Off"}
@@ -54,12 +63,12 @@ function Toggle({ value, disabled, onToggle }: { value: boolean; disabled: boole
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
   return (
-    <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{title}</h3>
+    <Card className={`p-5 md:p-5 ${className}`}>
+      <Eyebrow as="p" className="mb-3">{title}</Eyebrow>
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -134,44 +143,37 @@ function PolicyFieldRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 py-2.5 text-[13px] last:border-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3 text-sm last:border-0">
       <div className="min-w-0">
-        <p className="text-zinc-700 dark:text-zinc-300">{meta.label}</p>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{SOURCE_LABEL[data.source]}</p>
+        <p className="text-foreground">{meta.label}</p>
+        <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">{SOURCE_LABEL[data.source]}</p>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-2">
         {meta.kind === "bool" ? (
           <Toggle value={Boolean(data.value)} disabled={busy} onToggle={() => onSave(field, !data.value)} />
         ) : (
           <>
-            {meta.unit && meta.unit !== "$" && <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{meta.unit}</span>}
-            {meta.unit === "$" && <span className="text-[11px] text-zinc-400 dark:text-zinc-500">$</span>}
-            <input
+            {meta.unit && (
+              <span className="font-mono text-xs text-muted-foreground">{meta.unit === "$" ? "$" : meta.unit}</span>
+            )}
+            <Input
+              dense
               type="number"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="w-20 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-right text-[13px] tabular-nums"
+              className="w-20 text-right font-mono tabular-nums"
             />
             {dirty && (
-              <button
-                disabled={busy}
-                onClick={save}
-                className="rounded-full bg-green-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-green-800 disabled:opacity-40"
-              >
+              <Button variant="secondary" size="sm" disabled={busy} onClick={save}>
                 Save
-              </button>
+              </Button>
             )}
           </>
         )}
         {canReset && (
-          <button
-            disabled={busy}
-            onClick={reset}
-            className="rounded-full border border-zinc-200 dark:border-zinc-700 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-40"
-            title={scope === "default" ? "Revert to factory value" : "Revert to default"}
-          >
+          <Button variant="ghost" size="sm" disabled={busy} onClick={reset} title={scope === "default" ? "Revert to factory value" : "Revert to default"}>
             Reset
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -226,19 +228,20 @@ function EditablePolicyPanel() {
   }
 
   return (
-    <div className="sm:col-span-2 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <Card className="p-5 md:p-5 sm:col-span-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Customize policy</h3>
-          <p className="mt-0.5 text-[12px] text-zinc-400 dark:text-zinc-500">
+          <Eyebrow as="p" tone="accent" className="mb-1">Customize policy</Eyebrow>
+          <p className="max-w-lg text-sm leading-normal text-muted-foreground">
             Set defaults for every project, or override just one. A project falls back to the default for any field
             it hasn't overridden.
           </p>
         </div>
-        <select
+        <Select
+          dense
           value={selectedProject}
           onChange={(e) => setSelectedProject(e.target.value)}
-          className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-[13px]"
+          className="w-auto"
         >
           <option value="">Default (all projects)</option>
           {projects.map((p) => (
@@ -246,14 +249,16 @@ function EditablePolicyPanel() {
               {p.project_name ?? p.project_number} ({p.project_number})
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {error && (
-        <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">{error}</p>
+        <p className="mb-3 border border-accent px-3 py-2 text-sm text-accent" role="alert">
+          {error}
+        </p>
       )}
 
-      {!fields && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>}
+      {!fields && <p className="text-sm text-muted-foreground">Loading…</p>}
       {fields && (
         <div>
           {Object.entries(POLICY_FIELD_META).map(([field]) => (
@@ -268,7 +273,7 @@ function EditablePolicyPanel() {
           ))}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -301,20 +306,26 @@ export default function PolicyConfig() {
     }
   }
 
-  if (error) return <p className="px-6 py-8 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>;
-  if (!data) return <p className="px-6 py-8 text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>;
+  if (error) {
+    return (
+      <p className="border border-accent px-6 py-4 mx-6 my-8 text-sm text-accent" role="alert">
+        {error}
+      </p>
+    );
+  }
+  if (!data) return <p className="px-6 py-8 text-sm text-muted-foreground">Loading…</p>;
 
   return (
     <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 px-6 py-8 sm:grid-cols-2">
       <EditablePolicyPanel />
 
-      <Card title="Contact frequency">
+      <SectionCard title="Contact frequency">
         <Row label="Nudge interval" value={`${data.contact_frequency.nudge_interval_days} days`} />
         <Row label="Max nudges" value={data.contact_frequency.max_nudges} />
         <Row label="Min hours between touches" value={data.contact_frequency.min_hours_between_touches} />
-      </Card>
+      </SectionCard>
 
-      <Card title="Escalation rules">
+      <SectionCard title="Escalation rules">
         <Row label="Max missed commitments" value={data.escalation_rules.max_missed_commitments} />
         <Row label="Max commitment days" value={data.escalation_rules.max_commitment_days} />
         <Row label="Grace days" value={data.escalation_rules.grace_days} />
@@ -325,9 +336,9 @@ export default function PolicyConfig() {
           label="Blackout dates"
           value={data.escalation_rules.blackout_dates.length ? data.escalation_rules.blackout_dates.join(", ") : "None"}
         />
-      </Card>
+      </SectionCard>
 
-      <Card title="Channel configuration">
+      <SectionCard title="Channel configuration">
         <Row label="Chase engine enabled" value={<Bool value={data.channel_configuration.chase_enabled} />} />
         <Row label="Mail polling enabled" value={<Bool value={data.channel_configuration.mail_poll_enabled} />} />
         <Row
@@ -357,33 +368,31 @@ export default function PolicyConfig() {
           label="To-address allowlist"
           value={data.channel_configuration.to_address_allowlist.length ? data.channel_configuration.to_address_allowlist.join(", ") : "Unrestricted"}
         />
-      </Card>
+      </SectionCard>
 
-      <Card title="Allowed actions">
+      <SectionCard title="Allowed actions">
         <div className="flex flex-wrap gap-1.5">
           {data.allowed_actions.map((a) => (
-            <span key={a} className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11.5px] font-medium text-zinc-600 dark:text-zinc-300">
-              {a.replace(/_/g, " ")}
-            </span>
+            <Badge key={a} tone="neutral">{a.replace(/_/g, " ")}</Badge>
           ))}
         </div>
-      </Card>
+      </SectionCard>
 
       {docs && (
-        <div className="sm:col-span-2 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <h3 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Policy documents</h3>
-          <p className="mb-3 text-[12px] text-zinc-400 dark:text-zinc-500">
+        <Card className="p-5 md:p-5 sm:col-span-2">
+          <Eyebrow as="p" className="mb-1">Policy documents</Eyebrow>
+          <p className="mb-3 text-sm text-muted-foreground">
             The library the AI composer references when drafting messages (keyword-matched to what it's writing).
           </p>
           <div className="space-y-3">
             {docs.map((d) => (
-              <div key={d.id} className="border-t border-zinc-100 dark:border-zinc-800 pt-3 first:border-0 first:pt-0">
-                <p className="mb-0.5 text-[13px] font-medium text-zinc-800 dark:text-zinc-200">{d.title}</p>
-                <p className="text-[12.5px] text-zinc-500 dark:text-zinc-400">{d.text}</p>
+              <div key={d.id} className="border-t border-border pt-3 first:border-0 first:pt-0">
+                <p className="mb-0.5 text-sm font-medium text-foreground">{d.title}</p>
+                <p className="text-sm leading-normal text-muted-foreground">{d.text}</p>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );

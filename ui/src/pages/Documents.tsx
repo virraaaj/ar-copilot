@@ -6,6 +6,7 @@
 // original upload/search/list UI scoped to that project via project_number.
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { ArrowLeft, Upload } from "lucide-react";
 import {
   listDocuments,
   searchDocuments,
@@ -16,11 +17,14 @@ import {
   type Project,
 } from "../api";
 import { useSession } from "../context/SessionContext";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
+import { Input, Select } from "../components/ui/Input";
+import { Divider } from "../components/ui/Divider";
 
 const DOC_TYPES = ["vendor_certification", "customer_manual", "quote", "terms_and_conditions", "equipment_manual"];
-
-const selectClass =
-  "rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10";
 
 const UNFILED = "_unfiled";
 
@@ -39,8 +43,8 @@ export default function Documents() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+      <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   }
@@ -60,8 +64,8 @@ export default function Documents() {
 
   if (!projects) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
+      <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
@@ -70,11 +74,12 @@ export default function Documents() {
   const unfiledCount = countFor(null);
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Documents</h1>
-        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">Certifications, manuals, quotes, and T&amp;Cs — organized by project.</p>
-      </div>
+    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+      <PageHeader
+        eyebrow="Library"
+        title="Documents"
+        description="Certifications, manuals, quotes, and T&Cs — organized by project."
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {projects.map((p) => {
@@ -83,18 +88,18 @@ export default function Documents() {
             <button
               key={p.project_number}
               onClick={() => setOpenFolder(p)}
-              className="flex items-center gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+              className="flex items-center gap-3 border border-border p-4 text-left transition-colors duration-150 ease-bold hover:border-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-700 text-[13px] font-semibold text-white">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-border font-mono text-xs font-semibold text-foreground">
                 {(p.project_name ?? p.project_number).slice(0, 1).toUpperCase()}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{p.project_name ?? p.project_number}</p>
-                <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{p.project_number}</p>
+                <p className="truncate text-sm font-medium text-foreground">{p.project_name ?? p.project_number}</p>
+                <p className="font-mono text-xs text-muted-foreground">{p.project_number}</p>
               </div>
-              <span className="shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <Badge tone="neutral" className="shrink-0">
                 {count} doc{count === 1 ? "" : "s"}
-              </span>
+              </Badge>
             </button>
           );
         })}
@@ -102,23 +107,23 @@ export default function Documents() {
         {unfiledCount > 0 && (
           <button
             onClick={() => setOpenFolder({ project_number: UNFILED, project_name: "Unfiled" })}
-            className="flex items-center gap-3 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+            className="flex items-center gap-3 border border-dashed border-border p-4 text-left transition-colors duration-150 ease-bold hover:border-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-300 dark:bg-zinc-600 text-[13px] font-semibold text-white">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-border font-mono text-xs font-semibold text-muted-foreground">
               ?
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">Unfiled</p>
-              <p className="text-[12px] text-zinc-400 dark:text-zinc-500">Uploaded before project folders existed</p>
+              <p className="truncate text-sm font-medium text-foreground">Unfiled</p>
+              <p className="font-mono text-xs text-muted-foreground">Uploaded before project folders existed</p>
             </div>
-            <span className="shrink-0 rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+            <Badge tone="neutral" className="shrink-0">
               {unfiledCount} doc{unfiledCount === 1 ? "" : "s"}
-            </span>
+            </Badge>
           </button>
         )}
 
         {projects.length === 0 && unfiledCount === 0 && (
-          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>
+          <p className="text-sm text-muted-foreground">No projects found.</p>
         )}
       </div>
     </div>
@@ -177,46 +182,51 @@ function ProjectDocuments({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
       <button
         onClick={onBack}
-        className="mb-4 text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+        className="mb-6 inline-flex items-center gap-1.5 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        ← All projects
+        <ArrowLeft size={14} strokeWidth={1.5} aria-hidden />
+        All projects
       </button>
 
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="mb-8 flex flex-col items-start justify-between gap-4 border-b border-border pb-8 sm:flex-row sm:items-end">
         <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <Eyebrow as="p" className="mb-3">{isUnfiled ? "Unfiled" : "Project"}</Eyebrow>
+          <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
             {projectName ?? projectNumber}
           </h1>
-          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
+          <p className="mt-2 text-sm text-muted-foreground">
             {isUnfiled ? "Documents uploaded before project folders existed." : `Documents for project ${projectNumber}.`}
           </p>
         </div>
         {!isUnfiled && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0"
             onClick={() => {
               setCurrentProject({ project_number: projectNumber, project_name: projectName });
               navigate("/chat");
             }}
-            className="shrink-0 rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800"
           >
             Chat about this project
-          </button>
+          </Button>
         )}
       </div>
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
+      {error && <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>}
 
-      <div className="mb-4 flex items-center gap-2">
-        <select
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Select
+          dense
           value={docType}
           onChange={(e) => {
             setDocType(e.target.value);
             setResults(null);
           }}
-          className={selectClass}
+          className="w-auto"
         >
           <option value="">All types</option>
           {DOC_TYPES.map((t) => (
@@ -224,63 +234,64 @@ function ProjectDocuments({
               {t.replace(/_/g, " ")}
             </option>
           ))}
-        </select>
+        </Select>
 
         {!isUnfiled && (
-          <label className="cursor-pointer rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-[13px] font-medium text-zinc-600 dark:text-zinc-300 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
-            {uploading ? "Uploading..." : "Upload PDF"}
+          <label>
+            <span className="inline-flex h-11 cursor-pointer items-center gap-2 border border-foreground px-4 font-sans text-xs font-semibold uppercase tracking-wider text-foreground transition-all duration-150 ease-bold hover:bg-foreground hover:text-background">
+              <Upload size={14} strokeWidth={1.5} aria-hidden />
+              {uploading ? "Uploading…" : "Upload PDF"}
+            </span>
             <input type="file" accept="application/pdf" onChange={handleUpload} disabled={uploading} className="hidden" />
           </label>
         )}
       </div>
 
-      <form onSubmit={handleSearch} className="mb-6 flex gap-2">
-        <input
+      <form onSubmit={handleSearch} className="mb-8 flex gap-3">
+        <Input
+          dense
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search document content..."
-          className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10"
+          placeholder="Search document content…"
+          className="flex-1"
         />
-        <button
-          type="submit"
-          className="rounded-xl bg-green-700 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-green-800"
-        >
+        <Button type="submit" variant="secondary" size="sm">
           Search
-        </button>
+        </Button>
       </form>
 
       {results && (
-        <div className="mb-8 space-y-2">
-          <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{results.length} result(s)</p>
+        <div className="mb-10 space-y-3">
+          <Eyebrow as="p">{results.length} result{results.length === 1 ? "" : "s"}</Eyebrow>
           {results.map((r, i) => (
-            <div
-              key={i}
-              className="rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-            >
-              <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">
-                {r.filename} <span className="font-normal text-zinc-400 dark:text-zinc-500">· page {r.page}</span>
+            <div key={i} className="border border-border p-4">
+              <p className="text-sm font-medium text-foreground">
+                <span className="font-mono">{r.filename}</span>{" "}
+                <span className="font-mono font-normal text-muted-foreground">&middot; page {r.page}</span>
               </p>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">{r.excerpt}</p>
+              <p className="mt-2 text-sm leading-normal text-muted-foreground">{r.excerpt}</p>
             </div>
           ))}
         </div>
       )}
 
-      <p className="mb-2 text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Documents in this folder</p>
-      <div className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        {docs.map((d) => (
-          <div
-            key={d.filename}
-            className="flex items-center justify-between border-b border-zinc-50 dark:border-zinc-800 px-5 py-3 text-[13px] last:border-0"
-          >
-            <span className="font-medium text-zinc-800 dark:text-zinc-200">{d.filename}</span>
-            <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-0.5 text-[12px] font-medium capitalize text-zinc-500 dark:text-zinc-400">
-              {d.doc_type?.replace(/_/g, " ") ?? "untyped"}
-            </span>
+      <Eyebrow as="p" className="mb-3">Documents in this folder</Eyebrow>
+      <div className="border border-border">
+        {docs.map((d, i) => (
+          <div key={d.filename}>
+            {i > 0 && <Divider />}
+            <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+              <span className="truncate font-mono text-sm text-foreground">{d.filename}</span>
+              <Badge tone="neutral" className="shrink-0">
+                {d.doc_type?.replace(/_/g, " ") ?? "untyped"}
+              </Badge>
+            </div>
           </div>
         ))}
         {docs.length === 0 && (
-          <div className="px-5 py-12 text-center text-[13px] text-zinc-400 dark:text-zinc-500">No documents yet.</div>
+          <div className="px-5 py-16 text-center">
+            <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No documents yet.</p>
+          </div>
         )}
       </div>
     </div>

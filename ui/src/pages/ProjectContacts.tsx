@@ -1,7 +1,7 @@
 // Same design/concept as Lummus's own Project Contacts page, deliberately
 // mirrored per request (2026-07-16): one section per project, a card grid
-// of that project's contacts (one per role, colored by role), an "Add
-// contact" tile for any unassigned role, and edit/delete on each card.
+// of that project's contacts (one per role), an "Add contact" tile for any
+// unassigned role, and edit/delete on each card.
 import { useEffect, useState } from "react";
 import {
   listProjectContacts,
@@ -14,6 +14,9 @@ import {
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { ContactCard, AddContactTile, EmptyContactsState, ContactFormModal, type ContactFormValues } from "../components/ContactCard";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge } from "../components/ui/Badge";
+import { Button } from "../components/ui/Button";
 
 type ModalState = { projectNumber: string; contact: Contact | null } | null;
 
@@ -71,58 +74,55 @@ export default function ProjectContacts() {
   if (error) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>
+        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   }
   if (!groups) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading...</p>
+        <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Project Contacts</h1>
-        <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
+      <div className="mb-8 border-b border-border pb-6">
+        <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Project Contacts</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
           Who to reach for each project -- one contact per role. New projects start from the{" "}
-          <a href="/settings" className="font-medium text-zinc-600 dark:text-zinc-300 underline underline-offset-2">
+          <a href="/settings" className="text-foreground underline underline-offset-2 hover:text-accent">
             default contacts
           </a>{" "}
           template (Settings tab).
         </p>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-8">
         {groups.map((group) => {
           const usedRoles = group.contacts.map((c) => c.contact_type);
           const hasUnassignedRole = usedRoles.length < CONTACT_TYPES.length;
           return (
-            <div key={group.project_number} className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-              <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-5 py-3.5">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 dark:bg-zinc-700 text-[12px] font-semibold text-white">
-                    {(group.project_name ?? group.project_number).slice(0, 1).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{group.project_name ?? group.project_number}</p>
-                    <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>
-                  </div>
+            <div key={group.project_number} className="border border-border">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+                <div className="min-w-0">
+                  <p className="truncate text-base font-medium text-foreground">{group.project_name ?? group.project_number}</p>
+                  <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">{group.project_number}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                <div className="flex shrink-0 items-center gap-3">
+                  <Badge tone="neutral">
                     {group.contacts.length} contact{group.contacts.length === 1 ? "" : "s"}
-                  </span>
+                  </Badge>
                   {hasUnassignedRole && (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setModal({ projectNumber: group.project_number, contact: null })}
-                      className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-[12px] font-medium text-zinc-700 dark:text-zinc-300 transition-colors hover:bg-white dark:hover:bg-zinc-800"
                     >
                       Add contact
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -132,11 +132,10 @@ export default function ProjectContacts() {
                   <EmptyContactsState onAddFirst={() => setModal({ projectNumber: group.project_number, contact: null })} />
                 ) : (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {group.contacts.map((c, i) => (
+                    {group.contacts.map((c) => (
                       <ContactCard
                         key={c.contact_id}
                         contact={c}
-                        accentIndex={i}
                         onEdit={() => setModal({ projectNumber: group.project_number, contact: c })}
                         onDelete={() => handleDelete(c.contact_id)}
                       />
@@ -150,7 +149,7 @@ export default function ProjectContacts() {
             </div>
           );
         })}
-        {groups.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>}
+        {groups.length === 0 && <p className="text-sm text-muted-foreground">No projects found.</p>}
       </div>
 
       {modal && (

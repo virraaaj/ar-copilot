@@ -5,6 +5,7 @@
 // model doing the work live, not a canned replay.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 import {
   listGuidedDemoScenarios,
   resetGuidedDemo,
@@ -16,6 +17,9 @@ import {
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
 import { ChaseEventRow } from "../components/ChaseEventRow";
+import { Button } from "../components/ui/Button";
+import { Badge } from "../components/ui/Badge";
+import { PageHeader } from "../components/ui/PageHeader";
 
 type ScenarioRuntime = {
   nextStep: number;
@@ -151,107 +155,94 @@ export default function GuidedDemo() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            ✨ Guided Demo
-          </h1>
-          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">
-            Three scenarios, stepped through live against the real agent -- every draft, classification, and
-            decision below is the actual model, not a script.
-          </p>
-        </div>
-        {started && (
-          <button
-            disabled={resetBusy || anyStepRunning}
-            onClick={start}
-            title={anyStepRunning ? "Wait for the running step to finish before restarting" : "Reset the store and start all three scenarios over from step 1"}
-            className="shrink-0 rounded-full border border-zinc-200 dark:border-zinc-700 px-3.5 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 disabled:opacity-50"
-          >
-            Restart demo
-          </button>
-        )}
-      </div>
+    <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
+      <PageHeader
+        eyebrow="Live walkthrough"
+        title={
+          <span className="inline-flex items-center gap-3">
+            <Sparkles size={30} strokeWidth={1.5} className="text-accent" aria-hidden />
+            Guided Demo
+          </span>
+        }
+        description="Three scenarios, stepped through live against the real agent -- every draft, classification, and decision below is the actual model, not a script."
+        actions={
+          started ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={resetBusy || anyStepRunning}
+              onClick={start}
+              title={anyStepRunning ? "Wait for the running step to finish before restarting" : "Reset the store and start all three scenarios over from step 1"}
+            >
+              Restart demo
+            </Button>
+          ) : undefined
+        }
+      />
 
       {!started && (
-        <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <p className="mb-4 text-[13px] text-zinc-500 dark:text-zinc-400">
+        <div className="border border-border p-6 md:p-8">
+          <p className="mb-5 max-w-2xl text-sm leading-normal text-muted-foreground">
             Starting the demo resets the outcome-agent store and loads three fresh invoices, one per scenario
             below. This clears any other test data currently in Chases.
           </p>
           {startError && (
-            <p className="mb-3 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-400">
+            <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">
               {startError}
             </p>
           )}
-          <button
-            disabled={resetBusy || !scenarios}
-            onClick={start}
-            className="rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2 text-[13.5px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {starting ? "Starting…" : "Start Demo"}
-          </button>
+          <Button variant="primary" size="md" disabled={resetBusy || !scenarios} onClick={start}>
+            {starting ? "Starting…" : "Start demo"}
+          </Button>
         </div>
       )}
 
       {started && scenarios && (
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid gap-6 lg:grid-cols-3">
           {scenarios.map((s) => {
             const rt = runtime[s.id];
             if (!rt) return null;
             const done = rt.nextStep >= s.steps.length;
             const nextBeat = s.steps[rt.nextStep];
             return (
-              <div
-                key={s.id}
-                className="flex flex-col overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-              >
-                <div className="border-b border-zinc-100 dark:border-zinc-800 px-4 py-3.5">
-                  <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">{s.title}</p>
-                  <p className="mt-0.5 text-[11.5px] text-zinc-400 dark:text-zinc-500">
-                    {s.project_name} · {s.invoice_no}
+              <div key={s.id} className="flex flex-col border border-border">
+                <div className="border-b border-border px-5 py-4">
+                  <p className="font-mono text-sm font-semibold text-foreground">{s.title}</p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {s.project_name} &middot; {s.invoice_no}
                   </p>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 border border-border">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 transition-all"
+                        className="h-full bg-accent transition-all duration-150 ease-bold"
                         style={{ width: `${(rt.nextStep / s.steps.length) * 100}%` }}
                       />
                     </div>
-                    <span className="shrink-0 text-[11px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
                       {rt.nextStep}/{s.steps.length}
                     </span>
                   </div>
                 </div>
 
                 {rt.case && (
-                  <div className="border-b border-zinc-100 dark:border-zinc-800 px-4 py-3">
-                    <AgentPhaseRail state={rt.case.state} target={rt.case.target} compact />
+                  <div className="border-b border-border px-5 py-3">
+                    <AgentPhaseRail state={rt.case.state} target={rt.case.target} compact tone="bold" />
                   </div>
                 )}
 
-                <div className="flex-1 space-y-0 overflow-y-auto px-4 py-3" style={{ maxHeight: 420 }}>
+                <div className="flex-1 space-y-0 overflow-y-auto px-5 py-4" style={{ maxHeight: 440 }}>
                   {rt.history.length === 0 && (
-                    <p className="text-[12.5px] text-zinc-400 dark:text-zinc-500">
-                      Click "Run next step" to begin.
-                    </p>
+                    <p className="text-sm text-muted-foreground">Click &ldquo;Run next step&rdquo; to begin.</p>
                   )}
                   {rt.history.map((h, i) => (
-                    <div key={i} className="mb-3">
-                      <div className="mb-1 flex items-center gap-1.5">
-                        <span className="rounded-full bg-violet-50 dark:bg-violet-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
-                          {opLabel(h.op)}
-                        </span>
-                        {h.reply_as && (
-                          <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                            as {h.reply_as}
-                          </span>
-                        )}
+                    <div key={i} className="mb-4">
+                      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                        <Badge tone="accent">{opLabel(h.op)}</Badge>
+                        {h.reply_as && <Badge tone="neutral">as {h.reply_as}</Badge>}
                       </div>
-                      <p className="text-[12.5px] text-zinc-600 dark:text-zinc-300">{h.narration}</p>
+                      <p className="text-sm leading-normal text-foreground">{h.narration}</p>
                       {replySummary(h) && (
-                        <p className="mt-0.5 text-[11.5px] italic text-zinc-400 dark:text-zinc-500">
+                        <p className="mt-1 text-xs italic text-muted-foreground">
                           Understood as: {replySummary(h)}
                         </p>
                       )}
@@ -267,8 +258,8 @@ export default function GuidedDemo() {
                           something happened. */}
                       {(h.new_events && h.new_events.length > 0 ? h.new_events : h.latest_events?.slice(-1) || []).map(
                         (ev, j, arr) => (
-                          <div key={j} className="mt-1.5">
-                            <ChaseEventRow event={ev} trace={buildTrace(h.case?.last_decision)} isLast={j === arr.length - 1} />
+                          <div key={j} className="mt-2">
+                            <ChaseEventRow event={ev} trace={buildTrace(h.case?.last_decision)} isLast={j === arr.length - 1} tone="bold" />
                           </div>
                         )
                       )}
@@ -277,31 +268,25 @@ export default function GuidedDemo() {
                 </div>
 
                 {rt.error && (
-                  <p className="mx-4 mb-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[12px] text-rose-600 dark:text-rose-400">
+                  <p className="mx-5 mb-3 border border-accent px-3 py-2 text-xs text-accent" role="alert">
                     {rt.error}
                   </p>
                 )}
 
-                <div className="border-t border-zinc-100 dark:border-zinc-800 px-4 py-3">
+                <div className="border-t border-border px-5 py-4">
                   {!done ? (
-                    <button
-                      disabled={rt.busy || resetBusy}
-                      onClick={() => runNextStep(s)}
-                      className="w-full rounded-full bg-zinc-900 dark:bg-zinc-100 px-3.5 py-1.5 text-[12.5px] font-medium text-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-50"
-                    >
+                    <Button variant="secondary" size="sm" disabled={rt.busy || resetBusy} onClick={() => runNextStep(s)} className="w-full">
                       {rt.busy ? "Running…" : `Run next step: ${opLabel(nextBeat.op)}`}
-                    </button>
+                    </Button>
                   ) : (
-                    <div className="flex items-center justify-between">
-                      <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                        Scenario complete
-                      </span>
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge tone="positive">Scenario complete</Badge>
                       {rt.case && (
                         <Link
                           to={`/chases?case_id=${rt.case.id}`}
-                          className="text-[12px] font-medium text-zinc-600 dark:text-zinc-300 hover:underline"
+                          className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground underline decoration-dotted transition-colors duration-150 ease-bold hover:text-foreground"
                         >
-                          View in Chases →
+                          View in Chases &rarr;
                         </Link>
                       )}
                     </div>
@@ -312,6 +297,6 @@ export default function GuidedDemo() {
           })}
         </div>
       )}
-    </main>
+    </div>
   );
 }

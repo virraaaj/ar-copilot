@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { ChevronRight, Upload } from "lucide-react";
 import {
   listInvoices, getAgingSummary, uploadAgingExcel, listAgentCases,
   type Invoice, type AgingSummary, type AgentCase,
 } from "../api";
 import { useSession } from "../context/SessionContext";
 import { AgentPhaseRail } from "../components/AgentPhaseRail";
+import { Button } from "../components/ui/Button";
+import { Select } from "../components/ui/Input";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { Divider } from "../components/ui/Divider";
 
 const OPEN_AGENT_STATES = new Set([
   "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer", "customer_responded",
@@ -17,20 +23,17 @@ function money(n: number | null): string {
   return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
-  closed_paid: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-  closed_other: "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400",
-  snoozed: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+const STATUS_TONE: Record<string, BadgeTone> = {
+  active: "positive",
+  closed_paid: "neutral",
+  closed_other: "neutral",
+  snoozed: "warning",
 };
 
-function Pill({ label, styleMap }: { label: string | null; styleMap: Record<string, string> }) {
-  if (!label) return <span className="text-zinc-300 dark:text-zinc-600">--</span>;
-  const cls = styleMap[label] ?? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300";
+function StatusBadge({ label }: { label: string | null }) {
+  if (!label) return <span className="font-mono text-xs text-muted-foreground">--</span>;
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-medium capitalize ${cls}`}>
-      {label.replace(/_/g, " ")}
-    </span>
+    <Badge tone={STATUS_TONE[label] ?? "neutral"}>{label.replace(/_/g, " ")}</Badge>
   );
 }
 
@@ -150,17 +153,15 @@ export default function Dashboard() {
     return agentCases.filter((c) => c.project_number === projectNumber);
   }
 
-  const selectClass =
-    "rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300 outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10";
-
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8 flex items-start justify-between gap-4">
+    <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <div className="mb-10 flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-end">
         <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Aging Overview</h1>
-          <p className="mt-1 text-[14px] text-zinc-400 dark:text-zinc-500">A live snapshot of open invoices across every project.</p>
+          <Eyebrow as="p" tone="accent" className="mb-3">Live snapshot</Eyebrow>
+          <h1 className="font-display text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">Aging Overview</h1>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Every open invoice across every project, as of the last sync.</p>
         </div>
-        <div className="shrink-0 text-right">
+        <div className="shrink-0">
           <input
             ref={fileInputRef}
             type="file"
@@ -171,70 +172,70 @@ export default function Dashboard() {
               if (file) void handleUploadFile(file);
             }}
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="rounded-full bg-green-700 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {uploading ? "Uploading..." : "Upload aging Excel"}
-          </button>
+          <Button variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Upload size={16} strokeWidth={1.5} aria-hidden />
+            {uploading ? "Uploading…" : "Upload aging Excel"}
+          </Button>
         </div>
       </div>
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
+      {error && <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>}
       {uploadMessage && (
-        <p className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">{uploadMessage}</p>
+        <p className="mb-4 border border-border px-4 py-3 text-sm text-foreground">{uploadMessage}</p>
       )}
-      {uploadError && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{uploadError}</p>}
+      {uploadError && <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{uploadError}</p>}
 
       {summary && (
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Total Open</p>
-            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+        <div className="mb-10 grid grid-cols-2 divide-x divide-y divide-border border border-border sm:grid-cols-4 sm:divide-y-0">
+          <div className="px-5 py-6">
+            <Eyebrow as="p" className="mb-2">Total Open</Eyebrow>
+            <p className="font-mono text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
               {money(summary.total_open_amount)}
             </p>
           </div>
-          <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-            <p className="text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Invoices</p>
-            <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+          <div className="px-5 py-6">
+            <Eyebrow as="p" className="mb-2">Invoices</Eyebrow>
+            <p className="font-mono text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
               {summary.total_invoices}
             </p>
           </div>
           {Object.entries(summary.by_stage)
             .slice(0, 2)
             .map(([stage, s]) => (
-              <div
-                key={stage}
-                className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-              >
-                <p className="truncate text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                  {stage.replace(/_/g, " ")}
-                </p>
-                <p className="mt-1 font-display text-[22px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                  {s.count} <span className="text-[14px] font-normal text-zinc-400 dark:text-zinc-500">· {money(s.open_amount)}</span>
+              <div key={stage} className="px-5 py-6">
+                <Eyebrow as="p" className="mb-2 truncate">{stage.replace(/_/g, " ")}</Eyebrow>
+                <p className="font-mono text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
+                  {s.count}
+                  <span className="ml-1 text-base font-normal text-muted-foreground">/ {money(s.open_amount)}</span>
                 </p>
               </div>
             ))}
         </div>
       )}
 
-      <div className="mb-3 flex gap-2">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectClass}>
+      <div className="mb-6 flex items-center gap-3">
+        <Eyebrow as="label" htmlFor="dashboard-status-filter">Filter</Eyebrow>
+        <Select
+          id="dashboard-status-filter"
+          dense
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="w-auto"
+        >
           <option value="">All statuses</option>
           <option value="active">Active</option>
           <option value="closed_paid">Closed (paid)</option>
           <option value="closed_other">Closed (other)</option>
-        </select>
+        </Select>
       </div>
 
       {invoices.length === 0 && (
-        <div className="rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-12 text-center text-[13px] text-zinc-400 dark:text-zinc-500 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          No invoices match these filters.
+        <div className="border border-border px-5 py-16 text-center">
+          <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No invoices match these filters.</p>
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {projectGroups.map((group) => {
           const key = group.project_number ?? group.project_name ?? "unknown";
           const isOpen = expanded.has(key);
@@ -246,109 +247,98 @@ export default function Dashboard() {
           const trackedCount = projectCases.filter((c) => c.state === "promise_to_pay").length;
 
           return (
-            <div
-              key={key}
-              className="overflow-hidden rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-            >
+            <div key={key} className="border border-border">
               <button
                 onClick={() => toggleExpanded(key)}
-                className="flex w-full items-center gap-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/40 px-5 py-3.5 text-left transition-colors hover:bg-zinc-100/60 dark:hover:bg-zinc-800"
+                className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors duration-150 ease-bold hover:bg-muted"
+                aria-expanded={isOpen}
               >
-                <span
-                  className={`shrink-0 text-zinc-400 dark:text-zinc-500 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                <ChevronRight
+                  size={16}
+                  strokeWidth={1.5}
                   aria-hidden
-                >
-                  &#9656;
-                </span>
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 dark:bg-zinc-700 text-[12px] font-semibold text-white">
+                  className={`shrink-0 text-muted-foreground transition-transform duration-150 ease-bold ${isOpen ? "rotate-90" : ""}`}
+                />
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-border font-mono text-xs font-semibold text-foreground">
                   {(group.project_name ?? group.project_number ?? "?").slice(0, 1).toUpperCase()}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">
+                  <p className="truncate text-sm font-medium text-foreground">
                     {group.project_name ?? group.project_number ?? "Unknown project"}
                   </p>
-                  {group.project_number && <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{group.project_number}</p>}
+                  {group.project_number && (
+                    <p className="font-mono text-xs text-muted-foreground">{group.project_number}</p>
+                  )}
                 </div>
                 <span className="ml-auto flex shrink-0 items-center gap-2">
                   {projectCases.length > 0 && (
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                        escalatedCount > 0
-                          ? "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
-                          : activeCases.length > 0
-                            ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
-                            : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
-                      }`}
-                    >
-                      {activeCases.length} active{escalatedCount > 0 ? ` · ${escalatedCount} escalated` : ""}
-                    </span>
+                    <Badge tone={escalatedCount > 0 ? "critical" : activeCases.length > 0 ? "positive" : "neutral"}>
+                      {activeCases.length} active{escalatedCount > 0 ? ` / ${escalatedCount} escalated` : ""}
+                    </Badge>
                   )}
                   {group.invoices.length > 0 && (
-                    <span
-                      title="Invoices with a tracked payment date"
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                        trackedCount > 0
-                          ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300"
-                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400"
-                      }`}
-                    >
-                      {trackedCount}/{group.invoices.length} date tracked
-                    </span>
+                    <Badge tone="neutral" title="Invoices with a tracked payment date">
+                      {trackedCount}/{group.invoices.length} tracked
+                    </Badge>
                   )}
-                  <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                  <Badge tone="neutral">
                     {group.invoices.length} invoice{group.invoices.length === 1 ? "" : "s"}
-                  </span>
+                  </Badge>
                 </span>
               </button>
 
               {isOpen && (
                 <>
                   {activeCases.length > 0 && (
-                    <div className="space-y-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-800/40 px-5 py-3.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Agent activity</p>
+                    <div className="space-y-2 border-t border-border bg-muted/40 px-5 py-4">
+                      <Eyebrow as="p">Agent activity</Eyebrow>
                       {activeCases.map((c) => (
                         <Link
                           key={c.id}
                           to={`/agent/cases/${c.id}`}
-                          className="flex items-center gap-3 text-[12px] hover:opacity-80"
+                          className="flex items-center gap-3 text-xs transition-opacity hover:opacity-80"
                         >
-                          <span className="w-28 shrink-0 truncate text-zinc-600 dark:text-zinc-300">
+                          <span className="w-28 shrink-0 truncate font-mono text-foreground">
                             {c.invoice_no ?? c.case_key ?? c.case_id}
                           </span>
-                          <AgentPhaseRail state={c.state} target={c.target} compact />
+                          <AgentPhaseRail state={c.state} target={c.target} compact tone="bold" />
                         </Link>
                       ))}
                     </div>
                   )}
-                  <table className="w-full border-collapse text-[13px]">
+                  <Divider />
+                  <table className="w-full border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-zinc-100 dark:border-zinc-800 text-left text-[12px] font-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                        <th className="px-5 py-2.5 font-medium">Invoice #</th>
-                        <th className="px-5 py-2.5 font-medium">Status</th>
-                        <th className="px-5 py-2.5 font-medium">Due</th>
-                        <th className="px-5 py-2.5 text-right font-medium">Open Amount</th>
-                        <th className="px-5 py-2.5"></th>
+                      <tr className="border-b border-border text-left">
+                        <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">Invoice #</th>
+                        <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
+                        <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">Due</th>
+                        <th className="px-5 py-3 text-right font-mono text-xs font-medium uppercase tracking-wide text-muted-foreground">Open Amount</th>
+                        <th className="px-5 py-3"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {group.invoices.map((inv) => (
-                        <tr key={inv.invoice_id} className="group border-b border-zinc-50 dark:border-zinc-800 last:border-0 hover:bg-zinc-50/70 dark:hover:bg-zinc-800/60">
+                        <tr key={inv.invoice_id} className="group border-b border-border last:border-0 transition-colors duration-150 ease-bold hover:bg-muted/60">
                           <td className="px-5 py-3">
-                            <Link to={`/invoices/${inv.invoice_id}`} className="font-medium text-zinc-800 dark:text-zinc-200 hover:text-zinc-950 dark:hover:text-zinc-50">
+                            <Link
+                              to={`/invoices/${inv.invoice_id}`}
+                              className="font-mono font-medium text-foreground underline decoration-border decoration-1 underline-offset-4 hover:decoration-accent"
+                            >
                               {inv.invoice_no ?? inv.case_key ?? "--"}
                             </Link>
                           </td>
                           <td className="px-5 py-3">
-                            <Pill label={inv.status} styleMap={STATUS_STYLES} />
+                            <StatusBadge label={inv.status} />
                           </td>
-                          <td className="px-5 py-3 text-zinc-500 dark:text-zinc-400">{inv.due_date ?? "--"}</td>
-                          <td className="px-5 py-3 text-right font-medium tabular-nums text-zinc-800 dark:text-zinc-200">
+                          <td className="px-5 py-3 font-mono text-muted-foreground">{inv.due_date ?? "--"}</td>
+                          <td className="px-5 py-3 text-right font-mono font-medium tabular-nums text-foreground">
                             {money(inv.open_amount)}
                           </td>
                           <td className="px-5 py-3 text-right">
                             <button
                               onClick={() => askAboutInvoice(inv)}
-                              className="rounded-full px-3 py-1 text-[12px] font-medium text-zinc-400 dark:text-zinc-500 opacity-0 transition-all hover:bg-green-700 hover:text-white group-hover:opacity-100"
+                              className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground opacity-0 transition-all duration-150 ease-bold hover:text-accent group-hover:opacity-100 focus-visible:opacity-100"
                             >
                               Ask about this
                             </button>

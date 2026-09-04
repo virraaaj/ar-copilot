@@ -2,6 +2,10 @@ import { useState, useRef, useEffect, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { streamChat, listProjects, ApiError, type ChatHistoryMessage, type Project } from "../api";
 import { useSession } from "../context/SessionContext";
+import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { Eyebrow } from "../components/ui/Eyebrow";
+import { PageHeader } from "../components/ui/PageHeader";
 
 interface DisplayMessage {
   role: "user" | "assistant" | "progress";
@@ -15,9 +19,9 @@ interface DisplayMessage {
 function ThinkingDots() {
   return (
     <span className="inline-flex items-center gap-1">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.3s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500 [animation-delay:-0.15s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400 dark:bg-zinc-500" />
+      <span className="h-1.5 w-1.5 animate-bounce bg-muted-foreground [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce bg-muted-foreground [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce bg-muted-foreground" />
     </span>
   );
 }
@@ -35,9 +39,17 @@ const PINNED_INVOICE_SUGGESTIONS = [
   "Who are the contacts for this project?",
 ];
 
+// Turn timestamp, purely relative to when this session's messages array
+// grows -- we don't get a server timestamp per streamed event, so this is
+// "time the bubble appeared in this browser tab", shown mono like every
+// other timestamp in the app for consistency.
+function nowLabel(): string {
+  return new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function Chat() {
   const { token, pinnedInvoice, setPinnedInvoice, currentProject, setCurrentProject } = useSession();
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [messages, setMessages] = useState<(DisplayMessage & { at: string })[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -58,11 +70,11 @@ export default function Chat() {
     // its own preceding question ("what would you like the comment to
     // say?") instead of treating every message as a fresh conversation.
     const priorHistory: ChatHistoryMessage[] = messages
-      .filter((m): m is DisplayMessage & { role: "user" | "assistant" } => m.role === "user" || m.role === "assistant")
+      .filter((m): m is DisplayMessage & { role: "user" | "assistant"; at: string } => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
 
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: question }, { role: "progress", content: "Thinking" }]);
+    setMessages((m) => [...m, { role: "user", content: question, at: nowLabel() }, { role: "progress", content: "Thinking", at: nowLabel() }]);
     setSending(true);
 
     try {
@@ -72,19 +84,19 @@ export default function Chat() {
           // doing, rather than stacking a new bubble on top of it.
           setMessages((m) => [
             ...m.filter((msg) => msg.role !== "progress"),
-            { role: "progress", content: `Checking ${event.name.replace(/_/g, " ")}` },
+            { role: "progress", content: `Checking ${event.name.replace(/_/g, " ")}`, at: nowLabel() },
           ]);
         } else if (event.type === "answer") {
           setMessages((m) => [
             ...m.filter((msg) => msg.role !== "progress"),
-            { role: "assistant", content: event.content },
+            { role: "assistant", content: event.content, at: nowLabel() },
           ]);
         }
       }
     } catch (err) {
       setMessages((m) => [
         ...m.filter((msg) => msg.role !== "progress"),
-        { role: "assistant", content: err instanceof ApiError ? `Error: ${err.message}` : "Something went wrong." },
+        { role: "assistant", content: err instanceof ApiError ? `Error: ${err.message}` : "Something went wrong.", at: nowLabel() },
       ]);
     } finally {
       setSending(false);
@@ -117,28 +129,31 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chat</h1>
+    <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8 sm:px-12">
+      <div className="mb-1 flex items-start justify-between gap-4">
+        <div>
+          <Eyebrow tone="accent" as="p" className="mb-2">Chat</Eyebrow>
+          <p className="text-sm text-muted-foreground">
+            About <span className="font-medium text-foreground">{currentProject.project_name ?? currentProject.project_number}</span>
+          </p>
+        </div>
         <button
           onClick={changeProject}
-          className="rounded-full border border-zinc-200 dark:border-zinc-700 px-3 py-1 text-[12px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+          className="mt-1 shrink-0 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground underline decoration-border decoration-1 underline-offset-4 transition-colors duration-150 ease-bold hover:text-foreground hover:decoration-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           Change project
         </button>
       </div>
-      <p className="-mt-2 mb-4 text-[13px] text-zinc-400 dark:text-zinc-500">
-        Chatting about <span className="font-medium text-zinc-700 dark:text-zinc-300">{currentProject.project_name ?? currentProject.project_number}</span>
-      </p>
 
       {pinnedInvoice && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[13px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-          <span className="text-zinc-500 dark:text-zinc-400">
-            Re: <span className="font-medium text-zinc-900 dark:text-zinc-100">{pinnedInvoice.label}</span>
+        <div className="mt-5 flex items-center justify-between gap-3 border border-border px-4 py-3 text-sm">
+          <span className="min-w-0 truncate text-muted-foreground">
+            Re: <span className="font-medium text-foreground">{pinnedInvoice.label}</span>
           </span>
           <button
             onClick={() => setPinnedInvoice(null)}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 dark:text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-300"
+            aria-label="Clear pinned invoice"
+            className="flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 ease-bold hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             &times;
           </button>
@@ -146,12 +161,12 @@ export default function Chat() {
       )}
 
       {pinnedInvoice && messages.length === 0 && (
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {PINNED_INVOICE_SUGGESTIONS.map((q) => (
             <button
               key={q}
               onClick={() => sendQuestion(q)}
-              className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 transition-colors hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+              className="border border-border px-3.5 py-2 text-left text-xs font-medium text-muted-foreground transition-colors duration-150 ease-bold hover:border-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               {q}
             </button>
@@ -159,54 +174,47 @@ export default function Chat() {
         </div>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      <div className="mt-5 flex-1 overflow-y-auto border border-border">
         {messages.length === 0 && (
-          <p className="text-[13px] text-zinc-400 dark:text-zinc-500">
+          <p className="px-5 py-6 text-sm text-muted-foreground">
             {pinnedInvoice
               ? "Pick a question above, or ask your own."
               : 'Ask about invoices, documents, or aging — e.g. "which invoices are overdue past 60 days?"'}
           </p>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-            <span
-              className={`inline-block max-w-[85%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed ${
-                m.role === "user"
-                  ? "bg-green-700 text-white"
-                  : m.role === "progress"
-                    ? "flex items-center gap-2 italic text-zinc-400 dark:text-zinc-500"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
-              }`}
-            >
-              {m.role === "progress" ? (
-                <>
-                  {m.content}
-                  <ThinkingDots />
-                </>
-              ) : (
-                m.content
-              )}
-            </span>
+          <div key={i} className={`border-b border-border px-5 py-4 last:border-0 ${m.role === "user" ? "bg-muted/40" : ""}`}>
+            <div className="mb-1.5 flex items-baseline gap-2">
+              <Eyebrow tone={m.role === "user" ? "accent" : "muted"}>
+                {m.role === "user" ? "You" : "Agent"}
+              </Eyebrow>
+              <span className="font-mono text-[10px] text-muted-foreground">{m.at}</span>
+            </div>
+            {m.role === "progress" ? (
+              <span className="inline-flex items-center gap-2 text-sm italic text-muted-foreground">
+                {m.content}
+                <ThinkingDots />
+              </span>
+            ) : (
+              <p className="whitespace-pre-wrap text-base leading-normal text-foreground">{m.content}</p>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
-        <input
+      <form onSubmit={handleSubmit} className="mt-4 flex gap-3">
+        <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question..."
+          placeholder="Ask a question…"
           disabled={sending}
-          className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 text-[14px] outline-none transition-shadow focus:border-zinc-400 dark:focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 dark:focus:ring-zinc-100/10 disabled:opacity-50"
+          dense
+          className="flex-1"
         />
-        <button
-          type="submit"
-          disabled={sending || !input.trim()}
-          className="rounded-xl bg-green-700 px-5 py-2.5 text-[14px] font-medium text-white transition-colors hover:bg-green-800 disabled:opacity-40"
-        >
+        <Button type="submit" variant="secondary" size="sm" disabled={sending || !input.trim()} className="shrink-0">
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -226,30 +234,31 @@ function ProjectPicker({ onPick }: { onPick: (project: Project) => void }) {
   }, [token]);
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="mb-1 font-display text-[22px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Chat</h1>
-      <p className="mb-6 text-[14px] text-zinc-400 dark:text-zinc-500">Pick a project to chat about — invoices and documents both come from it.</p>
+    <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+      <PageHeader eyebrow="Chat" title="Pick a project" description="Invoices and documents both come from it." />
 
-      {error && <p className="mb-4 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-[13px] text-rose-600 dark:text-rose-400">{error}</p>}
-      {!projects && !error && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">Loading projects...</p>}
+      {error && (
+        <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
+      )}
+      {!projects && !error && <p className="text-sm text-muted-foreground">Loading projects…</p>}
 
       <div className="space-y-2">
         {projects?.map((p) => (
           <button
             key={p.project_number}
             onClick={() => onPick(p)}
-            className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200/70 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+            className="flex w-full items-center gap-3 border border-border p-4 text-left transition-colors duration-150 ease-bold hover:border-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-700 text-[13px] font-semibold text-white">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-border font-mono text-xs font-semibold text-foreground">
               {(p.project_name ?? p.project_number).slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0">
-              <p className="truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-100">{p.project_name ?? p.project_number}</p>
-              <p className="text-[12px] text-zinc-400 dark:text-zinc-500">{p.project_number}</p>
+              <p className="truncate text-sm font-medium text-foreground">{p.project_name ?? p.project_number}</p>
+              <p className="font-mono text-xs text-muted-foreground">{p.project_number}</p>
             </div>
           </button>
         ))}
-        {projects && projects.length === 0 && <p className="text-[13px] text-zinc-400 dark:text-zinc-500">No projects found.</p>}
+        {projects && projects.length === 0 && <p className="text-sm text-muted-foreground">No projects found.</p>}
       </div>
     </div>
   );

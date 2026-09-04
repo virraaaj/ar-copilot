@@ -1,31 +1,88 @@
 @import "tailwindcss";
 
-/* Class-based dark mode (added 2026-07-28) -- `dark:` variants only apply
-   under a `.dark` class on <html> (set by ThemeContext.tsx), not
-   automatically from the OS's prefers-color-scheme. Tailwind v4 needs
-   this custom-variant declared explicitly to get that behavior. */
+/* Dark-only (2026-09-04, "Bold Typography" redesign) -- the app no longer
+   ships a light theme or a runtime toggle: <html> always carries `.dark`
+   (see index.html), and every `dark:` variant left over in not-yet-
+   converted pages/components resolves against this one palette instead of
+   branching. Keep the custom-variant declared (Tailwind v4 requires it for
+   `dark:` to mean anything at all) even though it now always matches. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* ---- Type ---- */
+  --font-sans: "Inter Tight", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+  --text-4xl: 2.5rem;
+  --text-5xl: 3.5rem;
+  --text-6xl: 4.5rem;
+  --text-7xl: 6rem;
+  --text-8xl: 8rem;
+  --text-9xl: 10rem;
+
+  --tracking-tighter: -0.06em;
+  --tracking-tight: -0.04em;
+  --tracking-normal: -0.01em;
+  --tracking-wide: 0.05em;
+  --tracking-wider: 0.1em;
+  --tracking-widest: 0.2em;
+
+  --leading-none: 1;
+  --leading-tight: 1.1;
+  --leading-snug: 1.25;
+  --leading-normal: 1.6;
+  --leading-relaxed: 1.75;
+
+  /* ---- Color: single dark "Bold Typography" palette ---- */
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-muted: #1a1a1a;
+  --color-muted-foreground: #737373;
+  --color-accent: #ff3d00;
+  --color-accent-foreground: #0a0a0a;
+  --color-border: #262626;
+  --color-input: #1a1a1a;
+  --color-card: #0f0f0f;
+  --color-card-foreground: #fafafa;
+  --color-ring: #ff3d00;
+
+  /* ---- Motion ---- */
+  --ease-bold: cubic-bezier(0.25, 0, 0, 1);
 }
 
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: #fafafa;
-  color: #18181b;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  position: relative;
 }
 
-html.dark body {
-  background: #09090b;
-  color: #f4f4f5;
+/* Subtle fractal-noise grain over the whole page. Fixed + pointer-events:
+   none so it never intercepts clicks; ~1.5% opacity keeps it a texture,
+   not a visible pattern. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* Rely on the OS scrollbar, but keep it unobtrusive on webkit. */
@@ -34,29 +91,22 @@ html.dark body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #e4e4e7;
-  border-radius: 999px;
-  border: 2px solid #fafafa;
+  background: var(--color-border);
+  border-radius: 0;
+  border: 2px solid var(--color-background);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #d4d4d8;
-}
-html.dark ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-color: #09090b;
-}
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: #3a3a3a;
 }
 
 /* Native date-picker calendar icon is near-black by default, invisible
-   against a dark input -- same fix as Lummus's dev-sachin branch. */
-html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+   against a dark input. */
+input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   opacity: 0.65;
   cursor: pointer;
 }
-html.dark input[type="date"]:hover::-webkit-calendar-picker-indicator {
+input[type="date"]:hover::-webkit-calendar-picker-indicator {
   opacity: 1;
 }
 

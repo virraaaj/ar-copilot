@@ -22,15 +22,17 @@ export default function Settings() {
   return (
     <div>
       <div className="mx-auto max-w-4xl px-6 pt-8">
-        <div className="mb-2 flex gap-1 border-b border-zinc-200/70 dark:border-zinc-700">
+        <div className="mb-2 flex flex-wrap gap-2" role="tablist" aria-label="Settings sections">
           {TABS.map((t) => (
             <button
               key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
-              className={`-mb-px border-b-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors ${
+              className={`min-h-11 border px-3.5 py-2 font-mono text-xs font-medium uppercase tracking-wider transition-colors duration-150 ease-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                 tab === t.id
-                  ? "border-green-700 text-green-700"
-                  : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  ? "border-accent text-accent"
+                  : "border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground"
               }`}
             >
               {t.label}
