@@ -61,6 +61,12 @@ def _summarize_raw_invoice(inv: Dict[str, Any], project_names: Dict[str, Optiona
         "project_name": project_names.get(pn),
         "business_unit_id": None,
         "due_date": inv.get("due_date"),
+        # `amount` is the invoice FACE amount, not the AR open balance --
+        # Lummus keeps them distinct on purpose and its ingest refuses to let
+        # open_amount overwrite amount. The real balance lives only on the
+        # aging snapshot (BackendClient.list_aging_table), so callers that
+        # need it must read there; a partially-paid invoice reads at full
+        # value here. Flagged 2026-09-04.
         "open_amount": inv.get("amount"),
         "aging_status": "pre_due",
     }
