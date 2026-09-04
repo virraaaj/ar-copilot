@@ -1,28 +1,32 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { Sparkles } from "lucide-react";
 import { useSession } from "../context/SessionContext";
-import { useTheme } from "../context/ThemeContext";
 
+// Nav links: mono uppercase, wide tracking, underline-on-active/hover --
+// no pill backgrounds. The active state is the underline plus full
+// foreground colour, never colour alone.
 const linkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
-    isActive ? "bg-green-700 text-white" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
+  `relative py-1.5 font-mono text-xs font-medium uppercase tracking-wider transition-colors duration-150 ease-bold after:absolute after:-bottom-0.5 after:left-0 after:h-px after:bg-accent after:transition-transform after:duration-150 after:ease-bold ${
+    isActive
+      ? "text-foreground after:w-full after:scale-x-100"
+      : "text-muted-foreground after:w-full after:scale-x-0 hover:text-foreground hover:after:scale-x-100"
   }`;
 
 export default function NavBar() {
   const { email, clearSession } = useSession();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   return (
-    <nav className="sticky top-0 z-10 border-b border-zinc-200/70 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-        <div className="flex items-center gap-6">
-          <span className="flex items-center gap-2 font-display text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-900 dark:bg-zinc-700 text-[11px] font-bold text-white">
+    <nav className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-6 px-6 py-4 sm:px-12">
+        <div className="flex items-center gap-8">
+          <span className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-foreground">
+            <span className="flex h-6 w-6 items-center justify-center border border-accent font-mono text-[10px] font-bold text-accent">
               AR
             </span>
             Copilot
           </span>
-          <div className="flex items-center gap-1">
+          <div className="hidden items-center gap-5 md:flex">
             <NavLink to="/" className={linkClass} end>
               Dashboard
             </NavLink>
@@ -49,25 +53,18 @@ export default function NavBar() {
             </NavLink>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           <button
             onClick={() => navigate("/guided-demo")}
-            className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-1.5 text-[13px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+            className="hidden items-center gap-1.5 border border-border px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:border-accent hover:text-accent sm:inline-flex"
           >
-            <span aria-hidden>✨</span>
+            <Sparkles size={14} strokeWidth={1.5} aria-hidden />
             Guided Demo
           </button>
-          <button
-            onClick={toggleTheme}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-[14px] text-zinc-500 dark:text-zinc-400 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100"
-          >
-            {theme === "dark" ? "☀️" : "🌙"}
-          </button>
-          <span className="text-[13px] text-zinc-400 dark:text-zinc-500">{email}</span>
+          <span className="hidden font-mono text-xs text-muted-foreground lg:inline">{email}</span>
           <button
             onClick={clearSession}
-            className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+            className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-accent"
           >
             Log out
           </button>
