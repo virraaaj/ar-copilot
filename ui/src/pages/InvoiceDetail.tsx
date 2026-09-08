@@ -24,18 +24,7 @@ import { Input } from "../components/ui/Input";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
 import { ErrorState, describeError } from "../components/ui/ErrorState";
-
-function money(n: number | null): string {
-  if (n === null) return "--";
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
-
-function when(at: string | null): string {
-  if (!at) return "Unknown time";
-  const d = new Date(at);
-  if (isNaN(d.getTime())) return at;
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
+import { formatMoney, formatTimestamp } from "../utils/format";
 
 const EVENT_LABELS: Record<string, string> = {
   reply_received: "Comment",
@@ -383,7 +372,7 @@ export default function InvoiceDetail() {
 
   function askAboutThis() {
     if (!invoice) return;
-    const label = `${invoice.project_name ?? invoice.project_number ?? "Unknown project"} -- ${money(
+    const label = `${invoice.project_name ?? invoice.project_number ?? "Unknown project"} -- ${formatMoney(
       invoice.open_amount
     )}, ${invoice.aging_status ?? "unknown aging"}`;
     setPinnedInvoice({ invoice_id: invoice.invoice_id, label });
@@ -467,7 +456,7 @@ export default function InvoiceDetail() {
     ["Stage", invoice.stage],
     ["Due date", invoice.due_date],
     ["Aging status", invoice.aging_status],
-    ["Open amount", money(invoice.open_amount)],
+    ["Open amount", formatMoney(invoice.open_amount)],
   ];
 
   return (
@@ -618,7 +607,7 @@ export default function InvoiceDetail() {
                 <li key={i} className="border-l-2 border-border pl-4">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs font-medium uppercase tracking-wide text-foreground">{author ?? "Unknown user"}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{when(event.at)}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{formatTimestamp(event.at)}</span>
                   </div>
                   <p className="mt-1 text-sm leading-normal text-foreground">{body}</p>
                 </li>
@@ -641,7 +630,7 @@ export default function InvoiceDetail() {
               <li key={i} className="border-l-2 border-border pl-4">
                 <div className="flex items-center justify-between">
                   <Eyebrow>{humanizeEventType(event.event_type)}</Eyebrow>
-                  <span className="font-mono text-xs text-muted-foreground">{when(event.at)}</span>
+                  <span className="font-mono text-xs text-muted-foreground">{formatTimestamp(event.at)}</span>
                 </div>
                 <p className="mt-1 text-sm leading-normal text-foreground">{event.summary ?? event.title ?? "--"}</p>
               </li>

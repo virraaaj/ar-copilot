@@ -30,6 +30,7 @@ import { Input } from "../components/ui/Input";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
 import { PageHeader } from "../components/ui/PageHeader";
+import { formatMoney, formatTimestamp } from "../utils/format";
 
 const STATE_LABELS: Record<string, string> = {
   not_due: "Not due",
@@ -72,12 +73,6 @@ const OPEN_STATES = new Set([
 
 function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state;
-}
-
-function formatWhen(iso: string | null): string {
-  if (!iso) return "--";
-  const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 function activeCommitmentDate(commitments: Array<Record<string, unknown>>): string | null {
@@ -187,7 +182,7 @@ function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => v
         <div>
           <dt className="mb-1"><Eyebrow>Amount</Eyebrow></dt>
           <dd className="font-mono tabular-nums text-foreground">
-            {chase.amount != null ? `$${Number(chase.amount).toLocaleString()}` : "--"}
+            {formatMoney(chase.amount != null ? Number(chase.amount) : null)}
           </dd>
         </div>
         <div>
@@ -198,11 +193,11 @@ function CaseDetail({ chase, onChanged }: { chase: AgentCase; onChanged: () => v
         </div>
         <div>
           <dt className="mb-1"><Eyebrow>Last outreach</Eyebrow></dt>
-          <dd className="font-mono text-foreground">{formatWhen(chase.last_outreach_at)}</dd>
+          <dd className="font-mono text-foreground">{formatTimestamp(chase.last_outreach_at)}</dd>
         </div>
         <div>
           <dt className="mb-1"><Eyebrow>Next action</Eyebrow></dt>
-          <dd className="font-mono text-foreground">{formatWhen(chase.next_action_at)}</dd>
+          <dd className="font-mono text-foreground">{formatTimestamp(chase.next_action_at)}</dd>
         </div>
       </dl>
 

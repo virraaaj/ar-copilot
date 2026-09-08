@@ -15,6 +15,7 @@
 //    @theme + ui/src/components/ui/Badge.tsx). All in-scope callers
 //    (Chases.tsx, GuidedDemo.tsx) pass tone="bold".
 import { useState, type ReactNode } from "react";
+import { formatTimestamp } from "../utils/format";
 import {
   AlertCircle,
   AlertTriangle,
@@ -55,12 +56,6 @@ const DEFAULT_META: KindMeta = { icon: "•", color: "bg-zinc-100 dark:bg-zinc-8
 
 function metaFor(kind: string): KindMeta {
   return KIND_META[kind] ?? { ...DEFAULT_META, label: kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) };
-}
-
-function formatWhen(iso: string | null | undefined): string {
-  if (!iso) return "--";
-  const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 const COLLAPSE_THRESHOLD = 220;
@@ -172,7 +167,7 @@ function EventShell({
       <div className="min-w-0 flex-1 pb-4">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.color}`}>{meta.label}</span>
-          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{formatWhen(at)}</span>
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{formatTimestamp(at)}</span>
         </div>
         {children}
       </div>
@@ -474,7 +469,7 @@ function BoldEventShell({
       <div className="min-w-0 flex-1 pb-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
           <Badge tone={meta.tone}>{meta.label}</Badge>
-          <span className="font-mono text-[11px] text-muted-foreground">{formatWhen(at)}</span>
+          <span className="font-mono text-[11px] text-muted-foreground">{formatTimestamp(at)}</span>
         </div>
         {children}
       </div>

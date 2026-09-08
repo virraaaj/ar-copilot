@@ -9,11 +9,7 @@ import { useSession } from "../context/SessionContext";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { ErrorState, describeError } from "../components/ui/ErrorState";
-
-function money(n: number | null): string {
-  if (n === null) return "--";
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
+import { formatMoney } from "../utils/format";
 
 export default function ProjectInvoicePicker() {
   const { projectNumber } = useParams<{ projectNumber: string }>();
@@ -70,7 +66,7 @@ export default function ProjectInvoicePicker() {
                 </Eyebrow>
               </div>
             </div>
-            <div className="shrink-0 pl-4 font-mono text-sm font-medium tabular-nums text-foreground">{money(inv.open_amount)}</div>
+            <div className="shrink-0 pl-4 font-mono text-sm font-medium tabular-nums text-foreground">{formatMoney(inv.open_amount)}</div>
           </button>
         ))}
       </div>

@@ -12,6 +12,7 @@ import { Select } from "../components/ui/Input";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
 import { Divider } from "../components/ui/Divider";
+import { formatMoney } from "../utils/format";
 
 const OPEN_AGENT_STATES = new Set([
   "not_due", "due", "overdue", "outreach_ready", "waiting_for_customer", "customer_responded",
@@ -57,11 +58,6 @@ const TRIAGE_PRIORITY: Record<string, number> = {
   promise_missed: 1,
   paused: 2,
 };
-
-function money(n: number | null): string {
-  if (n === null) return "--";
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
 
 const STATUS_TONE: Record<string, BadgeTone> = {
   active: "positive",
@@ -231,7 +227,7 @@ export default function Dashboard() {
   }
 
   function askAboutInvoice(inv: Invoice) {
-    const label = `${inv.project_name ?? inv.project_number ?? "Unknown project"} -- ${money(inv.open_amount)}, ${
+    const label = `${inv.project_name ?? inv.project_number ?? "Unknown project"} -- ${formatMoney(inv.open_amount)}, ${
       inv.aging_status ?? "unknown aging"
     }`;
     setPinnedInvoice({ invoice_id: inv.invoice_id, label });
@@ -363,7 +359,7 @@ export default function Dashboard() {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-4">
-                      <span className="font-mono text-sm font-medium tabular-nums text-foreground">{money(c.amount)}</span>
+                      <span className="font-mono text-sm font-medium tabular-nums text-foreground">{formatMoney(c.amount)}</span>
                       <span className="flex items-center gap-1 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground">
                         Review
                         <ArrowRight size={14} strokeWidth={1.5} aria-hidden />
@@ -388,7 +384,7 @@ export default function Dashboard() {
           <div className="px-5 py-6">
             <Eyebrow as="p" className="mb-2">Total Open</Eyebrow>
             <p className="font-mono text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
-              {money(summary.total_open_amount)}
+              {formatMoney(summary.total_open_amount)}
             </p>
           </div>
           <div className="px-5 py-6">
@@ -404,7 +400,7 @@ export default function Dashboard() {
                 <Eyebrow as="p" className="mb-2 truncate">{stage.replace(/_/g, " ")}</Eyebrow>
                 <p className="font-mono text-3xl font-semibold tabular-nums text-foreground sm:text-4xl">
                   {s.count}
-                  <span className="ml-1 text-base font-normal text-muted-foreground">/ {money(s.open_amount)}</span>
+                  <span className="ml-1 text-base font-normal text-muted-foreground">/ {formatMoney(s.open_amount)}</span>
                 </p>
               </div>
             ))}
@@ -539,7 +535,7 @@ export default function Dashboard() {
                           </td>
                           <td className="px-5 py-3 font-mono text-muted-foreground">{inv.due_date ?? "--"}</td>
                           <td className="px-5 py-3 text-right font-mono font-medium tabular-nums text-foreground">
-                            {money(inv.open_amount)}
+                            {formatMoney(inv.open_amount)}
                           </td>
                           <td className="px-5 py-3 text-right">
                             <button

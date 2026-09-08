@@ -8,11 +8,7 @@ import { getOutbox, type OutboxEntry } from "../api";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
 import { Eyebrow } from "../components/ui/Eyebrow";
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
+import { formatTimestamp } from "../utils/format";
 
 const CHANNEL_TONE: Record<string, BadgeTone> = {
   email: "positive",
@@ -68,7 +64,7 @@ export default function Outbox() {
                 <span className="text-muted-foreground">&middot;</span>
                 <span className="font-mono text-xs text-muted-foreground">{e.project_number ?? "No project"}</span>
               </div>
-              <span className="font-mono text-xs text-muted-foreground">{formatWhen(e.at)}</span>
+              <span className="font-mono text-xs text-muted-foreground">{formatTimestamp(e.at)}</span>
             </div>
 
             <div className="mb-3 flex flex-wrap items-center gap-2">
