@@ -188,6 +188,18 @@ export async function getAgingSummary(token: string): Promise<AgingSummary> {
   return request("/aging-summary", token);
 }
 
+export interface AgingLastSynced {
+  as_of_date: string | null;
+}
+
+// Real, server-verified freshness signal (added 2026-09-07, replacing a
+// localStorage-based proxy that only reflected this browser's own last
+// upload -- see Dashboard.tsx). Backed by /api/aging/last-synced, which
+// derives this from the actual aging-table snapshot dates on the backend.
+export async function getAgingLastSynced(token: string): Promise<AgingLastSynced> {
+  return request("/aging/last-synced", token);
+}
+
 export interface AgingUploadResult {
   sync: Record<string, unknown>;
   tick: Record<string, unknown> | null;

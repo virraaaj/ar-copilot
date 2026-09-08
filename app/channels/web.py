@@ -211,6 +211,35 @@ async def list_business_units_endpoint(
     return await backend.list_business_units()
 
 
+@router.get("/aging/last-synced")
+async def aging_last_synced_endpoint(
+    _user: str = Depends(require_session),
+    backend: BackendClient = Depends(get_backend_client),
+) -> Dict[str, Any]:
+    """Real, server-verified freshness signal for the Dashboard's sync badge
+    (added 2026-09-07, replacing a client-side localStorage proxy that only
+    reflected this browser's own last upload -- see Dashboard.tsx history).
+
+    `/api/v1/dunning/aging-table` rows each carry an `as_of_date` -- the
+    snapshot date of the aging upload that produced that row. The most
+    recent aging upload's date is simply the maximum `as_of_date` across all
+    rows. That endpoint does not document (and we have no evidence of) a
+    guaranteed sort order by `as_of_date`, so a small `limit` could silently
+    miss the true max -- this pulls the full, paginated table via
+    `list_aging_table()` to keep the answer correct rather than fast. If
+    this ever needs to be cheaper, the real fix is asking Lummus for a
+    dedicated max-as_of_date endpoint or a documented sort order, not
+    guessing with a small page here.
+
+    No rows at all -> {"as_of_date": None}, not an error. An upstream
+    failure is left to propagate as httpx.RequestError, which app/main.py's
+    handler turns into a clean 503 -- never swallowed into a fake date.
+    """
+    rows = await backend.list_aging_table()
+    dates = [r["as_of_date"] for r in rows if r.get("as_of_date")]
+    return {"as_of_date": max(dates) if dates else None}
+
+
 @router.get("/aging-summary")
 async def aging_summary_endpoint(
     business_unit_id: Optional[str] = None,
