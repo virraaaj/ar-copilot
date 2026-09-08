@@ -6,6 +6,7 @@ import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { PageHeader } from "../components/ui/PageHeader";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 interface DisplayMessage {
   role: "user" | "assistant" | "progress";
@@ -226,19 +227,36 @@ export default function Chat() {
 function ProjectPicker({ onPick }: { onPick: (project: Project) => void }) {
   const { token } = useSession();
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  function load() {
     if (!token) return;
-    listProjects(token).then(setProjects).catch((e) => setError(String(e)));
-  }, [token]);
+    setLoading(true);
+    setError(null);
+    listProjects(token)
+      .then(setProjects)
+      .catch((e) => setError(describeError(e, "We couldn't load your projects.")))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(load, [token]);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
       <PageHeader eyebrow="Chat" title="Pick a project" description="Invoices and documents both come from it." />
 
+      {/* The project list is essential here -- chat can't do anything
+          without one -- so a failure blocks this content region rather
+          than degrading quietly, but the header above still renders. */}
       {error && (
-        <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
+        <ErrorState
+          eyebrow="Couldn't load projects"
+          message={error.message}
+          detail={error.detail}
+          onRetry={load}
+          retrying={loading}
+        />
       )}
       {!projects && !error && <p className="text-sm text-muted-foreground">Loading projects…</p>}
 

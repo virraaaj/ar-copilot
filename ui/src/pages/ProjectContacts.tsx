@@ -17,20 +17,27 @@ import { ContactCard, AddContactTile, EmptyContactsState, ContactFormModal, type
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 type ModalState = { projectNumber: string; contact: Contact | null } | null;
 
 export default function ProjectContacts() {
   const { token } = useSession();
   const [groups, setGroups] = useState<ProjectContactGroup[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   function load() {
     if (!token) return;
-    listProjectContacts(token).then(setGroups).catch((e) => setError(String(e)));
+    setLoading(true);
+    setError(null);
+    listProjectContacts(token)
+      .then(setGroups)
+      .catch((e) => setError(describeError(e, "We couldn't load project contacts.")))
+      .finally(() => setLoading(false));
   }
 
   useEffect(load, [token]);
@@ -58,7 +65,7 @@ export default function ProjectContacts() {
       setModal(null);
       load();
     } catch (e) {
-      setFormError(String(e));
+      setFormError(describeError(e, "That didn't save. Please try again.").message);
     } finally {
       setSubmitting(false);
     }
@@ -71,16 +78,35 @@ export default function ProjectContacts() {
     load();
   }
 
+  // Header/title always renders below, whether loading, errored, or
+  // loaded -- only the content beneath it changes, so the page never
+  // loses its identity if the fetch fails.
+  const header = (
+    <div className="mb-8 border-b border-border pb-6">
+      <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Project Contacts</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
+        Who to reach for each project -- one contact per role. New projects start from the{" "}
+        <a href="/settings" className="text-foreground underline underline-offset-2 hover:text-accent">
+          default contacts
+        </a>{" "}
+        template (Settings tab).
+      </p>
+    </div>
+  );
+
   if (error) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
+        {header}
+        <ErrorState message={error.message} detail={error.detail} onRetry={load} retrying={loading} />
       </div>
     );
   }
   if (!groups) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
+        {header}
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -88,17 +114,7 @@ export default function ProjectContacts() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-8 border-b border-border pb-6">
-        <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Project Contacts</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
-          Who to reach for each project -- one contact per role. New projects start from the{" "}
-          <a href="/settings" className="text-foreground underline underline-offset-2 hover:text-accent">
-            default contacts
-          </a>{" "}
-          template (Settings tab).
-        </p>
-      </div>
+      {header}
 
       <div className="space-y-8">
         {groups.map((group) => {

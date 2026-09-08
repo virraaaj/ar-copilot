@@ -8,6 +8,7 @@ import { listProjectInvoices, type Invoice } from "../api";
 import { useSession } from "../context/SessionContext";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Eyebrow } from "../components/ui/Eyebrow";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -21,14 +22,20 @@ export default function ProjectInvoicePicker() {
   const { token } = useSession();
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+  function load() {
     if (!token || !projectNumber) return;
+    setLoading(true);
+    setError(null);
     listProjectInvoices(token, projectNumber)
       .then(setInvoices)
-      .catch((e) => setError(String(e)));
-  }, [token, projectNumber]);
+      .catch((e) => setError(describeError(e, "We couldn't load invoices for this project.")))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(load, [token, projectNumber]);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
@@ -39,9 +46,7 @@ export default function ProjectInvoicePicker() {
       />
 
       {error && (
-        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">
-          {error}
-        </p>
+        <ErrorState message={error.message} detail={error.detail} onRetry={load} retrying={loading} />
       )}
       {!error && invoices === null && <p className="text-sm text-muted-foreground">Loading…</p>}
       {invoices !== null && invoices.length === 0 && (

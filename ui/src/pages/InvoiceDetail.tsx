@@ -11,6 +11,7 @@ import {
   createFollowUp,
   cancelFollowUp,
   listAgentCases,
+  ApiError,
   type Invoice,
   type TimelineEvent,
   type FollowUpStatus,
@@ -22,6 +23,7 @@ import { Button, buttonVariants } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 function money(n: number | null): string {
   if (n === null) return "--";
@@ -69,6 +71,24 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   closed_other: "neutral",
   snoozed: "warning",
 };
+
+// Distinguishes "this invoice genuinely doesn't exist" from "the backend
+// is unreachable/erroring", per the failure policy -- those read very
+// differently to a user, and a retry only makes sense for the latter.
+// getInvoice (app/agent/tools_read.py) tries a case lookup, falls back to
+// the raw invoice table, and only lets a BackendError through once *both*
+// have failed -- the local API wraps that BackendError as a 422 whose
+// message embeds the upstream status, e.g. "Get invoice (raw) failed
+// (404): ...". A bare id that simply doesn't exist surfaces that way; the
+// live-audit case (the backend's own login to the Lummus sandbox
+// rejecting every request) surfaces as "Backend login failed (401)."
+// instead, which is a systemic failure, not a missing invoice.
+function classifyLoadError(err: unknown): "not-found" | "failed" {
+  if (err instanceof ApiError && /\(404\)/.test(err.message) && !/login failed/i.test(err.message)) {
+    return "not-found";
+  }
+  return "failed";
+}
 
 function ModalShell({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
@@ -195,7 +215,8 @@ export default function InvoiceDetail() {
   const { token, setPinnedInvoice, setCurrentProject } = useSession();
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ kind: "not-found" | "failed"; message: string; detail?: string } | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
@@ -222,7 +243,23 @@ export default function InvoiceDetail() {
 
   function loadInvoice() {
     if (!token || !invoiceId) return;
-    getInvoice(token, invoiceId).then(setInvoice).catch((e) => setError(String(e)));
+    setInvoiceLoading(true);
+    setError(null);
+    getInvoice(token, invoiceId)
+      .then(setInvoice)
+      .catch((e) => {
+        const kind = classifyLoadError(e);
+        setError({
+          kind,
+          ...describeError(
+            e,
+            kind === "not-found"
+              ? "This invoice couldn't be found. It may have been removed, or the link may be out of date."
+              : "We couldn't load this invoice."
+          ),
+        });
+      })
+      .finally(() => setInvoiceLoading(false));
   }
 
   useEffect(loadInvoice, [token, invoiceId]);
@@ -281,7 +318,7 @@ export default function InvoiceDetail() {
       setShowFollowUpModal(false);
       loadFollowUp();
     } catch (e) {
-      setFollowUpError(String(e));
+      setFollowUpError(describeError(e, "That didn't go through. Please try again.").message);
     } finally {
       setFollowUpSubmitting(false);
     }
@@ -307,7 +344,7 @@ export default function InvoiceDetail() {
       setCommentText("");
       loadTimeline();
     } catch (e) {
-      setCommentError(String(e));
+      setCommentError(describeError(e, "That comment didn't post. Please try again.").message);
     } finally {
       setPosting(false);
     }
@@ -323,7 +360,7 @@ export default function InvoiceDetail() {
       loadInvoice(); // active_pause_id flips, which flips the button to "Resume"
       loadTimeline();
     } catch (e) {
-      setSnoozeError(String(e));
+      setSnoozeError(describeError(e, "That didn't go through. Please try again.").message);
     } finally {
       setSnoozing(false);
     }
@@ -338,7 +375,7 @@ export default function InvoiceDetail() {
       loadInvoice(); // active_pause_id clears, which flips the button back to "Snooze"
       loadTimeline();
     } catch (e) {
-      setResumeError(String(e));
+      setResumeError(describeError(e, "That didn't go through. Please try again.").message);
     } finally {
       setResuming(false);
     }
@@ -358,16 +395,50 @@ export default function InvoiceDetail() {
     navigate("/chat");
   }
 
-  if (error)
+  // The "back to dashboard" link is this page's only fixed identity/nav
+  // element before an invoice loads (there's no separate PageHeader --
+  // the title itself comes from the invoice), so it stays visible in
+  // every state instead of being wiped out by a bare error.
+  const backLink = (
+    <Link
+      to="/"
+      className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    >
+      &larr; Back to dashboard
+    </Link>
+  );
+
+  if (error) {
+    // A genuinely missing invoice can't be fixed by retrying the same id
+    // -- offer a way out instead. A backend/connectivity failure is
+    // usually transient, so offer retry there.
     return (
       <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
-        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
+        {backLink}
+        <div className="mt-6">
+          <ErrorState
+            eyebrow={error.kind === "not-found" ? "Invoice not found" : "Couldn't load this invoice"}
+            message={error.message}
+            detail={error.detail}
+            onRetry={error.kind === "not-found" ? undefined : loadInvoice}
+            retrying={invoiceLoading}
+            action={
+              error.kind === "not-found" ? (
+                <Link to="/" className={`${buttonVariants("secondary", "sm")} min-h-11`}>
+                  Back to dashboard
+                </Link>
+              ) : undefined
+            }
+          />
+        </div>
       </div>
     );
+  }
   if (!invoice)
     return (
       <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        {backLink}
+        <p className="mt-6 text-sm text-muted-foreground">Loading…</p>
       </div>
     );
 

@@ -23,6 +23,7 @@ import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
 import { Divider } from "../components/ui/Divider";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 const DOC_TYPES = ["vendor_certification", "customer_manual", "quote", "terms_and_conditions", "equipment_manual"];
 
@@ -31,23 +32,36 @@ const UNFILED = "_unfiled";
 export default function Documents() {
   const { token } = useSession();
   const [projects, setProjects] = useState<Project[] | null>(null);
+  // allDocs only feeds the per-folder count badges -- supporting data the
+  // grid works fine without, so a failure here degrades quietly to "no
+  // counts yet" instead of blocking the page (see loadDocs' catch below).
   const [allDocs, setAllDocs] = useState<DocumentRef[]>([]);
   const [openFolder, setOpenFolder] = useState<{ project_number: string; project_name: string | null } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The project list IS this page's reason for existing (it's the folder
+  // grid), so unlike allDocs, a failure here blocks the content region.
+  const [projectsError, setProjectsError] = useState<{ message: string; detail?: string } | null>(null);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+
+  function loadProjects() {
+    if (!token) return;
+    setProjectsLoading(true);
+    setProjectsError(null);
+    listProjects(token)
+      .then(setProjects)
+      .catch((e) => setProjectsError(describeError(e, "We couldn't load your projects.")))
+      .finally(() => setProjectsLoading(false));
+  }
+
+  function loadDocs() {
+    if (!token) return;
+    listDocuments(token).then(setAllDocs).catch(() => setAllDocs([]));
+  }
 
   useEffect(() => {
-    if (!token) return;
-    listProjects(token).then(setProjects).catch((e) => setError(String(e)));
-    listDocuments(token).then(setAllDocs).catch((e) => setError(String(e)));
+    loadProjects();
+    loadDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-
-  if (error) {
-    return (
-      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
-        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
-      </div>
-    );
-  }
 
   if (openFolder) {
     return (
@@ -56,15 +70,20 @@ export default function Documents() {
         projectName={openFolder.project_name}
         onBack={() => {
           setOpenFolder(null);
-          if (token) listDocuments(token).then(setAllDocs).catch((e) => setError(String(e)));
+          loadDocs();
         }}
       />
     );
   }
 
-  if (!projects) {
+  if (!projects && !projectsError) {
     return (
       <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
+        <PageHeader
+          eyebrow="Library"
+          title="Documents"
+          description="Certifications, manuals, quotes, and T&Cs — organized by project."
+        />
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -81,6 +100,17 @@ export default function Documents() {
         description="Certifications, manuals, quotes, and T&Cs — organized by project."
       />
 
+      {projectsError && (
+        <ErrorState
+          eyebrow="Couldn't load documents"
+          message={projectsError.message}
+          detail={projectsError.detail}
+          onRetry={loadProjects}
+          retrying={projectsLoading}
+        />
+      )}
+
+      {projects && (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {projects.map((p) => {
           const count = countFor(p.project_number);
@@ -126,6 +156,7 @@ export default function Documents() {
           <p className="text-sm text-muted-foreground">No projects found.</p>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -147,13 +178,21 @@ function ProjectDocuments({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocumentSearchResult[] | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [docsLoading, setDocsLoading] = useState(false);
+  // The document list is this folder view's reason for existing, so a
+  // failure here blocks that region of content (below); an upload failure
+  // is a one-off action error and stays a small inline notice instead.
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [uploadError, setUploadError] = useState<{ message: string; detail?: string } | null>(null);
 
   function refresh() {
     if (!token) return;
+    setDocsLoading(true);
+    setError(null);
     listDocuments(token, docType || undefined, projectNumber)
       .then(setDocs)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(describeError(e, "We couldn't load the documents in this folder.")))
+      .finally(() => setDocsLoading(false));
   }
 
   useEffect(refresh, [token, docType, projectNumber]);
@@ -163,12 +202,12 @@ function ProjectDocuments({
     const file = input.files?.[0];
     if (!file || !token || isUnfiled) return;
     setUploading(true);
-    setError(null);
+    setUploadError(null);
     try {
       await uploadDocument(token, file, projectNumber, docType || undefined);
       refresh();
     } catch (err) {
-      setError(String(err));
+      setUploadError(describeError(err, "That upload didn't go through."));
     } finally {
       setUploading(false);
       input.value = "";
@@ -216,7 +255,11 @@ function ProjectDocuments({
         )}
       </div>
 
-      {error && <p className="mb-4 border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>}
+      {uploadError && (
+        <p className="mb-4 border border-border px-4 py-3 text-sm text-foreground" role="alert" title={uploadError.detail}>
+          {uploadError.message}
+        </p>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
@@ -276,24 +319,28 @@ function ProjectDocuments({
       )}
 
       <Eyebrow as="p" className="mb-3">Documents in this folder</Eyebrow>
-      <div className="border border-border">
-        {docs.map((d, i) => (
-          <div key={d.filename}>
-            {i > 0 && <Divider />}
-            <div className="flex items-center justify-between gap-4 px-5 py-3.5">
-              <span className="truncate font-mono text-sm text-foreground">{d.filename}</span>
-              <Badge tone="neutral" className="shrink-0">
-                {d.doc_type?.replace(/_/g, " ") ?? "untyped"}
-              </Badge>
+      {error ? (
+        <ErrorState message={error.message} detail={error.detail} onRetry={refresh} retrying={docsLoading} />
+      ) : (
+        <div className="border border-border">
+          {docs.map((d, i) => (
+            <div key={d.filename}>
+              {i > 0 && <Divider />}
+              <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                <span className="truncate font-mono text-sm text-foreground">{d.filename}</span>
+                <Badge tone="neutral" className="shrink-0">
+                  {d.doc_type?.replace(/_/g, " ") ?? "untyped"}
+                </Badge>
+              </div>
             </div>
-          </div>
-        ))}
-        {docs.length === 0 && (
-          <div className="px-5 py-16 text-center">
-            <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No documents yet.</p>
-          </div>
-        )}
-      </div>
+          ))}
+          {docs.length === 0 && (
+            <div className="px-5 py-16 text-center">
+              <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No documents yet.</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -21,14 +21,19 @@ import { ContactCard, AddContactTile, EmptyContactsState, ContactFormModal, type
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
+import { ErrorState, describeError } from "../components/ui/ErrorState";
 
 type ModalState = { bu: string | null; contact: Contact | null } | null;
 
 export default function DefaultProjectContacts() {
   const { token } = useSession();
   const [scopes, setScopes] = useState<DefaultContactScope[] | null>(null);
+  // Business units only feed the "Add BU override" picker -- supporting
+  // data the page works without (that action just stays unavailable), so
+  // its own failure degrades quietly rather than blocking the page.
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -36,7 +41,12 @@ export default function DefaultProjectContacts() {
 
   function load() {
     if (!token) return;
-    listDefaultProjectContacts(token).then(setScopes).catch((e) => setError(String(e)));
+    setLoading(true);
+    setError(null);
+    listDefaultProjectContacts(token)
+      .then(setScopes)
+      .catch((e) => setError(describeError(e, "We couldn't load default project contacts.")))
+      .finally(() => setLoading(false));
     listBusinessUnits(token).then(setBusinessUnits).catch(() => setBusinessUnits([]));
   }
 
@@ -66,7 +76,7 @@ export default function DefaultProjectContacts() {
       setShowAddBu(false);
       load();
     } catch (e) {
-      setFormError(String(e));
+      setFormError(describeError(e, "That didn't save. Please try again.").message);
     } finally {
       setSubmitting(false);
     }
@@ -88,44 +98,53 @@ export default function DefaultProjectContacts() {
     load();
   }
 
+  const overriddenBus = new Set((scopes ?? []).filter((s) => s.bu).map((s) => s.bu));
+  const availableBusForOverride = businessUnits.filter((bu) => !overriddenBus.has(bu.bu_id));
+
+  // Header/title (plus the "Add BU override" action, disabled while
+  // there's nothing loaded to override) always renders below, whether
+  // loading, errored, or loaded -- the page never loses its identity.
+  const header = (
+    <div className="mb-8 flex items-start justify-between gap-4 border-b border-border pb-6">
+      <div>
+        <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Default Project Contacts</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
+          Applied to every new project unless a business unit override exists below.
+        </p>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="shrink-0"
+        disabled={!scopes || availableBusForOverride.length === 0}
+        onClick={() => setShowAddBu(true)}
+      >
+        Add BU override
+      </Button>
+    </div>
+  );
+
   if (error) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
-        <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
+        {header}
+        <ErrorState message={error.message} detail={error.detail} onRetry={load} retrying={loading} />
       </div>
     );
   }
   if (!scopes) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-10">
+        {header}
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
-  const overriddenBus = new Set(scopes.filter((s) => s.bu).map((s) => s.bu));
-  const availableBusForOverride = businessUnits.filter((bu) => !overriddenBus.has(bu.bu_id));
-
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="mb-8 flex items-start justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <Eyebrow as="p" tone="accent" className="mb-2">Settings</Eyebrow>
-          <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Default Project Contacts</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-normal text-muted-foreground">
-            Applied to every new project unless a business unit override exists below.
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="shrink-0"
-          disabled={availableBusForOverride.length === 0}
-          onClick={() => setShowAddBu(true)}
-        >
-          Add BU override
-        </Button>
-      </div>
+      {header}
 
       <div className="space-y-8">
         {scopes.map((scope) => {
