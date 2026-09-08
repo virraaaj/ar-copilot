@@ -86,7 +86,7 @@ export default function Outbox() {
             {e.body && <p className="text-sm leading-normal text-muted-foreground">{e.body}</p>}
             {e.policy_reason && <p className="mt-2 text-sm text-accent">{e.policy_reason}</p>}
             {e.evaluation_failures.length > 0 && (
-              <p className="mt-2 font-mono text-xs text-[#facc15]">Evaluation flags: {e.evaluation_failures.join(", ")}</p>
+              <p className="mt-2 font-mono text-xs text-status-warning-text">Evaluation flags: {e.evaluation_failures.join(", ")}</p>
             )}
           </div>
         ))}

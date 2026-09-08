@@ -9,13 +9,11 @@
 // need Trace Studio open to see *why* a step happened, not just that it did.
 //
 // Ships two visual tones behind an explicit `tone` prop:
-//  - "legacy" (default): the original rainbow palette. Every existing
-//    caller keeps this by not passing `tone`, so Trace Studio
-//    (AgentCockpit.tsx, inside .lummus-shell) and GuidedDemo.tsx render
-//    byte-identically to before.
+//  - "legacy" (default): the original rainbow palette. Used only by
+//    Trace Studio (AgentCockpit.tsx, inside .lummus-shell).
 //  - "bold": the restrained Bold Typography palette (see ui/src/index.css
-//    @theme + ui/src/components/ui/Badge.tsx). Opted into only by the
-//    already-converted Chases.tsx.
+//    @theme + ui/src/components/ui/Badge.tsx). All in-scope callers
+//    (Chases.tsx, GuidedDemo.tsx) pass tone="bold".
 import { useState, type ReactNode } from "react";
 import {
   AlertCircle,

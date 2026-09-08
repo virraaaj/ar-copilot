@@ -54,6 +54,12 @@
   --color-card-foreground: #fafafa;
   --color-ring: #ff3d00;
 
+  /* ---- Status tones (promoted from Badge.tsx hardcoded hex) ---- */
+  --color-status-positive-border: #2f8f4e;
+  --color-status-positive-text: #4ade80;
+  --color-status-warning-border: #a3660a;
+  --color-status-warning-text: #facc15;
+
   /* ---- Motion ---- */
   --ease-bold: cubic-bezier(0.25, 0, 0, 1);
 }

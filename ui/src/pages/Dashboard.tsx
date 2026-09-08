@@ -430,7 +430,14 @@ export default function Dashboard() {
 
       {invoices.length === 0 && (
         <div className="border border-border px-5 py-16 text-center">
-          <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No invoices match these filters.</p>
+          {summary?.total_invoices === 0 ? (
+            <>
+              <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No invoice data yet</p>
+              <p className="mt-3 text-base text-muted-foreground">Upload an aging file to get started.</p>
+            </>
+          ) : (
+            <p className="font-display text-2xl font-semibold tracking-tight text-foreground">No invoices match these filters.</p>
+          )}
         </div>
       )}
 

@@ -2,12 +2,12 @@
 //
 // Ships two visual tones behind an explicit `tone` prop:
 //  - "legacy" (default): the original rainbow palette (rose/emerald/green-
-//    700/zinc). Every existing caller keeps this by not passing `tone`, so
-//    Trace Studio (AgentCockpit.tsx, inside .lummus-shell), GuidedDemo.tsx
-//    and InvoiceDetail.tsx render byte-identically to before.
+//    700/zinc). Used only by Trace Studio (AgentCockpit.tsx, inside
+//    .lummus-shell).
 //  - "bold": the restrained Bold Typography palette (see ui/src/index.css
-//    @theme + ui/src/components/ui/Badge.tsx). Opted into only by the
-//    already-converted Chases.tsx and Dashboard.tsx.
+//    @theme + ui/src/components/ui/Badge.tsx). All in-scope callers
+//    (Chases.tsx, Dashboard.tsx, GuidedDemo.tsx, InvoiceDetail.tsx)
+//    pass tone="bold".
 import { AlertTriangle, Check, EyeOff } from "lucide-react";
 import { Badge, BADGE_TONE_CLASSES, type BadgeTone } from "./ui/Badge";
 import { Eyebrow } from "./ui/Eyebrow";
