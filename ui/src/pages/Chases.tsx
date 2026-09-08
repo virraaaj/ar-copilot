@@ -375,14 +375,14 @@ export default function Chases() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
         <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
       <PageHeader
         eyebrow="Outcome agent"
         title="Chases"

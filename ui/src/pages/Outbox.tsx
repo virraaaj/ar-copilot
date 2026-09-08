@@ -33,7 +33,7 @@ export default function Outbox() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
         <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">
           {error}
         </p>
@@ -42,14 +42,14 @@ export default function Outbox() {
   }
   if (!entries) {
     return (
-      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
       <PageHeader eyebrow="Outcome agent" title="Outbox" description="Every message the agent has generated, newest first." />
 
       {entries.length === 0 && <p className="text-sm text-muted-foreground">Nothing sent yet.</p>}

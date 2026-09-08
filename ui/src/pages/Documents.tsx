@@ -43,7 +43,7 @@ export default function Documents() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
         <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
@@ -64,7 +64,7 @@ export default function Documents() {
 
   if (!projects) {
     return (
-      <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -74,7 +74,7 @@ export default function Documents() {
   const unfiledCount = countFor(null);
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
       <PageHeader
         eyebrow="Library"
         title="Documents"
@@ -182,7 +182,7 @@ function ProjectDocuments({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-7xl px-6 py-10 sm:px-12">
       <button
         onClick={onBack}
         className="mb-6 inline-flex items-center gap-1.5 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"

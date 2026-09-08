@@ -360,13 +360,13 @@ export default function InvoiceDetail() {
 
   if (error)
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
         <p className="border border-accent px-4 py-3 text-sm text-accent" role="alert">{error}</p>
       </div>
     );
   if (!invoice)
     return (
-      <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+      <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -400,7 +400,7 @@ export default function InvoiceDetail() {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
       <Link to="/" className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-foreground">
         &larr; Back to dashboard
       </Link>

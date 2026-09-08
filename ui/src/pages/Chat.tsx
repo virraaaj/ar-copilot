@@ -129,7 +129,7 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-57px)] max-w-2xl flex-col px-6 py-8 sm:px-12">
+    <div className="mx-auto flex h-[calc(100vh-57px)] max-w-4xl flex-col px-6 py-8 sm:px-12">
       <div className="mb-1 flex items-start justify-between gap-4">
         <div>
           <Eyebrow tone="accent" as="p" className="mb-2">Chat</Eyebrow>

@@ -31,7 +31,7 @@ export default function ProjectInvoicePicker() {
   }, [token, projectNumber]);
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10 sm:px-12">
+    <div className="mx-auto max-w-4xl px-6 py-10 sm:px-12">
       <PageHeader
         eyebrow="Pick an invoice"
         title={`Which invoice would you like to ${action}?`}
