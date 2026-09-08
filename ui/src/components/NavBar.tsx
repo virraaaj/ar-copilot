@@ -1,6 +1,8 @@
+import { useId, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Sparkles } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { useSession } from "../context/SessionContext";
+import MobileNavMenu from "./MobileNavMenu";
 
 // Nav links: mono uppercase, wide tracking, underline-on-active/hover --
 // no pill backgrounds. The active state is the underline plus full
@@ -15,6 +17,17 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export default function NavBar() {
   const { email, clearSession } = useSession();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Closing the drawer must not lose focus -- send it back to the trigger
+  // that opened it (Escape, choosing a destination, and the drawer's own
+  // close button all funnel through here).
+  const closeMenu = () => {
+    setMenuOpen(false);
+    triggerRef.current?.focus();
+  };
 
   return (
     <nav className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
@@ -53,7 +66,7 @@ export default function NavBar() {
             </NavLink>
           </div>
         </div>
-        <div className="flex items-center gap-5">
+        <div className="hidden items-center gap-5 md:flex">
           <button
             onClick={() => navigate("/guided-demo")}
             className="hidden items-center gap-1.5 border border-border px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:border-accent hover:text-accent sm:inline-flex"
@@ -63,13 +76,44 @@ export default function NavBar() {
           </button>
           <span className="hidden font-mono text-xs text-muted-foreground lg:inline">{email}</span>
           <button
+            type="button"
             onClick={clearSession}
-            className="font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:text-accent"
+            className="inline-flex items-center border border-border px-3 py-1.5 font-mono text-xs font-medium uppercase tracking-wider text-muted-foreground transition-colors duration-150 ease-bold hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Log out
           </button>
         </div>
+
+        {/* Below md: a single hamburger trigger replaces the whole desktop
+            action cluster (nav links, Guided Demo, email, Log out) --
+            everything reachable up top is reachable through the drawer it
+            opens instead of being silently `hidden`. */}
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
+          aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+          // While the full-screen drawer covers this button it must drop out
+          // of the tab order -- otherwise Shift+Tab from inside the drawer
+          // (or wrapping Tab at the end of the document) lands on a control
+          // that's invisible underneath the overlay.
+          tabIndex={menuOpen ? -1 : 0}
+          onClick={() => setMenuOpen((prev) => !prev)}
+          className="flex h-11 w-11 items-center justify-center text-muted-foreground transition-colors duration-150 ease-bold hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background md:hidden"
+        >
+          <Menu size={22} strokeWidth={1.5} aria-hidden />
+        </button>
       </div>
+
+      <MobileNavMenu
+        open={menuOpen}
+        onClose={closeMenu}
+        menuId={menuId}
+        email={email}
+        onGuidedDemo={() => navigate("/guided-demo")}
+        onLogout={clearSession}
+      />
     </nav>
   );
 }

@@ -7,7 +7,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const INPUT_BASE =
-  "w-full border border-border bg-input px-4 text-base text-foreground placeholder-muted-foreground outline-none transition-colors duration-150 ease-bold focus:border-accent disabled:opacity-50";
+  "w-full border border-border bg-input px-4 text-base text-foreground placeholder-muted-foreground outline-none transition-colors duration-150 ease-bold focus:border-accent focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50";
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   { dense = false, className = "", ...props },

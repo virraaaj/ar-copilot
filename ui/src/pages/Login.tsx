@@ -24,10 +24,9 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      const { session_token, email: confirmedEmail, demo_mode } = await login(email, password);
+      const { session_token, email: confirmedEmail } = await login(email, password);
       setSession(session_token, confirmedEmail);
-      // Offline demo (DEV_AUTH_BYPASS): skip Dashboard — it needs Lummus UAT.
-      navigate(demo_mode ? "/agent" : "/");
+      navigate("/");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed");
     } finally {
